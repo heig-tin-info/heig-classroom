@@ -1,0 +1,14 @@
+{
+  // Longueur de ligne : 100 caractères pour la prose ;
+  // les tables d'exigences et les blocs de code sont exclus.
+  "MD013": {
+    "line_length": 100,
+    "tables": false,
+    "code_blocks": false
+  },
+  // Documents TeXSmith : le titre vit dans le front matter YAML,
+  // les sections sont donc des titres de premier niveau (#).
+  "MD025": false,
+  // Ancres TeXSmith `{#sec:...}` non reconnues par le linter.
+  "MD051": false
+}

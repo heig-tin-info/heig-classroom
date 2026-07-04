@@ -1,0 +1,8 @@
+[project]
+name = "heig-classroom"
+version = "0.1.0"
+description = "HEIG GitHub Classroom — documentation et outillage"
+requires-python = ">=3.12"
+
+[dependency-groups]
+docs = ["texsmith"]
