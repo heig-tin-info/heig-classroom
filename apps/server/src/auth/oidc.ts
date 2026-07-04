@@ -1,0 +1,89 @@
+/**
+ * Login plateforme OIDC (AU-01..05) : Authorization Code + PKCE avec `state`
+ * et `nonce`, via openid-client (certifié). L'IdP est Switch edu-ID en
+ * production, Keycloak local en développement — le code est identique.
+ */
+import * as oidc from "openid-client";
+
+import type { AppConfig } from "../config.js";
+
+export interface OidcClaims {
+  sub: string;
+  email: string;
+  emailVerified: boolean;
+  givenName: string;
+  familyName: string;
+  swissEduId: string | null;
+}
+
+export class OidcProvider {
+  private config: oidc.Configuration | null = null;
+
+  constructor(private readonly app: AppConfig) {}
+
+  /** Découverte paresseuse et mise en cache : un IdP injoignable au boot ne
+   *  doit pas empêcher le serveur (et /healthz) de démarrer. */
+  private async configuration(): Promise<oidc.Configuration> {
+    if (this.config) return this.config;
+    const execute =
+      this.app.NODE_ENV === "production" ? [] : [oidc.allowInsecureRequests];
+    this.config = await oidc.discovery(
+      new URL(this.app.OIDC_ISSUER),
+      this.app.OIDC_CLIENT_ID,
+      this.app.OIDC_CLIENT_SECRET,
+      undefined,
+      { execute },
+    );
+    return this.config;
+  }
+
+  get redirectUri(): string {
+    return new URL("/app/auth/callback", this.app.PUBLIC_URL).href;
+  }
+
+  async beginLogin() {
+    const config = await this.configuration();
+    const codeVerifier = oidc.randomPKCECodeVerifier();
+    const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
+    const state = oidc.randomState();
+    const nonce = oidc.randomNonce();
+    const url = oidc.buildAuthorizationUrl(config, {
+      redirect_uri: this.redirectUri,
+      scope: "openid profile email",
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+      state,
+      nonce,
+    });
+    return { url: url.href, codeVerifier, state, nonce };
+  }
+
+  async completeLogin(
+    callbackUrl: URL,
+    stash: { codeVerifier: string; state: string; nonce: string },
+  ): Promise<OidcClaims> {
+    const config = await this.configuration();
+    const tokens = await oidc.authorizationCodeGrant(config, callbackUrl, {
+      pkceCodeVerifier: stash.codeVerifier,
+      expectedState: stash.state,
+      expectedNonce: stash.nonce,
+    });
+    // AU-09/NFR-02 : les tokens ne sont ni persistés ni retournés — seules les
+    // claims d'identité sortent d'ici.
+    const claims = tokens.claims();
+    if (!claims) throw new Error("ID token sans claims");
+    const email = typeof claims.email === "string" ? claims.email : "";
+    if (!email) throw new Error("Claim email absente");
+    return {
+      sub: claims.sub,
+      email: email.trim().toLowerCase(),
+      emailVerified: claims.email_verified === true,
+      givenName: typeof claims.given_name === "string" ? claims.given_name : "",
+      familyName: typeof claims.family_name === "string" ? claims.family_name : "",
+      swissEduId:
+        typeof claims.swissEduPersonUniqueID === "string"
+          ? claims.swissEduPersonUniqueID
+          : null,
+    };
+  }
+}

@@ -14,9 +14,27 @@ const EnvSchema = z.object({
     .string()
     .default("postgres://hgc:hgc@localhost:5432/hgc"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
+
+  /** URL publique du portail (base des redirect URIs OIDC/OAuth). */
+  PUBLIC_URL: z.string().default("http://localhost:3000"),
+
+  // --- OIDC (AU-01..03) : Keycloak local en dev, Switch edu-ID en prod. ---
+  OIDC_ISSUER: z.string().default("http://localhost:8080/realms/hgc-dev"),
+  OIDC_CLIENT_ID: z.string().default("hgc-portal"),
+  OIDC_CLIENT_SECRET: z.string().default("dev-secret-not-for-production"),
+
+  /** Signature des cookies d'état de login (pas des sessions, qui vivent en base). */
+  COOKIE_SECRET: z.string().min(16).default("dev-cookie-secret-change-me"),
+  /** Durée de session (AU-06 : 12 h par défaut). */
+  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(72).default(12),
+  /**
+   * Provisionnement des teachers par liste d'e-mails (H2 : pas de rôle admin en
+   * v1). Vérifié à chaque login : promotion et rétrogradation suivent la liste.
+   */
+  TEACHER_EMAILS: z.string().default(""),
 });
 
-export type AppConfig = z.infer<typeof EnvSchema>;
+export type AppConfig = z.infer<typeof EnvSchema> & { teacherEmails: Set<string> };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env);
@@ -26,5 +44,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .join("; ");
     throw new Error(`Configuration invalide — ${issues}`);
   }
-  return parsed.data;
+  if (parsed.data.NODE_ENV === "production") {
+    for (const [key, marker] of [
+      ["OIDC_CLIENT_SECRET", "not-for-production"],
+      ["COOKIE_SECRET", "change-me"],
+    ] as const) {
+      if (parsed.data[key].includes(marker)) {
+        throw new Error(`Configuration invalide — ${key} de dev interdit en production`);
+      }
+    }
+  }
+  const teacherEmails = new Set(
+    parsed.data.TEACHER_EMAILS.split(",")
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.length > 0),
+  );
+  return { ...parsed.data, teacherEmails };
 }

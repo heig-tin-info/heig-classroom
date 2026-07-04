@@ -1,8 +1,10 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import fastifyCookie from "@fastify/cookie";
 import { sql } from "drizzle-orm";
 import { collectDefaultMetrics, Gauge, Registry } from "prom-client";
 
 import type { HealthResponse } from "@hgc/contracts";
+import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 
@@ -25,6 +27,9 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   app.addHook("onClose", async () => {
     await pool.end();
   });
+
+  await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
+  await app.register(authPlugin, { config });
 
   // --- Observabilité (NFR-08, docs/03 « Observabilité orientée exigences ») ---
   const registry = new Registry();
