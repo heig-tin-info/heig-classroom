@@ -1,0 +1,43 @@
+{
+  "realm": "hgc-dev",
+  "enabled": true,
+  "registrationAllowed": false,
+  "clients": [
+    {
+      "clientId": "hgc-portal",
+      "name": "HEIG GitHub Classroom (dev)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-secret-not-for-production",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": ["http://localhost:3000/app/auth/callback"],
+      "webOrigins": ["http://localhost:3000"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": ["openid", "profile", "email"]
+    }
+  ],
+  "users": [
+    {
+      "username": "teacher",
+      "enabled": true,
+      "email": "teacher@heig-vd.ch",
+      "emailVerified": true,
+      "firstName": "Tania",
+      "lastName": "Teacher",
+      "credentials": [{ "type": "password", "value": "teacher", "temporary": false }]
+    },
+    {
+      "username": "student",
+      "enabled": true,
+      "email": "student@heig-vd.ch",
+      "emailVerified": true,
+      "firstName": "Sacha",
+      "lastName": "Student",
+      "credentials": [{ "type": "password", "value": "student", "temporary": false }]
+    }
+  ]
+}

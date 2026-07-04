@@ -1,0 +1,33 @@
+# Environnement de développement — PostgreSQL + Keycloak (IdP OIDC de test,
+# remplace Switch edu-ID en dev, voir docs/03-architecture.md et ADR-002).
+# Lancement : docker compose -f docker-compose.dev.yml up -d
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: hgc
+      POSTGRES_PASSWORD: hgc
+      POSTGRES_DB: hgc
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hgc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+
+volumes:
+  pgdata:

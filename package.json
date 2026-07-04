@@ -1,0 +1,16 @@
+{
+  "name": "heig-classroom",
+  "private": true,
+  "version": "0.1.0",
+  "description": "HEIG GitHub Classroom — portail teacher/student adossé à GitHub",
+  "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @hgc/server dev"
+  }
+}
