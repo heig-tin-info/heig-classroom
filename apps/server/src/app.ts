@@ -7,6 +7,7 @@ import type { HealthResponse } from "@hgc/contracts";
 import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
+import { classroomsPlugin } from "./modules/classrooms.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -28,8 +29,14 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     await pool.end();
   });
 
+  // Import du roster : le CSV arrive tel quel dans req.body (AU-13).
+  app.addContentTypeParser(["text/csv", "text/plain"], { parseAs: "string" }, (_req, body, done) =>
+    done(null, body),
+  );
+
   await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
   await app.register(authPlugin, { config });
+  await app.register(classroomsPlugin);
 
   // --- Observabilité (NFR-08, docs/03 « Observabilité orientée exigences ») ---
   const registry = new Registry();

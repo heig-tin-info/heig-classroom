@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import fp from "fastify-plugin";
 import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { users } from "../db/schema.js";
+import { claimEnrollments } from "../modules/roster.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
   CSRF_COOKIE,
@@ -64,7 +66,7 @@ async function upsertUser(
   return row;
 }
 
-export async function authPlugin(app: FastifyInstance, opts: { config: AppConfig }) {
+async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig }) {
   const { config } = opts;
   const provider = new OidcProvider(config);
   const secure = config.NODE_ENV === "production";
@@ -131,6 +133,10 @@ export async function authPlugin(app: FastifyInstance, opts: { config: AppConfig
     }
 
     const user = await upsertUser(app, config, claims);
+    // Claim automatique du roster sur e-mail vérifié (AU-18, H3).
+    if (claims.emailVerified) {
+      await claimEnrollments(app.db, { id: user.id, email: user.email });
+    }
     const session = await createSession(app.db, user.id, config.SESSION_TTL_HOURS);
     await audit(app.db, {
       actorUserId: user.id,
@@ -200,3 +206,7 @@ declare module "fastify" {
     ) => Promise<FastifyReply | undefined>;
   }
 }
+
+/** fastify-plugin : les décorateurs (request.user, requireSession) doivent être
+ *  visibles des autres plugins — sans fp, ils restent encapsulés ici. */
+export const authPlugin = fp(authPluginImpl, { name: "auth" });

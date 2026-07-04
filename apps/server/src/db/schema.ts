@@ -59,8 +59,9 @@ export const sessions = pgTable(
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey(),
-  githubOrgId: bigint("github_org_id", { mode: "number" }).notNull().unique(),
-  login: text("login").notNull(),
+  /** Résolu à l'installation de la GitHub App (M2) ; null tant que non installée. */
+  githubOrgId: bigint("github_org_id", { mode: "number" }).unique(),
+  login: text("login").notNull().unique(),
   installationId: bigint("installation_id", { mode: "number" }).unique(),
   status: text("status", { enum: ["active", "degraded"] })
     .notNull()
