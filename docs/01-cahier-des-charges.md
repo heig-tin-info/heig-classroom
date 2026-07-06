@@ -583,7 +583,10 @@ deux rôles.
      collaborator sur un dépôt privé consomme un siège. Demande de sièges via le
      programme GitHub Education effectuée (≥ effectif étudiant + marge ; la remise
      100 % s'applique aux sièges supplémentaires).
-  3. À vérifier — quotas d'invitations par 24 h (test lors du spike S2).
+  3. À vérifier — quotas d'invitations par 24 h. Le spike S2 (2026-07-06, voir
+     `docs/spikes/S2-rapport.md`) a validé toute la chaîne de provisionnement
+     (30 dépôts, 4 s chacun, zéro 403) ; le quota d'invitations reste mesuré
+     passivement en M2 via le rate limiter configurable.
   4. Action requise — **minutes GitHub Actions** : 3 000 min/mois incluses (plan Team) et les dépôts
      étudiants sont privés — le grading CI de ~100 étudiants peut dépasser ce budget.
      Prévoir un **runner self-hosted** pour le grading, ou vérifier une extension de
