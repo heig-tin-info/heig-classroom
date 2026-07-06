@@ -42,7 +42,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
   await app.register(authPlugin, { config });
   await app.register(githubLinkPlugin, { config });
-  await app.register(classroomsPlugin);
+  await app.register(classroomsPlugin, { config });
 
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
   if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {

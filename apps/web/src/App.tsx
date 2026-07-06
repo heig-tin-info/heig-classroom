@@ -27,6 +27,7 @@ import {
   type RosterEntry,
 } from "./api";
 import { RosterImport } from "./RosterImport";
+import { RosterTable } from "./RosterTable";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { Badge, Button, Card, EmptyState, Field, GithubIcon } from "./ui";
 
@@ -180,68 +181,6 @@ function Header({ me }: { me: Me }) {
   );
 }
 
-function RosterTable({ roster }: { roster: RosterEntry[] }) {
-  if (roster.length === 0) {
-    return (
-      <EmptyState icon={Users} title="Roster vide">
-        Importe la liste des étudiants au format CSV pour démarrer.
-      </EmptyState>
-    );
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            <th className="px-3 py-2 font-medium">Étudiant</th>
-            <th className="px-3 py-2 font-medium">E-mail</th>
-            <th className="px-3 py-2 font-medium">Statut</th>
-            <th className="px-3 py-2 font-medium">GitHub</th>
-            <th className="px-3 py-2 font-medium">Dernière connexion</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {roster.map((r) => (
-            <tr key={r.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-              <td className="px-3 py-2 font-medium">
-                {r.prenom} {r.nom}
-              </td>
-              <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400">{r.email}</td>
-              <td className="px-3 py-2">
-                {r.conflictFlag ? (
-                  <Badge tone="red" icon={AlertTriangle}>
-                    conflit
-                  </Badge>
-                ) : r.status === "claimed" ? (
-                  <Badge tone="green" icon={CheckCircle2}>
-                    réclamé
-                  </Badge>
-                ) : (
-                  <Badge tone="amber" icon={Clock}>
-                    en attente
-                  </Badge>
-                )}
-              </td>
-              <td className="px-3 py-2">
-                {r.githubLogin ? (
-                  <span className="inline-flex items-center gap-1">
-                    <GithubIcon className="size-3.5" /> {r.githubLogin}
-                  </span>
-                ) : (
-                  <span className="text-zinc-400">—</span>
-                )}
-              </td>
-              <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400">
-                {r.lastLoginAt ? new Date(r.lastLoginAt).toLocaleString("fr-CH") : "—"}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
@@ -282,7 +221,7 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
           <Users className="size-4 text-zinc-400" />
           <h2 className="font-medium">Roster</h2>
         </div>
-        <RosterTable roster={room.roster} />
+        <RosterTable classroomId={room.id} roster={room.roster} />
       </Card>
 
       <RosterImport classroomId={room.id} />

@@ -7,7 +7,9 @@ import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
 
 import { audit } from "../audit.js";
-import { classrooms, enrollments, organizations } from "../db/schema.js";
+import type { AppConfig } from "../config.js";
+import { enrollments, classrooms, organizations } from "../db/schema.js";
+import { resolveOrgInstallation } from "../github/app.js";
 import { importRoster, rosterView } from "./roster.js";
 
 const IdParam = z.object({ id: z.uuid() });
@@ -43,7 +45,11 @@ async function getOrCreateOrganization(app: FastifyInstance, login: string) {
   return row;
 }
 
-export async function classroomsPlugin(app: FastifyInstance) {
+export async function classroomsPlugin(
+  app: FastifyInstance,
+  opts: { config: AppConfig },
+) {
+  const { config } = opts;
   /** Teacher uniquement (AU-23/24) ; 404 pour tout ce qui n'est pas à lui. */
   const requireTeacher = async (req: FastifyRequest, reply: FastifyReply) => {
     const denied = await app.requireSession(req, reply);
@@ -118,14 +124,161 @@ export async function classroomsPlugin(app: FastifyInstance) {
   app.get("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
     const room = await ownedClassroom(req, reply);
     if (!room) return reply;
-    const [org] = await app.db
+    let [org] = await app.db
       .select({ login: organizations.login, installationId: organizations.installationId })
       .from(organizations)
       .where(eq(organizations.id, room.orgId))
       .limit(1);
+    // Résolution paresseuse de l'installation (GH-04) : tant que l'App n'est
+    // pas détectée sur l'org, on retente à chaque consultation du détail.
+    if (org && org.installationId === null) {
+      try {
+        const found = await resolveOrgInstallation(config, org.login);
+        if (found) {
+          await app.db
+            .update(organizations)
+            .set({
+              installationId: found.installationId,
+              githubOrgId: found.githubOrgId,
+              status: "active",
+            })
+            .where(eq(organizations.id, room.orgId));
+          org = { ...org, installationId: found.installationId };
+          await audit(app.db, {
+            actorType: "system",
+            action: "org.installation_resolved",
+            subjectType: "organization",
+            subjectId: room.orgId,
+            payload: found,
+          });
+        }
+      } catch (err) {
+        req.log.warn({ err, org: org.login }, "résolution d'installation impossible");
+      }
+    }
     const roster = await rosterView(app.db, room.id);
     return { ...room, org, roster };
   });
+
+  // --- Édition du roster, entrée par entrée ---
+
+  const EnrollmentParam = z.object({ id: z.uuid(), eid: z.uuid() });
+  const EnrollmentPatch = z
+    .object({
+      nom: z.string().min(1).max(200).optional(),
+      prenom: z.string().min(1).max(200).optional(),
+      email: z.email().optional(),
+    })
+    .refine((b) => b.nom || b.prenom || b.email, { message: "Aucun champ à modifier" });
+
+  /** Charge l'entrée si la classroom appartient au teacher courant. */
+  async function ownedEnrollment(req: FastifyRequest, reply: FastifyReply) {
+    const params = EnrollmentParam.safeParse(req.params);
+    if (!params.success) {
+      await reply.code(404).send({ error: "not_found" });
+      return null;
+    }
+    const [row] = await app.db
+      .select({ enrollment: enrollments, teacherId: classrooms.teacherId })
+      .from(enrollments)
+      .innerJoin(classrooms, eq(enrollments.classroomId, classrooms.id))
+      .where(
+        and(eq(enrollments.id, params.data.eid), eq(enrollments.classroomId, params.data.id)),
+      )
+      .limit(1);
+    if (!row || row.teacherId !== req.user!.id) {
+      await reply.code(404).send({ error: "not_found" });
+      return null;
+    }
+    return row.enrollment;
+  }
+
+  app.patch(
+    "/app/api/classrooms/:id/roster/:eid",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const entry = await ownedEnrollment(req, reply);
+      if (!entry) return reply;
+      const body = EnrollmentPatch.safeParse(req.body);
+      if (!body.success) {
+        return reply.code(400).send({ error: "validation", issues: body.error.issues });
+      }
+      const email = body.data.email?.trim().toLowerCase();
+      const emailChanged = email !== undefined && email !== entry.email;
+      try {
+        const [updated] = await app.db
+          .update(enrollments)
+          .set({
+            ...(body.data.nom ? { nom: body.data.nom } : {}),
+            ...(body.data.prenom ? { prenom: body.data.prenom } : {}),
+            ...(email ? { email } : {}),
+            // Changer l'e-mail invalide le rattachement : l'entrée redevient
+            // à réclamer par le détenteur du nouvel e-mail (AU-18).
+            ...(emailChanged
+              ? { status: "pending" as const, userId: null, claimedAt: null, conflictFlag: false }
+              : {}),
+          })
+          .where(eq(enrollments.id, entry.id))
+          .returning();
+        await audit(app.db, {
+          actorUserId: req.user!.id,
+          actorType: "user",
+          action: "roster.update",
+          subjectType: "enrollment",
+          subjectId: entry.id,
+          payload: { ...body.data, emailChanged },
+        });
+        return updated;
+      } catch {
+        // UNIQUE(classroom_id, email)
+        return reply
+          .code(409)
+          .send({ error: "duplicate_email", message: "Cet e-mail est déjà dans le roster" });
+      }
+    },
+  );
+
+  app.post(
+    "/app/api/classrooms/:id/roster/:eid/unclaim",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const entry = await ownedEnrollment(req, reply);
+      if (!entry) return reply;
+      const [updated] = await app.db
+        .update(enrollments)
+        .set({ status: "pending", userId: null, claimedAt: null, conflictFlag: false })
+        .where(eq(enrollments.id, entry.id))
+        .returning();
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "roster.unclaim",
+        subjectType: "enrollment",
+        subjectId: entry.id,
+        payload: { previousUserId: entry.userId },
+      });
+      return updated;
+    },
+  );
+
+  app.delete(
+    "/app/api/classrooms/:id/roster/:eid",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const entry = await ownedEnrollment(req, reply);
+      if (!entry) return reply;
+      await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "roster.remove",
+        subjectType: "enrollment",
+        subjectId: entry.id,
+        payload: { nom: entry.nom, prenom: entry.prenom, email: entry.email },
+      });
+      return reply.code(204).send();
+    },
+  );
 
   app.patch("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
     const room = await ownedClassroom(req, reply);
