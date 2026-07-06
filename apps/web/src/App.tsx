@@ -13,7 +13,6 @@ import {
   Plus,
   School,
   Sun,
-  Upload,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -26,6 +25,7 @@ import {
   type Me,
   type RosterEntry,
 } from "./api";
+import { RosterImport } from "./RosterImport";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { Badge, Button, Card, EmptyState, Field, GithubIcon } from "./ui";
 
@@ -183,25 +183,14 @@ function RosterTable({ roster }: { roster: RosterEntry[] }) {
 }
 
 function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
-  const qc = useQueryClient();
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
-  });
-  const [csv, setCsv] = useState("nom,prenom,email\n");
-  const importRoster = useMutation({
-    mutationFn: () => api(`/app/api/classrooms/${id}/roster`, { method: "POST", csv }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["classroom", id] }),
   });
 
   if (detail.isLoading) return null;
   if (!detail.data) return <p>Classroom introuvable.</p>;
   const room = detail.data;
-  const importErrors =
-    importRoster.isError && importRoster.error instanceof ApiError
-      ? ((importRoster.error.body as { errors?: { line: number; message: string }[] })
-          ?.errors ?? [])
-      : [];
 
   return (
     <div className="space-y-4">
@@ -236,40 +225,7 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
         <RosterTable roster={room.roster} />
       </Card>
 
-      <Card className="p-4">
-        <div className="mb-2 flex items-center gap-2">
-          <Upload className="size-4 text-zinc-400" />
-          <h2 className="font-medium">Importer le roster</h2>
-          <span className="text-xs text-zinc-400">
-            CSV — colonnes nom, prenom, email (séparateur , ou ;)
-          </span>
-        </div>
-        <textarea
-          aria-label="CSV du roster"
-          value={csv}
-          onChange={(e) => setCsv(e.target.value)}
-          className="min-h-28 w-full rounded-lg border border-zinc-300 bg-white p-3 font-mono text-sm shadow-sm focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-950"
-        />
-        <div className="mt-2 flex items-center gap-3">
-          <Button onClick={() => importRoster.mutate()} disabled={importRoster.isPending}>
-            <Upload className="size-4" /> Importer
-          </Button>
-          {importRoster.isSuccess ? (
-            <span className="inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="size-4" /> Import effectué
-            </span>
-          ) : null}
-        </div>
-        {importErrors.length > 0 ? (
-          <ul className="mt-2 space-y-1 text-sm text-red-600 dark:text-red-400">
-            {importErrors.map((e, i) => (
-              <li key={i} className="flex items-center gap-1">
-                <AlertTriangle className="size-3.5" /> ligne {e.line} : {e.message}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </Card>
+      <RosterImport classroomId={room.id} />
     </div>
   );
 }

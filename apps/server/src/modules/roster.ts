@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
-import { parseRosterCsv, type RosterParse } from "@hgc/domain";
+import { parseRosterCsv, rosterFromRows, type Cell, type RosterParse } from "@hgc/domain";
 
 import { audit } from "../audit.js";
 import type { Db } from "../db/client.js";
@@ -20,9 +20,9 @@ export interface RosterImportSummary {
 export async function importRoster(
   db: Db,
   classroomId: string,
-  csvText: string,
+  source: { csv: string } | { rows: Cell[][] },
 ): Promise<{ parse: RosterParse; summary?: RosterImportSummary }> {
-  const parse = parseRosterCsv(csvText);
+  const parse = "csv" in source ? parseRosterCsv(source.csv) : rosterFromRows(source.rows);
   if (!parse.ok) return { parse };
 
   let inserted = 0;

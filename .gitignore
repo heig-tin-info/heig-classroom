@@ -8,3 +8,6 @@ dist/
 .env.*
 !.env.example
 coverage/
+
+# Données personnelles réelles (exemples locaux, LPD)
+/*.xlsx

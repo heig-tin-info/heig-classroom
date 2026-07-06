@@ -4,12 +4,20 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ClassroomCreate } from "@hgc/contracts";
+import type { Cell } from "@hgc/domain";
 
 import { audit } from "../audit.js";
 import { classrooms, enrollments, organizations } from "../db/schema.js";
 import { importRoster, rosterView } from "./roster.js";
 
 const IdParam = z.object({ id: z.uuid() });
+
+const RowsBody = z.object({
+  rows: z
+    .array(z.array(z.union([z.string(), z.number(), z.null()])))
+    .min(1)
+    .max(5000),
+});
 
 async function getOrCreateOrganization(app: FastifyInstance, login: string) {
   const normalized = login.trim();
@@ -163,12 +171,22 @@ export async function classroomsPlugin(app: FastifyInstance) {
     async (req, reply) => {
       const room = await ownedClassroom(req, reply);
       if (!room) return reply;
-      if (typeof req.body !== "string" || req.body.length === 0) {
-        return reply
-          .code(400)
-          .send({ error: "validation", message: "Corps CSV attendu (text/csv)" });
+      // Deux formes : CSV brut (text/csv) ou lignes tabulaires {rows} (JSON),
+      // typiquement extraites d'un fichier Excel côté client.
+      let source: { csv: string } | { rows: Cell[][] };
+      if (typeof req.body === "string" && req.body.length > 0) {
+        source = { csv: req.body };
+      } else {
+        const parsed = RowsBody.safeParse(req.body);
+        if (!parsed.success) {
+          return reply.code(400).send({
+            error: "validation",
+            message: "Corps attendu : text/csv, ou JSON { rows: Cell[][] }",
+          });
+        }
+        source = { rows: parsed.data.rows };
       }
-      const { parse, summary } = await importRoster(app.db, room.id, req.body);
+      const { parse, summary } = await importRoster(app.db, room.id, source);
       if (!parse.ok) {
         // Import atomique (AU-14) : rien n'a été écrit.
         return reply.code(400).send({ error: "roster_invalid", errors: parse.errors });
