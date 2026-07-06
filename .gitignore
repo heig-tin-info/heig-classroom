@@ -11,3 +11,6 @@ coverage/
 
 # Données personnelles réelles (exemples locaux, LPD)
 /*.xlsx
+
+# Secrets locaux (PEM GitHub App, etc.) — ADR-010
+secrets/

@@ -35,6 +35,19 @@ const EnvSchema = z.object({
    * v1). Vérifié à chaque login : promotion et rétrogradation suivent la liste.
    */
   TEACHER_EMAILS: z.string().default(""),
+
+  // --- GitHub App (GH-01..03) : provisionnement, webhooks, identité bot. ---
+  // Vides tant que l'App n'est pas configurée ; les modules GitHub refusent
+  // de démarrer sans elles, le reste du portail fonctionne.
+  GITHUB_APP_ID: z.string().default(""),
+  /** Chemin du PEM (ADR-010 : secret en fichier, jamais dans le dépôt). */
+  GITHUB_APP_PRIVATE_KEY_PATH: z.string().default(""),
+  GITHUB_APP_SLUG: z.string().default(""),
+  GITHUB_WEBHOOK_SECRET: z.string().default(""),
+
+  // --- OAuth App (AU-08..12) : liaison du compte GitHub, scope read:user. ---
+  GITHUB_OAUTH_CLIENT_ID: z.string().default(""),
+  GITHUB_OAUTH_CLIENT_SECRET: z.string().default(""),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema> & { teacherEmails: Set<string> };
