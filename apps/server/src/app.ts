@@ -8,6 +8,7 @@ import { sql } from "drizzle-orm";
 import { collectDefaultMetrics, Gauge, Registry } from "prom-client";
 
 import type { HealthResponse } from "@hgc/contracts";
+import { githubLinkPlugin } from "./auth/github-link.js";
 import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
@@ -40,6 +41,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
 
   await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
   await app.register(authPlugin, { config });
+  await app.register(githubLinkPlugin, { config });
   await app.register(classroomsPlugin);
 
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).

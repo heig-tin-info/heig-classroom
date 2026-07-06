@@ -14,6 +14,7 @@ import {
   School,
   Sun,
   Users,
+  X,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -93,6 +94,64 @@ function ThemeToggle() {
   );
 }
 
+function GithubLink({ me }: { me: Me }) {
+  const qc = useQueryClient();
+  const unlink = useMutation({
+    mutationFn: () => api("/app/auth/github/unlink", { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+  if (me.githubLogin) {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Badge tone="green" icon={GithubIcon}>
+          {me.githubLogin}
+        </Badge>
+        <Button
+          variant="ghost"
+          aria-label="Délier le compte GitHub"
+          title="Délier le compte GitHub"
+          onClick={() => unlink.mutate()}
+        >
+          <X className="size-3.5" />
+        </Button>
+      </span>
+    );
+  }
+  return (
+    <a
+      href="/app/auth/github/link"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+    >
+      <GithubIcon className="size-4" /> Lier GitHub
+    </a>
+  );
+}
+
+/** Bannière de retour du flux de liaison (?github=linked|conflict|error). */
+function GithubBanner() {
+  const [status] = useState(() => {
+    const s = new URLSearchParams(window.location.search).get("github");
+    if (s) window.history.replaceState(null, "", "/");
+    return s;
+  });
+  if (!status) return null;
+  if (status === "linked") {
+    return (
+      <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">
+        <CheckCircle2 className="size-4" /> Compte GitHub lié.
+      </div>
+    );
+  }
+  return (
+    <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-500/10 dark:text-red-300">
+      <AlertTriangle className="size-4" />
+      {status === "conflict"
+        ? "Ce compte GitHub est déjà lié à un autre utilisateur."
+        : "La liaison GitHub a échoué — réessaie."}
+    </div>
+  );
+}
+
 function Header({ me }: { me: Me }) {
   const qc = useQueryClient();
   const logout = useMutation({
@@ -105,6 +164,7 @@ function Header({ me }: { me: Me }) {
         <Logo className="size-5" />
         <span className="font-semibold tracking-tight">HEIG Classroom</span>
         <span className="flex-1" />
+        <GithubLink me={me} />
         <Badge tone="zinc" icon={me.role === "teacher" ? School : GraduationCap}>
           {me.role === "teacher" ? "enseignant" : "étudiant"}
         </Badge>
@@ -351,6 +411,7 @@ export default function App() {
     <div className="min-h-dvh">
       <Header me={me.data} />
       <main className="mx-auto max-w-5xl px-4 py-6">
+        <GithubBanner />
         {me.data.role === "teacher" ? <TeacherHome /> : <StudentHome me={me.data} />}
       </main>
     </div>
