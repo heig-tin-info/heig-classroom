@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
+    "@fastify/static": "^9.1.3",
     "@hgc/contracts": "workspace:*",
     "@hgc/domain": "workspace:*",
     "drizzle-orm": "^0.45.2",

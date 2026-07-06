@@ -1,5 +1,9 @@
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
+
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
+import fastifyStatic from "@fastify/static";
 import { sql } from "drizzle-orm";
 import { collectDefaultMetrics, Gauge, Registry } from "prom-client";
 
@@ -37,6 +41,17 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
   await app.register(authPlugin, { config });
   await app.register(classroomsPlugin);
+
+  // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
+  if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {
+    await app.register(fastifyStatic, { root: resolve(config.STATIC_DIR) });
+    app.setNotFoundHandler((req, reply) => {
+      // Fallback SPA pour la navigation ; les surfaces API restent en 404 JSON.
+      const isApi = ["/app/", "/api/", "/webhooks/"].some((p) => req.url.startsWith(p));
+      if (req.method === "GET" && !isApi) return reply.sendFile("index.html");
+      return reply.code(404).send({ error: "not_found" });
+    });
+  }
 
   // --- Observabilité (NFR-08, docs/03 « Observabilité orientée exigences ») ---
   const registry = new Registry();

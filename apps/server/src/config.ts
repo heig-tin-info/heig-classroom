@@ -18,6 +18,9 @@ const EnvSchema = z.object({
   /** URL publique du portail (base des redirect URIs OIDC/OAuth). */
   PUBLIC_URL: z.string().default("http://localhost:3000"),
 
+  /** Dossier du SPA buildé (apps/web/dist) ; vide = API seule (dev Vite). */
+  STATIC_DIR: z.string().default(""),
+
   // --- OIDC (AU-01..03) : Keycloak local en dev, Switch edu-ID en prod. ---
   OIDC_ISSUER: z.string().default("http://localhost:8080/realms/hgc-dev"),
   OIDC_CLIENT_ID: z.string().default("hgc-portal"),
