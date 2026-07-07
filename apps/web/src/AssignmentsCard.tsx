@@ -18,6 +18,7 @@ import {
 import { useMemo, useState } from "react";
 
 import { api, ApiError } from "./api";
+import { AssignmentDetail } from "./AssignmentDetail";
 import {
   Badge,
   Button,
@@ -436,10 +437,12 @@ function AssignmentRow({
   classroomId,
   assignment: a,
   onEdit,
+  onOpen,
 }: {
   classroomId: string;
   assignment: Assignment;
   onEdit: () => void;
+  onOpen: () => void;
 }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["assignments", classroomId] });
@@ -459,7 +462,13 @@ function AssignmentRow({
 
   return (
     <li className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
-      <span className="font-medium">{a.name}</span>
+      <button
+        onClick={onOpen}
+        className="font-medium hover:text-accent hover:underline"
+        title="Open assignment detail"
+      >
+        {a.name}
+      </button>
       <StateBadge state={a.state} />
       <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
         <CalendarClock className="size-3.5" />
@@ -531,10 +540,23 @@ export function AssignmentsCard({
   appInstalled: boolean;
 }) {
   const [modal, setModal] = useState<"create" | Assignment | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
   const list = useQuery<Assignment[]>({
     queryKey: ["assignments", classroomId],
     queryFn: () => api(`/app/api/classrooms/${classroomId}/assignments`),
   });
+
+  if (detailId) {
+    return (
+      <Card className="p-4">
+        <AssignmentDetail
+          classroomId={classroomId}
+          assignmentId={detailId}
+          onBack={() => setDetailId(null)}
+        />
+      </Card>
+    );
+  }
 
   return (
     <Card className="p-4">
@@ -563,6 +585,7 @@ export function AssignmentsCard({
               classroomId={classroomId}
               assignment={a}
               onEdit={() => setModal(a)}
+              onOpen={() => setDetailId(a.id)}
             />
           ))}
         </ul>

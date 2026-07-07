@@ -6,8 +6,16 @@ import { z } from "zod";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { assignments, classrooms, organizations } from "../db/schema.js";
+import {
+  assignments,
+  classrooms,
+  enrollments,
+  organizations,
+  studentRepos,
+  users,
+} from "../db/schema.js";
 import { installationClient } from "../github/app.js";
+import { lockStudentRepo, unlockStudentRepo } from "../github/lock.js";
 import { createSquashedRepo } from "../github/squash.js";
 
 const IdParam = z.object({ id: z.uuid() });
@@ -267,6 +275,217 @@ export async function assignmentsPlugin(
       return updated;
     },
   );
+
+  // --- Détail : roster × acceptations, état live des dépôts (US-13/GR-15) ---
+  // Sans webhooks (M3), l'état est récupéré de GitHub à l'ouverture puis mis
+  // en cache dans student_repos — même logique que la future réconciliation.
+  app.get(
+    "/app/api/classrooms/:id/assignments/:aid/detail",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(req, reply);
+      if (!owned) return reply;
+      const a = owned.assignment;
+
+      const roster = await app.db
+        .select({
+          enrollmentId: enrollments.id,
+          nom: enrollments.nom,
+          prenom: enrollments.prenom,
+          email: enrollments.email,
+          status: enrollments.status,
+          userId: enrollments.userId,
+          githubLogin: users.githubLogin,
+        })
+        .from(enrollments)
+        .leftJoin(users, eq(enrollments.userId, users.id))
+        .where(eq(enrollments.classroomId, a.classroomId))
+        .orderBy(enrollments.nom, enrollments.prenom);
+
+      const repos = await app.db
+        .select()
+        .from(studentRepos)
+        .where(eq(studentRepos.assignmentId, a.id));
+
+      interface LiveState {
+        lastCommitSha: string | null;
+        lastCommitAt: string | null;
+        commitCount: number;
+        checksPassed: number | null;
+        checksTotal: number | null;
+        ciStatus: "none" | "pending" | "pass" | "fail";
+        missing?: boolean;
+      }
+      const live = new Map<string, LiveState>();
+
+      const provisioned = repos.filter((r) => r.provisionStatus === "ok" && r.fullName);
+      if (provisioned.length > 0 && owned.org.installationId !== null) {
+        const client = await installationClient(config, owned.org.installationId);
+        await Promise.all(
+          provisioned.map(async (r) => {
+            const [orgLogin, repoName] = r.fullName!.split("/") as [string, string];
+            try {
+              const commits = await client.octokit.request(
+                "GET /repos/{owner}/{repo}/commits",
+                { owner: orgLogin, repo: repoName, per_page: 1, request: { retries: 0 } },
+              );
+              const head = commits.data[0];
+              if (!head) throw Object.assign(new Error("empty"), { status: 409 });
+              const lastPage = /[?&]page=(\d+)>; rel="last"/.exec(commits.headers.link ?? "");
+              const commitCount = lastPage ? Number(lastPage[1]) : commits.data.length;
+              const checks = await client.octokit.request(
+                "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
+                { owner: orgLogin, repo: repoName, ref: head.sha, request: { retries: 0 } },
+              );
+              // skipped/neutral (ex. condition anti-bot GH-44) ≠ échec.
+              const runs = checks.data.check_runs.filter(
+                (c) => !["skipped", "neutral"].includes(c.conclusion ?? ""),
+              );
+              const passed = runs.filter((c) => c.conclusion === "success").length;
+              const pending = runs.some((c) => c.status !== "completed");
+              const ciStatus =
+                runs.length === 0 ? "none" : pending ? "pending" : passed === runs.length ? "pass" : "fail";
+              const state: LiveState = {
+                lastCommitSha: head.sha,
+                lastCommitAt: head.commit.committer?.date ?? head.commit.author?.date ?? null,
+                commitCount,
+                checksPassed: runs.length ? passed : null,
+                checksTotal: runs.length ? runs.length : null,
+                ciStatus,
+              };
+              live.set(r.id, state);
+              await app.db
+                .update(studentRepos)
+                .set({
+                  lastCommitSha: state.lastCommitSha,
+                  lastCommitAt: state.lastCommitAt ? new Date(state.lastCommitAt) : null,
+                  ciStatus,
+                })
+                .where(eq(studentRepos.id, r.id));
+            } catch (err) {
+              const status = (err as { status?: number }).status;
+              if (status === 409) {
+                // dépôt vide : provisionné mais aucun commit lisible
+                live.set(r.id, {
+                  lastCommitSha: null,
+                  lastCommitAt: null,
+                  commitCount: 0,
+                  checksPassed: null,
+                  checksTotal: null,
+                  ciStatus: "none",
+                });
+              } else if (status === 404) {
+                live.set(r.id, {
+                  lastCommitSha: null,
+                  lastCommitAt: null,
+                  commitCount: 0,
+                  checksPassed: null,
+                  checksTotal: null,
+                  ciStatus: "none",
+                  missing: true,
+                });
+              } else {
+                req.log.warn({ err, repo: r.fullName }, "live state fetch failed");
+              }
+            }
+          }),
+        );
+      }
+
+      return {
+        assignment: a,
+        students: roster.map((s) => {
+          const repo = s.userId ? repos.find((r) => r.userId === s.userId) : undefined;
+          return {
+            enrollmentId: s.enrollmentId,
+            nom: s.nom,
+            prenom: s.prenom,
+            email: s.email,
+            claimStatus: s.status,
+            githubLogin: s.githubLogin,
+            repo: repo
+              ? {
+                  id: repo.id,
+                  fullName: repo.fullName,
+                  provisionStatus: repo.provisionStatus,
+                  invitationStatus: repo.invitationStatus,
+                  acceptedAt: repo.acceptedAt,
+                  lockedAt: repo.lockedAt,
+                  ...(live.get(repo.id) ?? {
+                    lastCommitSha: repo.lastCommitSha,
+                    lastCommitAt: repo.lastCommitAt,
+                    commitCount: null,
+                    checksPassed: null,
+                    checksTotal: null,
+                    ciStatus: repo.ciStatus,
+                  }),
+                }
+              : null,
+          };
+        }),
+      };
+    },
+  );
+
+  // --- Lock / unlock manuel d'un dépôt étudiant (US-22 : « un push de plus ») ---
+  const RepoParam = z.object({ id: z.uuid(), aid: z.uuid(), rid: z.uuid() });
+
+  async function ownedStudentRepo(req: FastifyRequest, reply: FastifyReply) {
+    const owned = await ownedAssignment(req, reply);
+    if (!owned) return null;
+    const params = RepoParam.safeParse(req.params);
+    if (!params.success) {
+      await reply.code(404).send({ error: "not_found" });
+      return null;
+    }
+    const [repo] = await app.db
+      .select()
+      .from(studentRepos)
+      .where(
+        and(eq(studentRepos.id, params.data.rid), eq(studentRepos.assignmentId, owned.assignment.id)),
+      )
+      .limit(1);
+    if (!repo || repo.provisionStatus !== "ok" || !repo.fullName) {
+      await reply.code(404).send({ error: "not_found" });
+      return null;
+    }
+    return { ...owned, repo };
+  }
+
+  for (const action of ["lock", "unlock"] as const) {
+    app.post(
+      `/app/api/classrooms/:id/assignments/:aid/repos/:rid/${action}`,
+      { preHandler: requireTeacher },
+      async (req, reply) => {
+        const owned = await ownedStudentRepo(req, reply);
+        if (!owned) return reply;
+        if (owned.org.installationId === null) {
+          return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
+        }
+        const client = await installationClient(config, owned.org.installationId);
+        const repoName = owned.repo.fullName!.split("/")[1]!;
+        if (action === "lock") {
+          await lockStudentRepo(client.octokit, owned.org.login, repoName);
+        } else {
+          await unlockStudentRepo(client.octokit, owned.org.login, repoName);
+        }
+        const [updated] = await app.db
+          .update(studentRepos)
+          .set({ lockedAt: action === "lock" ? new Date() : null })
+          .where(eq(studentRepos.id, owned.repo.id))
+          .returning();
+        await audit(app.db, {
+          actorUserId: req.user!.id,
+          actorType: "user",
+          action: `repo.${action}`,
+          subjectType: "student_repo",
+          subjectId: owned.repo.id,
+          payload: { repo: owned.repo.fullName },
+        });
+        return updated;
+      },
+    );
+  }
 
   app.post(
     "/app/api/classrooms/:id/assignments/:aid/publish",
