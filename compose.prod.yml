@@ -67,7 +67,7 @@ services:
     command: start --import-realm --proxy-headers xforwarded --http-enabled true
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-disabled}
       KC_HOSTNAME: https://classroom.chevallier.io/kc
       KC_HTTP_RELATIVE_PATH: /kc
     ports:
