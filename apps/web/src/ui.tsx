@@ -33,7 +33,7 @@ export function Modal({
       aria-label={title}
     >
       <div
-        className="mt-10 w-full max-w-3xl rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        className="mt-10 w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center gap-2">
@@ -93,7 +93,7 @@ export function Button({
   return (
     <button
       {...props}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${styles} ${props.className ?? ""}`}
+      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${styles} ${props.className ?? ""}`}
     >
       {children}
     </button>
@@ -103,7 +103,7 @@ export function Button({
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
+      className={`rounded-xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.05),0_4px_16px_rgb(0_0_0/0.04)] transition-all duration-200 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgb(0_0_0/0.3)] ${className}`}
     >
       {children}
     </div>
@@ -168,7 +168,7 @@ export function Field({
       <span className="font-medium text-zinc-700 dark:text-zinc-300">{label}</span>
       <input
         {...props}
-        className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900"
+        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900"
       />
     </label>
   );

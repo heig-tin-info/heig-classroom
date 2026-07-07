@@ -68,7 +68,7 @@ function Landing() {
       </div>
       <a
         href="/app/auth/login"
-        className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white shadow-sm transition-colors hover:bg-accent-hover"
+        className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover hover:shadow-md"
       >
         Sign in with Switch edu-ID
       </a>
@@ -122,7 +122,7 @@ function GithubLink({ me }: { me: Me }) {
   return (
     <a
       href="/app/auth/github/link"
-      className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+      className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
     >
       <GithubIcon className="size-4" /> Link GitHub
     </a>
@@ -161,7 +161,7 @@ function Header({ me }: { me: Me }) {
     onSuccess: () => qc.setQueryData(["me"], null),
   });
   return (
-    <header className="sticky top-0 z-10 border-b border-zinc-200 bg-white/80 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/80">
+    <header className="sticky top-0 z-10 bg-white/80 shadow-[0_1px_8px_rgb(0_0_0/0.06)] backdrop-blur dark:bg-zinc-950/80 dark:shadow-[0_1px_8px_rgb(0_0_0/0.4)]">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4">
         <Logo className="size-5" />
         <span className="font-semibold tracking-tight">HEIG Classroom</span>
@@ -220,7 +220,7 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
       <AssignmentsCard classroomId={room.id} appInstalled={room.org?.installationId != null} />
 
       <Card>
-        <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+        <div className="flex items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
           <Users className="size-4 text-zinc-400" />
           <h2 className="font-medium">Roster</h2>
         </div>
@@ -263,7 +263,7 @@ function TeacherHome() {
         <div className="grid gap-4 sm:grid-cols-2">
           {rooms.data.map((c) => (
             <button key={c.id} onClick={() => setSelected(c.id)} className="text-left">
-              <Card className="p-4 transition-shadow hover:shadow-md">
+              <Card className="p-4 hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgb(0_0_0/0.06),0_12px_28px_rgb(0_0_0/0.08)]">
                 <div className="flex items-center gap-2">
                   <FolderGit2 className="size-5 text-accent" />
                   <span className="font-medium">{c.name}</span>
