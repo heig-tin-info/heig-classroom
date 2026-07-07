@@ -226,6 +226,56 @@ export const studentRepos = pgTable(
   ],
 );
 
+/**
+ * Reçus de push (GR-14, ADR-012) : l'heure de réception serveur est écrite
+ * SYNCHRONEMENT dans le handler webhook — c'est la référence du gel de note,
+ * jamais dépendante du retard de la file.
+ */
+export const pushReceipts = pgTable(
+  "push_receipts",
+  {
+    id: uuid("id").primaryKey(),
+    studentRepoId: uuid("student_repo_id")
+      .notNull()
+      .references(() => studentRepos.id, { onDelete: "cascade" }),
+    branch: text("branch").notNull(),
+    headSha: char("head_sha", { length: 40 }).notNull(),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
+    isBot: boolean("is_bot").notNull().default(false),
+    forced: boolean("forced").notNull().default(false),
+  },
+  (t) => [uniqueIndex("push_receipts_repo_sha_uq").on(t.studentRepoId, t.headSha)],
+);
+
+/** Commits bot (revert, deadline, sync) : filtre déterministe GR-05/GH-44. */
+export const botCommits = pgTable(
+  "bot_commits",
+  {
+    studentRepoId: uuid("student_repo_id")
+      .notNull()
+      .references(() => studentRepos.id, { onDelete: "cascade" }),
+    sha: char("sha", { length: 40 }).notNull(),
+    kind: text("kind", { enum: ["revert", "deadline", "sync"] }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("bot_commits_pk").on(t.studentRepoId, t.sha)],
+);
+
+/** Historique des reverts de fichiers protégés (plafond anti-boucle H10). */
+export const reverts = pgTable(
+  "reverts",
+  {
+    id: uuid("id").primaryKey(),
+    studentRepoId: uuid("student_repo_id")
+      .notNull()
+      .references(() => studentRepos.id, { onDelete: "cascade" }),
+    revertSha: char("revert_sha", { length: 40 }).notNull(),
+    files: text("files").array().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("reverts_repo_time_idx").on(t.studentRepoId, t.createdAt)],
+);
+
 export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   actorUserId: uuid("actor_user_id"),

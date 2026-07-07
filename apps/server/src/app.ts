@@ -19,6 +19,8 @@ import { avatarPlugin } from "./modules/avatar.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
 import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
+import { makeWebhookHandler, webhooksPlugin } from "./modules/webhooks.js";
+import { startJobs } from "./jobs.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -73,6 +75,15 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(assignmentsPlugin, { config });
   await app.register(studentPlugin, { config });
 
+  // File de jobs + webhooks (M3). Le plugin webhooks est encapsulé : son
+  // parser JSON brut (HMAC) ne fuit pas sur les autres routes.
+  await startJobs(app, {
+    connectionString: config.DATABASE_URL,
+    runWorkers: config.WORKER_MODE !== "web",
+    handler: makeWebhookHandler(app, config),
+  });
+  await app.register(webhooksPlugin, { config });
+
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
   if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {
     await app.register(fastifyStatic, { root: resolve(config.STATIC_DIR) });
@@ -110,8 +121,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
       status: databaseOk ? "ok" : "degraded",
       checks: {
         database: databaseOk ? "up" : "down",
-        // pg-boss démarre en M3 (webhooks/jobs) ; jusque-là l'état suit la base.
-        jobs: databaseOk ? "up" : "down",
+        jobs: app.boss ? "up" : "down",
       },
       uptimeSeconds: Math.round(process.uptime()),
     };
