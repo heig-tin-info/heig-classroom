@@ -1,6 +1,6 @@
 # Deployment on a DigitalOcean Droplet
 
-1. Create an Ubuntu/Debian droplet
+## 1. Create an Ubuntu/Debian droplet
 
 ```bash
 # Swap 2 Go (utile si < 2 Go de RAM)
@@ -50,3 +50,104 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmo
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
 apt update && apt install -y caddy
 ```
+
+```
+root@heig-classroom:~# node -v
+v22.23.1
+root@heig-classroom:~# pnpm -v
+do! Corepack is about to download https://registry.npmjs.org/pnpm/-/pnpm-11.10.0.tgz
+? Do you want to continue? [Y/n
+
+11.10.0
+root@heig-classroom:~# docker --version
+Docker version 29.6.1, build 8900f1d
+root@heig-classroom:~# caddy version
+v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0=
+```
+
+## 2. DNS : `classroom.chevallier.io` → IP du droplet (A/AAAA), propagation vérifiée
+(`dig +short classroom.chevallier.io`).
+
+## 3. Applications GitHub de **production** (mêmes écrans qu'en dev, permissions
+GH-02 dans `docs/02-specs-fonctionnelles.md`) :
+
+- **GitHub App** `hgc-prod` : webhook `https://classroom.chevallier.io/webhooks/github`
+  (activable au jalon M3), générer le PEM, **installer sur l'organisation**
+  (All repositories).
+- **OAuth App** : callback `https://classroom.chevallier.io/app/auth/github/callback`.
+
+## 4. Code et secrets
+
+```bash
+cd /opt/heig-classroom
+sudo -u hgc git clone <url-du-depot> app && cd app
+mkdir -p secrets backups
+# Déposer (jamais dans git), puis chmod 600 :
+#   secrets/hgc-prod.private-key.pem   (GitHub App de prod)
+#   secrets/eduid-private-key.pem      (private_key_jwt edu-ID, déjà générée)
+cp .env.prod.example .env.prod && chmod 600 .env.prod
+nano .env.prod    # POSTGRES_PASSWORD/COOKIE_SECRET : openssl rand -base64 32
+```
+
+Copie chiffrée des secrets dans le coffre (`age`) — condition du RTO 4 h (ADR-010).
+
+## 5. Caddy (natif) : le vhost est versionné dans [Caddyfile](Caddyfile)
+
+```bash
+sudo cp Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+## 6. Premier déploiement
+
+```bash
+docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+docker compose -f compose.prod.yml logs -f app   # migrations puis « hgc-server démarré »
+curl -s https://classroom.chevallier.io/healthz  # {"status":"ok",...}
+```
+
+Ensuite : console Keycloak sur `https://classroom.chevallier.io/kc/` (compte admin
+de `.env.prod`) → créer les comptes réels du realm ou changer les mots de passe de
+test importés ; les enseignants sont ceux de `TEACHER_EMAILS`.
+
+## 7. Mise à jour / rollback
+
+```bash
+cd /opt/heig-classroom/app && git pull
+docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+# rollback : git checkout <tag-précédent> puis même commande ;
+# migrations additives — en cas de doute, restaurer la base (§8).
+```
+
+## 8. Sauvegardes (NFR-16 : RPO 24 h, RTO 4 h)
+
+- Le service `backup` du compose fait un `pg_dump -Fc` quotidien dans `./backups/`
+  (rétention 30 jours). **À câbler** : copie hors droplet, p. ex.
+  `rclone copy backups remote:hgc-backups` en cron (DigitalOcean Spaces, stockage
+  SWITCH…).
+- Restauration :
+
+```bash
+docker compose -f compose.prod.yml stop app
+docker compose -f compose.prod.yml exec -T postgres \
+  pg_restore -U hgc -d hgc --clean --if-exists < backups/hgc-<date>.dump
+docker compose -f compose.prod.yml start app
+```
+
+- Droplet perdu : nouveau droplet → §1 → secrets depuis le coffre → restaurer le
+  dump → re-pointer le DNS. Test de restauration chronométré chaque semestre.
+
+## 9. Bascule SWITCH edu-ID (dès validation de la ressource) — dans `.env.prod` :
+
+```bash
+OIDC_ISSUER=<issuer edu-ID>
+OIDC_CLIENT_ID=<client id délivré>
+OIDC_PRIVATE_KEY_PATH=secrets/eduid-private-key.pem
+OIDC_PRIVATE_KEY_KID=hgc-eduid-2026
+```
+
+`docker compose -f compose.prod.yml --env-file .env.prod up -d app`, tester un
+login réel, puis retirer le service `keycloak` du compose et le bloc `/kc/*` du
+Caddyfile.
+
+## 10. Supervision : sonde externe 60 s sur `/healthz` (Uptime-Kuma, ou le monitoring
+DigitalOcean) ; logs via `docker compose logs -f app` (credentials masqués).

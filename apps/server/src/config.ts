@@ -15,6 +15,11 @@ const EnvSchema = z.object({
   DATABASE_URL: z
     .string()
     .default("postgres://hgc:hgc@localhost:5432/hgc"),
+  /** Applique les migrations Drizzle au démarrage (déploiement conteneur). */
+  MIGRATE_ON_START: z
+    .string()
+    .default("")
+    .transform((v) => v === "1" || v === "true"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
   /** URL publique du portail (base des redirect URIs OIDC/OAuth). */

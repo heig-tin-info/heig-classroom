@@ -1,0 +1,36 @@
+# hgc-server — image unique : API + SPA buildé + git (provisionnement).
+# Build :   docker build -t hgc-server .
+# ADR-009 : un conteneur applicatif, PostgreSQL et Caddy à côté (compose).
+
+FROM node:22-slim AS build
+RUN corepack enable pnpm
+WORKDIR /src
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/domain/package.json packages/domain/
+COPY packages/contracts/package.json packages/contracts/
+COPY apps/server/package.json apps/server/
+COPY apps/web/package.json apps/web/
+RUN pnpm install --frozen-lockfile
+COPY tsconfig.base.json ./
+COPY packages ./packages
+COPY apps ./apps
+RUN pnpm build
+# Arbre de production autonome du serveur (node_modules épuré + workspaces)
+RUN pnpm --filter @hgc/server deploy --prod --legacy /out \
+  && cp -r apps/server/drizzle /out/drizzle \
+  && cp -r apps/web/dist /out/web
+
+FROM node:22-slim
+# git : push des refs squashed et provisionnement (GH-03)
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+ENV NODE_ENV=production
+WORKDIR /app
+COPY --from=build /out /app
+USER node
+ENV STATIC_DIR=/app/web MIGRATE_ON_START=1 PORT=3000
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+  CMD curl -sf http://localhost:3000/healthz || exit 1
+CMD ["node", "dist/server.js"]

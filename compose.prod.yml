@@ -1,0 +1,80 @@
+# Production — classroom.chevallier.io
+# Caddy tourne en NATIF sur l'hôte (voir deploy.md) : seuls des ports
+# loopback sont publiés ici. Lancement :
+#   docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+services:
+  app:
+    build: .
+    restart: always
+    env_file: .env.prod
+    environment:
+      DATABASE_URL: postgres://hgc:${POSTGRES_PASSWORD:?}@postgres:5432/hgc
+      PUBLIC_URL: https://classroom.chevallier.io
+      NODE_ENV: production
+    ports:
+      - "127.0.0.1:3000:3000" # Caddy natif → reverse_proxy localhost:3000
+    volumes:
+      - ./secrets:/app/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17
+    restart: always
+    environment:
+      POSTGRES_USER: hgc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: hgc
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hgc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # pg_dump quotidien vers ./backups (NFR-16 : RPO 24 h) ; rétention 30 jours.
+  # La copie HORS VM (rclone vers un stockage externe) reste à câbler — voir
+  # deploy.md, section Sauvegardes.
+  backup:
+    image: postgres:17
+    restart: always
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint:
+      - bash
+      - -c
+      - |
+        while true; do
+          pg_dump -Fc -h postgres -U hgc hgc > "/backups/hgc-$(date +%F).dump.tmp" \
+            && mv "/backups/hgc-$(date +%F).dump.tmp" "/backups/hgc-$(date +%F).dump"
+          ls -1t /backups/hgc-*.dump 2>/dev/null | tail -n +31 | xargs -r rm --
+          sleep 86400
+        done
+
+  # IdP transitoire tant que SWITCH edu-ID est en validation. À retirer ensuite
+  # (trois variables d'env dans .env.prod). Servi sous /kc/ par Caddy.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    restart: always
+    command: start --import-realm --proxy-headers xforwarded --http-enabled true
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?}
+      KC_HOSTNAME: https://classroom.chevallier.io/kc
+      KC_HTTP_RELATIVE_PATH: /kc
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+      - keycloak-data:/opt/keycloak/data/h2
+
+volumes:
+  pgdata:
+  keycloak-data:

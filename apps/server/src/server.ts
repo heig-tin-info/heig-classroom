@@ -1,7 +1,23 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { migrate } from "drizzle-orm/node-postgres/migrator";
+
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
+import { createDb } from "./db/client.js";
 
 const config = loadConfig();
+
+// Déploiement conteneur (ADR-009) : migrations appliquées au démarrage.
+// Drizzle sérialise par verrou en base — sûr même à plusieurs démarrages.
+if (config.MIGRATE_ON_START) {
+  const { db, pool } = createDb(config.DATABASE_URL);
+  const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "../drizzle");
+  await migrate(db, { migrationsFolder });
+  await pool.end();
+}
+
 const app = await buildApp({ config });
 
 // ADR-001 : en mode `worker`, le processus n'écoute pas — il ne fera tourner

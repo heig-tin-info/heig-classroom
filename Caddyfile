@@ -1,0 +1,27 @@
+# Caddy NATIF (apt) — à copier vers /etc/caddy/Caddyfile puis :
+#   sudo systemctl reload caddy
+classroom.chevallier.io {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+	}
+
+	# IdP transitoire (Keycloak) — à retirer à la bascule edu-ID
+	handle /kc/* {
+		reverse_proxy localhost:8080
+	}
+
+	# SSE : flux non bufferisé (docs/03, ADR-005)
+	handle /app/events {
+		reverse_proxy localhost:3000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		reverse_proxy localhost:3000
+	}
+}

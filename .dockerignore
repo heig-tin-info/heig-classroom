@@ -1,0 +1,11 @@
+node_modules
+**/node_modules
+**/dist
+.git
+.venv
+build
+secrets
+.env
+.env.*
+docs
+*.xlsx
