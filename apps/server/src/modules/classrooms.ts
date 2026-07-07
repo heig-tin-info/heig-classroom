@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
@@ -9,7 +9,7 @@ import type { Cell } from "@hgc/domain";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { enrollments, classrooms, organizations } from "../db/schema.js";
-import { resolveOrgInstallation } from "../github/app.js";
+import { listInstalledOrgs, orgExistsOnGithub, resolveOrgInstallation } from "../github/app.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
 
 const IdParam = z.object({ id: z.uuid() });
@@ -79,6 +79,16 @@ export async function classroomsPlugin(
     return room;
   }
 
+  // Organisations proposées à la création : celles où l'App est installée.
+  app.get("/app/api/orgs", { preHandler: requireTeacher }, async (req) => {
+    try {
+      return await listInstalledOrgs(config);
+    } catch (err) {
+      req.log.warn({ err }, "listing installations failed");
+      return [];
+    }
+  });
+
   app.get("/app/api/classrooms", { preHandler: requireTeacher }, async (req) => {
     return app.db
       .select({
@@ -92,7 +102,7 @@ export async function classroomsPlugin(
       .from(classrooms)
       .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
       .leftJoin(enrollments, eq(enrollments.classroomId, classrooms.id))
-      .where(eq(classrooms.teacherId, req.user!.id))
+      .where(and(eq(classrooms.teacherId, req.user!.id), isNull(classrooms.archivedAt)))
       .groupBy(classrooms.id, organizations.login)
       .orderBy(classrooms.createdAt);
   });
@@ -101,6 +111,15 @@ export async function classroomsPlugin(
     const body = ClassroomCreate.safeParse(req.body);
     if (!body.success) {
       return reply.code(400).send({ error: "validation", issues: body.error.issues });
+    }
+    // L'organisation doit exister sur GitHub (saisie libre validée) ;
+    // lookup indéterminé (rate limit) = on laisse passer.
+    const exists = await orgExistsOnGithub(body.data.orgLogin.trim());
+    if (exists === false) {
+      return reply.code(400).send({
+        error: "org_not_found",
+        message: `Organization “${body.data.orgLogin.trim()}” does not exist on GitHub`,
+      });
     }
     const org = await getOrCreateOrganization(app, body.data.orgLogin);
     const [room] = await app.db
@@ -159,8 +178,30 @@ export async function classroomsPlugin(
       }
     }
     const roster = await rosterView(app.db, room.id);
-    return { ...room, org, roster };
+    return { ...room, org, roster, appSlug: config.GITHUB_APP_SLUG || null };
   });
+
+  app.post(
+    "/app/api/classrooms/:id/archive",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await ownedClassroom(req, reply);
+      if (!room) return reply;
+      await app.db
+        .update(classrooms)
+        .set({ archivedAt: new Date() })
+        .where(eq(classrooms.id, room.id));
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "classroom.archive",
+        subjectType: "classroom",
+        subjectId: room.id,
+        payload: { name: room.name },
+      });
+      return reply.code(204).send();
+    },
+  );
 
   // --- Édition du roster, entrée par entrée ---
 

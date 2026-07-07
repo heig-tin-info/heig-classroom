@@ -81,4 +81,5 @@ export interface ClassroomDetail {
   name: string;
   org: { login: string; installationId: number | null } | null;
   roster: RosterEntry[];
+  appSlug: string | null;
 }

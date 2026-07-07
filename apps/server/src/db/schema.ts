@@ -115,6 +115,7 @@ export const classrooms = pgTable("classrooms", {
     .notNull()
     .references(() => users.id),
   name: text("name").notNull(),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

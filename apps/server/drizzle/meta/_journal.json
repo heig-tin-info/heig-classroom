@@ -50,6 +50,13 @@
       "when": 1783427693144,
       "tag": "0006_avatars",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783428773175,
+      "tag": "0007_classroom-archive",
+      "breakpoints": true
     }
   ]
 }

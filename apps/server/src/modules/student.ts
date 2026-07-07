@@ -52,7 +52,13 @@ export async function studentPlugin(
         .innerJoin(classrooms, eq(enrollments.classroomId, classrooms.id))
         .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
         .innerJoin(users, eq(classrooms.teacherId, users.id))
-        .where(and(eq(enrollments.userId, me.id), eq(enrollments.status, "claimed")))
+        .where(
+          and(
+            eq(enrollments.userId, me.id),
+            eq(enrollments.status, "claimed"),
+            isNull(classrooms.archivedAt),
+          ),
+        )
         .orderBy(asc(classrooms.name));
 
       const roomIds = rooms.map((r) => r.id);

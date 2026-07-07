@@ -46,6 +46,33 @@ export async function installationClient(
   return { octokit, token };
 }
 
+/** Organisations où l'App est installée (dropdown de création de classroom). */
+export async function listInstalledOrgs(config: AppConfig): Promise<string[]> {
+  const app = githubApp(config);
+  if (!app) return [];
+  const logins: string[] = [];
+  for await (const { installation } of app.eachInstallation.iterator()) {
+    const account = installation.account as { login?: string; type?: string } | null;
+    if (account?.login && account.type === "Organization") logins.push(account.login);
+  }
+  return logins.sort();
+}
+
+/** L'organisation existe-t-elle sur GitHub ? (lookup public, non authentifié).
+ *  `null` = indéterminé (rate limit, réseau) : on laisse passer. */
+export async function orgExistsOnGithub(login: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(`https://api.github.com/orgs/${encodeURIComponent(login)}`, {
+      headers: { accept: "application/vnd.github+json", "user-agent": "hgc-server" },
+    });
+    if (res.status === 200) return true;
+    if (res.status === 404) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** GET /orgs/{org}/installation — null si l'App n'y est pas installée. */
 export async function resolveOrgInstallation(
   config: AppConfig,

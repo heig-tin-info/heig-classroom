@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Archive,
+  Settings as SettingsIcon,
+  Trash2,
   ArrowLeft,
   Building2,
   CheckCircle2,
@@ -32,7 +35,7 @@ import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import { Avatar, SettingsPage } from "./SettingsPage";
 import { applyTheme, initialTheme, type Theme } from "./theme";
-import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime, Modal } from "./ui";
 
 function useMe() {
   return useQuery<Me | null>({
@@ -155,7 +158,105 @@ function Header({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) 
   );
 }
 
+function ClassroomSettings({
+  room,
+  onClose,
+  onGone,
+}: {
+  room: ClassroomDetail;
+  onClose: () => void;
+  onGone: () => void;
+}) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(room.name);
+  const rename = useMutation({
+    mutationFn: () =>
+      api(`/app/api/classrooms/${room.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classroom", room.id] });
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+      onClose();
+    },
+  });
+  const archive = useMutation({
+    mutationFn: () => api(`/app/api/classrooms/${room.id}/archive`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+      onGone();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: () => api(`/app/api/classrooms/${room.id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+      onGone();
+    },
+  });
+
+  return (
+    <Modal title="Classroom settings" onClose={onClose}>
+      <div className="space-y-6">
+        <form
+          className="flex flex-wrap items-end gap-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            rename.mutate();
+          }}
+        >
+          <Field label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+          <Button disabled={rename.isPending || name.trim() === "" || name === room.name}>
+            Rename
+          </Button>
+        </form>
+
+        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">
+          <h3 className="mb-1 font-medium">Archive classroom</h3>
+          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+            Removes the classroom from the interface for you and the students. Data and
+            GitHub repositories are kept.
+          </p>
+          <Button
+            variant="subtle"
+            onClick={() => {
+              if (window.confirm(`Archive “${room.name}”?`)) archive.mutate();
+            }}
+            disabled={archive.isPending}
+          >
+            <Archive className="size-4" /> Archive
+          </Button>
+        </div>
+
+        <div className="rounded-lg bg-red-50 p-4 dark:bg-red-500/10">
+          <h3 className="mb-1 font-medium text-red-700 dark:text-red-400">Delete classroom</h3>
+          <p className="mb-3 text-sm text-red-700/80 dark:text-red-400/80">
+            Deletes the classroom, its roster and its assignments from the portal. GitHub
+            repositories are not touched. This cannot be undone.
+          </p>
+          <Button
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete “${room.name}” permanently? Roster and assignments will be removed from the portal.`,
+                )
+              ) {
+                remove.mutate();
+              }
+            }}
+            disabled={remove.isPending}
+          >
+            <Trash2 className="size-4" /> Delete permanently
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
+  const [showSettings, setShowSettings] = useState(false);
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
@@ -184,11 +285,31 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
             GitHub App installed
           </Badge>
         ) : (
-          <Badge tone="amber" icon={Clock}>
-            GitHub App not installed
-          </Badge>
+          <span className="inline-flex items-center gap-2">
+            <Badge tone="amber" icon={Clock}>
+              GitHub App not installed
+            </Badge>
+            {room.appSlug ? (
+              <a
+                href={`https://github.com/apps/${room.appSlug}/installations/new`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
+              >
+                <GithubIcon className="size-4" /> Install GitHub App
+              </a>
+            ) : null}
+          </span>
         )}
+        <span className="flex-1" />
+        <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
+          <SettingsIcon className="size-4" />
+        </Button>
       </div>
+
+      {showSettings ? (
+        <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={onBack} />
+      ) : null}
 
       <AssignmentsCard classroomId={room.id} appInstalled={room.org?.installationId != null} />
 
@@ -210,9 +331,14 @@ function TeacherHome() {
   const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [org, setOrg] = useState("");
+  const [customOrg, setCustomOrg] = useState(false);
   const rooms = useQuery<ClassroomSummary[]>({
     queryKey: ["classrooms"],
     queryFn: () => api("/app/api/classrooms"),
+  });
+  const installedOrgs = useQuery<string[]>({
+    queryKey: ["installed-orgs"],
+    queryFn: () => api("/app/api/orgs"),
   });
   const create = useMutation({
     mutationFn: () =>
@@ -283,19 +409,54 @@ function TeacherHome() {
             onChange={(e) => setName(e.target.value)}
             required
           />
-          <Field
-            label="GitHub organization"
-            placeholder="heig-tin-info"
-            value={org}
-            onChange={(e) => setOrg(e.target.value)}
-            required
-          />
+          {installedOrgs.data?.length && !customOrg ? (
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                GitHub organization
+              </span>
+              <select
+                className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+                value={org}
+                onChange={(e) => {
+                  if (e.target.value === "__other__") {
+                    setCustomOrg(true);
+                    setOrg("");
+                  } else {
+                    setOrg(e.target.value);
+                  }
+                }}
+                required
+              >
+                <option value="" disabled>
+                  Pick an organization (App installed)
+                </option>
+                {installedOrgs.data.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+                <option value="__other__">Other organization…</option>
+              </select>
+            </label>
+          ) : (
+            <Field
+              label="GitHub organization"
+              placeholder="heig-tin-info"
+              value={org}
+              onChange={(e) => setOrg(e.target.value)}
+              required
+            />
+          )}
           <Button disabled={create.isPending}>
             <Plus className="size-4" /> Create
           </Button>
         </form>
         {create.isError ? (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">Creation failed.</p>
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+            {create.error instanceof ApiError
+              ? ((create.error.body as { message?: string })?.message ?? "Creation failed.")
+              : "Creation failed."}
+          </p>
         ) : null}
       </Card>
     </div>

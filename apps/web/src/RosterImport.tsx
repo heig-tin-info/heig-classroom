@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload, UserPlus } from "lucide-react";
 import { useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
@@ -31,6 +31,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
   const [csv, setCsv] = useState("");
   const [dragging, setDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [manual, setManual] = useState({ nom: "", prenom: "", email: "" });
   const fileInput = useRef<HTMLInputElement>(null);
 
   const importRoster = useMutation({
@@ -98,8 +99,8 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
           Drop an Excel or CSV file here, or click to browse
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          .xlsx, .xls, .ods, .csv — nom, prénom and e-mail columns are detected
-          automatically; other columns are ignored
+          .xlsx, .xls, .ods, .csv — last name, first name and e-mail columns are
+          detected automatically (French headers work too); other columns are ignored
         </p>
         {fileName ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{fileName}</p>
@@ -117,16 +118,63 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
         />
       </div>
 
+      {/* Ajout manuel d'un étudiant */}
+      <form
+        className="mt-3 flex flex-wrap items-end gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          importRoster.mutate({
+            rows: [
+              ["lastname", "firstname", "email"],
+              [manual.nom, manual.prenom, manual.email],
+            ],
+          });
+          setManual({ nom: "", prenom: "", email: "" });
+        }}
+      >
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">Last name</span>
+          <input
+            required
+            value={manual.nom}
+            onChange={(e) => setManual({ ...manual, nom: e.target.value })}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">First name</span>
+          <input
+            required
+            value={manual.prenom}
+            onChange={(e) => setManual({ ...manual, prenom: e.target.value })}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">E-mail</span>
+          <input
+            required
+            type="email"
+            value={manual.email}
+            onChange={(e) => setManual({ ...manual, email: e.target.value })}
+            className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+        </label>
+        <Button disabled={importRoster.isPending}>
+          <UserPlus className="size-4" /> Add student
+        </Button>
+      </form>
+
       {/* Ou CSV collé */}
       <details className="mt-3">
         <summary className="cursor-pointer text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
-          … or paste CSV (nom, prenom, email columns)
+          … or paste CSV (last name, first name, e-mail)
         </summary>
         <textarea
           aria-label="Roster CSV"
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
-          placeholder={"nom,prenom,email\nDupont,Marie,marie.dupont@heig-vd.ch"}
+          placeholder={"lastname,firstname,email\nDupont,Marie,marie.dupont@heig-vd.ch"}
           className="mt-2 min-h-28 w-full rounded-lg border border-zinc-300 bg-white p-3 font-mono text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-950"
         />
         <Button
