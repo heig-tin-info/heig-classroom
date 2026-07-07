@@ -13,10 +13,8 @@ import {
   Moon,
   Plus,
   School,
-  ShieldCheck,
   Sun,
   Users,
-  X,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -28,11 +26,11 @@ import {
   type Me,
   type RosterEntry,
 } from "./api";
-import { AdminPanel } from "./AdminPanel";
 import { AssignmentsCard } from "./AssignmentsCard";
 import { useLiveUpdates } from "./live";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
+import { Avatar, SettingsPage } from "./SettingsPage";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime } from "./ui";
 
@@ -100,39 +98,6 @@ function ThemeToggle() {
   );
 }
 
-function GithubLink({ me }: { me: Me }) {
-  const qc = useQueryClient();
-  const unlink = useMutation({
-    mutationFn: () => api("/app/auth/github/unlink", { method: "POST" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
-  });
-  if (me.githubLogin) {
-    return (
-      <span className="inline-flex items-center gap-1">
-        <Badge tone="green" icon={GithubIcon}>
-          {me.githubLogin}
-        </Badge>
-        <Button
-          variant="ghost"
-          aria-label="Unlink GitHub account"
-          title="Unlink GitHub account"
-          onClick={() => unlink.mutate()}
-        >
-          <X className="size-3.5" />
-        </Button>
-      </span>
-    );
-  }
-  return (
-    <a
-      href="/app/auth/github/link"
-      className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-    >
-      <GithubIcon className="size-4" /> Link GitHub
-    </a>
-  );
-}
-
 /** Bannière de retour du flux de liaison (?github=linked|conflict|error). */
 function GithubBanner() {
   const [status] = useState(() => {
@@ -158,15 +123,7 @@ function GithubBanner() {
   );
 }
 
-function Header({
-  me,
-  adminOpen,
-  onToggleAdmin,
-}: {
-  me: Me;
-  adminOpen: boolean;
-  onToggleAdmin: () => void;
-}) {
+function Header({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) {
   const qc = useQueryClient();
   const logout = useMutation({
     mutationFn: () => api("/app/auth/logout", { method: "POST" }),
@@ -178,24 +135,17 @@ function Header({
         <Logo className="size-5" />
         <span className="font-semibold tracking-tight">HEIG Classroom</span>
         <span className="flex-1" />
-        {me.role === "admin" ? (
-          <Button
-            variant={adminOpen ? "primary" : "ghost"}
-            aria-label="Administration"
-            title="Administration"
-            onClick={onToggleAdmin}
-          >
-            <ShieldCheck className="size-4" />
-            Admin
-          </Button>
-        ) : null}
-        <GithubLink me={me} />
-        <Badge tone="zinc" icon={me.role === "teacher" ? School : GraduationCap}>
-          {me.role}
-        </Badge>
-        <span className="hidden text-sm text-zinc-500 sm:inline dark:text-zinc-400">
-          {me.givenName} {me.familyName}
-        </span>
+        <button
+          onClick={onOpenSettings}
+          aria-label="Open settings"
+          title="Settings"
+          className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        >
+          <span className="hidden text-sm text-zinc-500 sm:inline dark:text-zinc-400">
+            {me.givenName} {me.familyName}
+          </span>
+          <Avatar me={me} className="size-8 text-xs" />
+        </button>
         <ThemeToggle />
         <Button variant="ghost" aria-label="Sign out" onClick={() => logout.mutate()}>
           <LogOut className="size-4" />
@@ -498,22 +448,18 @@ function StudentHome({ me }: { me: Me }) {
 
 export default function App() {
   const me = useMe();
-  const [adminOpen, setAdminOpen] = useState(false);
+  const [view, setView] = useState<"home" | "settings">("home");
   useLiveUpdates(me.data != null);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
   const role = me.data.role;
   return (
     <div className="min-h-dvh">
-      <Header
-        me={me.data}
-        adminOpen={adminOpen}
-        onToggleAdmin={() => setAdminOpen((v) => !v)}
-      />
+      <Header me={me.data} onOpenSettings={() => setView("settings")} />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
-        {role === "admin" && adminOpen ? (
-          <AdminPanel />
+        {view === "settings" ? (
+          <SettingsPage me={me.data} onBack={() => setView("home")} />
         ) : role === "teacher" || role === "admin" ? (
           <TeacherHome />
         ) : (
