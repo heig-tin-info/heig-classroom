@@ -30,7 +30,7 @@ export const users = pgTable(
     givenName: text("given_name").notNull().default(""),
     familyName: text("family_name").notNull().default(""),
     swissEduId: text("swiss_edu_id"),
-    role: text("role", { enum: ["student", "teacher"] })
+    role: text("role", { enum: ["student", "teacher", "admin"] })
       .notNull()
       .default("student"),
     githubUserId: bigint("github_user_id", { mode: "number" }).unique(),
@@ -56,6 +56,24 @@ export const sessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("sessions_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * Teachers gérés en base par l'admin (révision de H2, 2026-07-07) : le grant
+ * se fait par e-mail avant même que la personne ait un compte — identité et
+ * dernière connexion se remplissent à son premier login edu-ID.
+ */
+export const teacherGrants = pgTable(
+  "teacher_grants",
+  {
+    id: uuid("id").primaryKey(),
+    /** Normalisé en minuscules. */
+    email: text("email").notNull().unique(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
 );
 
 export const organizations = pgTable("organizations", {

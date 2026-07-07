@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   School,
+  ShieldCheck,
   Sun,
   Users,
   X,
@@ -27,6 +28,7 @@ import {
   type Me,
   type RosterEntry,
 } from "./api";
+import { AdminPanel } from "./AdminPanel";
 import { AssignmentsCard } from "./AssignmentsCard";
 import { useLiveUpdates } from "./live";
 import { RosterImport } from "./RosterImport";
@@ -156,7 +158,15 @@ function GithubBanner() {
   );
 }
 
-function Header({ me }: { me: Me }) {
+function Header({
+  me,
+  adminOpen,
+  onToggleAdmin,
+}: {
+  me: Me;
+  adminOpen: boolean;
+  onToggleAdmin: () => void;
+}) {
   const qc = useQueryClient();
   const logout = useMutation({
     mutationFn: () => api("/app/auth/logout", { method: "POST" }),
@@ -168,6 +178,17 @@ function Header({ me }: { me: Me }) {
         <Logo className="size-5" />
         <span className="font-semibold tracking-tight">HEIG Classroom</span>
         <span className="flex-1" />
+        {me.role === "admin" ? (
+          <Button
+            variant={adminOpen ? "primary" : "ghost"}
+            aria-label="Administration"
+            title="Administration"
+            onClick={onToggleAdmin}
+          >
+            <ShieldCheck className="size-4" />
+            Admin
+          </Button>
+        ) : null}
         <GithubLink me={me} />
         <Badge tone="zinc" icon={me.role === "teacher" ? School : GraduationCap}>
           {me.role}
@@ -477,15 +498,27 @@ function StudentHome({ me }: { me: Me }) {
 
 export default function App() {
   const me = useMe();
+  const [adminOpen, setAdminOpen] = useState(false);
   useLiveUpdates(me.data != null);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
+  const role = me.data.role;
   return (
     <div className="min-h-dvh">
-      <Header me={me.data} />
+      <Header
+        me={me.data}
+        adminOpen={adminOpen}
+        onToggleAdmin={() => setAdminOpen((v) => !v)}
+      />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
-        {me.data.role === "teacher" ? <TeacherHome /> : <StudentHome me={me.data} />}
+        {role === "admin" && adminOpen ? (
+          <AdminPanel />
+        ) : role === "teacher" || role === "admin" ? (
+          <TeacherHome />
+        ) : (
+          <StudentHome me={me.data} />
+        )}
       </main>
     </div>
   );

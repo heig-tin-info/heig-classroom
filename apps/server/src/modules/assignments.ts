@@ -58,7 +58,9 @@ export async function assignmentsPlugin(
   const requireTeacher = async (req: FastifyRequest, reply: FastifyReply) => {
     const denied = await app.requireSession(req, reply);
     if (denied) return denied;
-    if (req.user!.role !== "teacher") return reply.code(403).send({ error: "forbidden" });
+    if (req.user!.role !== "teacher" && req.user!.role !== "admin") {
+      return reply.code(403).send({ error: "forbidden" });
+    }
     return undefined;
   };
 

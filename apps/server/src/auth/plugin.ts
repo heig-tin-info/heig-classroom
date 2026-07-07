@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { users } from "../db/schema.js";
+import { teacherGrants, users } from "../db/schema.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
@@ -28,13 +28,26 @@ declare module "fastify" {
   }
 }
 
-/** Upsert de l'utilisateur au login (clé : oidc_sub) + rôle par liste (H2). */
+/**
+ * Upsert de l'utilisateur au login (clé : oidc_sub). Rôle recalculé à chaque
+ * login : admin (SUPER_ADMIN_EMAIL), teacher (grant en base), sinon student.
+ */
 async function upsertUser(
   app: FastifyInstance,
   config: AppConfig,
   claims: OidcClaims,
 ): Promise<SessionUser> {
-  const role = config.teacherEmails.has(claims.email) ? "teacher" : "student";
+  let role: "student" | "teacher" | "admin" = "student";
+  if (config.SUPER_ADMIN_EMAIL && claims.email === config.SUPER_ADMIN_EMAIL) {
+    role = "admin";
+  } else {
+    const [grant] = await app.db
+      .select({ id: teacherGrants.id })
+      .from(teacherGrants)
+      .where(eq(teacherGrants.email, claims.email))
+      .limit(1);
+    if (grant) role = "teacher";
+  }
   const now = new Date();
   const [row] = await app.db
     .insert(users)

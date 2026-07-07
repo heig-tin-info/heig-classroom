@@ -95,8 +95,6 @@ Actions) comme infrastructure d'exécution.
   la plateforme.
 - Anti-plagiat, détection de similarité entre dépôts.
 - Application mobile ; le portail est une application web responsive.
-- Interface d'administration : l'attribution du rôle teacher se fait par configuration
-  (liste d'e-mails/`sub` edu-ID), sans rôle admin applicatif en v1.
 
 # Acteurs et rôles
 
@@ -107,11 +105,10 @@ Actions) comme infrastructure d'exécution.
 | **Système (bot)** | Identité machine de la plateforme (GitHub App + identité bot de commit). Provisionne les dépôts, pousse les reverts et commits de deadline, ouvre les PR de synchro. | Tokens d'installation GitHub App |
 | **Client API** | CLI fourni ou script du teacher consommant l'API REST. | Clé d'API (scopée, révocable) |
 
-Il n'existe que deux rôles applicatifs : `teacher` et `student` (AU-23). Un
-utilisateur possède exactement un rôle par classroom ; un teacher peut être student
-d'une autre classroom. Le rôle teacher est attribué via une liste d'identités
-autorisées en configuration serveur, gérée par l'exploitant de la plateforme (pas de
-rôle admin applicatif en v1, cf. hypothèse H2).
+Trois rôles applicatifs (révision H2 du 2026-07-07) : `admin`, `teacher` et
+`student`. Le super administrateur (unique, e-mail en configuration serveur) attribue
+et révoque le rôle teacher depuis l'écran d'administration ; l'admin hérite des
+capacités teacher. Un teacher peut être student d'une autre classroom.
 
 # User stories
 
@@ -623,6 +620,11 @@ infirmer) par le porteur du projet.
 
 > **Statut** : hypothèses H1 à H12 validées telles quelles par le porteur du projet
 > le 2026-07-03. Elles font désormais partie du périmètre contractuel de la v1.
+> **Révision du 2026-07-07 — H2** : un rôle **admin** applicatif est introduit.
+> Le super administrateur (unique, e-mail en configuration serveur) gère les
+> teachers **en base** depuis un écran d'administration : grant par e-mail
+> (identité complétée au premier login), révocation à effet immédiat, compteurs
+> de classrooms/assignments. Le rôle reste recalculé à chaque login.
 
 - **H1 — Extensions de deadline individuelles exclues de la v1.** Le ruleset lock est
   retenu notamment parce qu'il rend cette évolution possible plus tard, mais aucun

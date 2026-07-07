@@ -43,7 +43,7 @@ export interface Me {
   email: string;
   givenName: string;
   familyName: string;
-  role: "teacher" | "student";
+  role: "teacher" | "student" | "admin";
   githubLogin: string | null;
   lastLoginAt: string | null;
 }

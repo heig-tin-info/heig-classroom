@@ -107,7 +107,7 @@ curl -s https://classroom.chevallier.io/healthz  # {"status":"ok",...}
 
 Ensuite : console Keycloak sur `https://classroom.chevallier.io/kc/` (compte admin
 de `.env.prod`) → créer les comptes réels du realm ou changer les mots de passe de
-test importés ; les enseignants sont ceux de `TEACHER_EMAILS`.
+test importés ; l'admin est `SUPER_ADMIN_EMAIL` ; les teachers se gèrent dans l'écran Admin.
 
 ## 7. Mise à jour / rollback
 

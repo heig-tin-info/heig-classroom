@@ -14,6 +14,7 @@ import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { assignmentsPlugin } from "./modules/assignments.js";
 import { publish } from "./events.js";
+import { adminPlugin } from "./modules/admin.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
 import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
@@ -59,6 +60,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(authPlugin, { config });
   await app.register(eventsPlugin);
   await app.register(githubLinkPlugin, { config });
+  await app.register(adminPlugin, { config });
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
   await app.register(studentPlugin, { config });

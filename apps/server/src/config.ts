@@ -45,10 +45,10 @@ const EnvSchema = z.object({
   /** Durée de session (AU-06 : 12 h par défaut). */
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(72).default(12),
   /**
-   * Provisionnement des teachers par liste d'e-mails (H2 : pas de rôle admin en
-   * v1). Vérifié à chaque login : promotion et rétrogradation suivent la liste.
+   * Super administrateur (révision de H2, 2026-07-07) : seul e-mail géré par
+   * l'environnement. Les teachers sont gérés en base, depuis l'écran admin.
    */
-  TEACHER_EMAILS: z.string().default(""),
+  SUPER_ADMIN_EMAIL: z.string().default(""),
 
   // --- GitHub App (GH-01..03) : provisionnement, webhooks, identité bot. ---
   // Vides tant que l'App n'est pas configurée ; les modules GitHub refusent
@@ -64,7 +64,7 @@ const EnvSchema = z.object({
   GITHUB_OAUTH_CLIENT_SECRET: z.string().default(""),
 });
 
-export type AppConfig = z.infer<typeof EnvSchema> & { teacherEmails: Set<string> };
+export type AppConfig = z.infer<typeof EnvSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = EnvSchema.safeParse(env);
@@ -84,13 +84,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       }
     }
   }
-  const teacherEmails = new Set(
-    parsed.data.TEACHER_EMAILS.split(",")
-      .map((e) => e.trim().toLowerCase())
-      .filter((e) => e.length > 0),
-  );
   return {
     ...parsed.data,
+    SUPER_ADMIN_EMAIL: parsed.data.SUPER_ADMIN_EMAIL.trim().toLowerCase(),
     // Chemin du PEM absolu dès le chargement : le processus ne dépend plus
     // de son répertoire de lancement (ADR-010, secret en fichier).
     GITHUB_APP_PRIVATE_KEY_PATH: parsed.data.GITHUB_APP_PRIVATE_KEY_PATH
@@ -99,6 +95,5 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     OIDC_PRIVATE_KEY_PATH: parsed.data.OIDC_PRIVATE_KEY_PATH
       ? resolve(parsed.data.OIDC_PRIVATE_KEY_PATH)
       : "",
-    teacherEmails,
   };
 }
