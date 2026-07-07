@@ -35,15 +35,21 @@ Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.
 
 | Permission | Level |
 | --- | --- |
-| Metadata | Read (automatic) |
-| Administration | Read & write |
-| Contents | Read & write |
-| Workflows | Read & write |
-| Pull requests | Read & write |
-| Checks | Read |
 | Actions | Read |
+| Administration | Read & write |
+| Checks | Read |
+| Contents | Read & write |
+| Metadata | Read (automatic) |
+| Pull requests | Read & write |
+| Workflows | Read & write |
 
 - **Organization permissions**: Members, Read (optional)
+- **Subscribe to events**: nothing for now. The portal will consume webhook
+  events starting with milestone M3; when you activate the webhook, come back
+  and subscribe to **Push**, **Workflow run**, **Pull request**, **Repository**
+  and **Member** (the available checkboxes depend on the permissions above).
+  Installation events are always delivered to GitHub Apps, no subscription
+  needed.
 - **Where can this App be installed**: *Only on this account*
 
 Once created, note the **App ID** (the `Iv23…` Client ID works too), generate a
@@ -66,6 +72,7 @@ delivered to you. Read-only access to your public profile, nothing else.
 - **Homepage URL**: `https://classroom.chevallier.io`
 - **Authorization callback URL**:
   `https://classroom.chevallier.io/app/auth/github/callback`
+- Do not check Enable Device Flow
 
 Note the **Client ID** and generate a client secret.
 
