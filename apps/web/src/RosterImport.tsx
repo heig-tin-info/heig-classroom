@@ -15,7 +15,7 @@ async function fileToPayload(
   if (/\.(xlsx|xls|ods)$/i.test(file.name)) {
     const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]!];
-    if (!sheet) throw new Error("Classeur vide");
+    if (!sheet) throw new Error("Empty workbook");
     const rows = XLSX.utils.sheet_to_json<Cell[]>(sheet, {
       header: 1,
       defval: null,
@@ -52,7 +52,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
     try {
       importRoster.mutate(await fileToPayload(file));
     } catch {
-      setFileName(`${file.name} — fichier illisible`);
+      setFileName(`${file.name} — unreadable file`);
     }
   }
 
@@ -66,14 +66,14 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
         <Upload className="size-4 text-zinc-400" />
-        <h2 className="font-medium">Importer le roster</h2>
+        <h2 className="font-medium">Import roster</h2>
       </div>
 
       {/* Dépôt de fichier : Excel, LibreOffice ou CSV */}
       <div
         role="button"
         tabIndex={0}
-        aria-label="Déposer un fichier de roster"
+        aria-label="Drop a roster file"
         onClick={() => fileInput.current?.click()}
         onKeyDown={(e) => e.key === "Enter" && fileInput.current?.click()}
         onDragOver={(e) => {
@@ -95,11 +95,11 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
       >
         <FileSpreadsheet className="size-8 text-zinc-400" />
         <p className="text-sm font-medium">
-          Glisse un fichier Excel ou CSV ici, ou clique pour choisir
+          Drop an Excel or CSV file here, or click to browse
         </p>
         <p className="text-xs text-zinc-500 dark:text-zinc-400">
-          .xlsx, .xls, .ods, .csv — les colonnes nom, prénom et e-mail sont détectées
-          automatiquement, les autres sont ignorées
+          .xlsx, .xls, .ods, .csv — nom, prénom and e-mail columns are detected
+          automatically; other columns are ignored
         </p>
         {fileName ? (
           <p className="text-xs text-zinc-500 dark:text-zinc-400">{fileName}</p>
@@ -120,10 +120,10 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
       {/* Ou CSV collé */}
       <details className="mt-3">
         <summary className="cursor-pointer text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
-          … ou coller un CSV (colonnes nom, prenom, email)
+          … or paste CSV (nom, prenom, email columns)
         </summary>
         <textarea
-          aria-label="CSV du roster"
+          aria-label="Roster CSV"
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
           placeholder={"nom,prenom,email\nDupont,Marie,marie.dupont@heig-vd.ch"}
@@ -134,25 +134,25 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
           onClick={() => importRoster.mutate({ csv })}
           disabled={importRoster.isPending || csv.trim().length === 0}
         >
-          <Upload className="size-4" /> Importer le CSV
+          <Upload className="size-4" /> Import CSV
         </Button>
       </details>
 
       {importRoster.isSuccess ? (
         <p className="mt-3 inline-flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-          <CheckCircle2 className="size-4" /> Import effectué
+          <CheckCircle2 className="size-4" /> Import done
         </p>
       ) : null}
       {importErrors.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm text-red-600 dark:text-red-400">
           {importErrors.map((e, i) => (
             <li key={i} className="flex items-center gap-1">
-              <AlertTriangle className="size-3.5" /> ligne {e.line} : {e.message}
+              <AlertTriangle className="size-3.5" /> line {e.line}: {e.message}
             </li>
           ))}
         </ul>
       ) : importRoster.isError && importErrors.length === 0 ? (
-        <p className="mt-3 text-sm text-red-600 dark:text-red-400">Import refusé.</p>
+        <p className="mt-3 text-sm text-red-600 dark:text-red-400">Import failed.</p>
       ) : null}
     </Card>
   );

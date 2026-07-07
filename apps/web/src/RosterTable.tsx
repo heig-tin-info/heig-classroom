@@ -13,7 +13,7 @@ import {
 import { useState } from "react";
 
 import { api, ApiError, type RosterEntry } from "./api";
-import { Badge, EmptyState, GithubIcon } from "./ui";
+import { Badge, EmptyState, GithubIcon, isoDateTime } from "./ui";
 
 function IconButton({
   label,
@@ -64,7 +64,7 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
   if (editing) {
     const err =
       save.isError && save.error instanceof ApiError
-        ? ((save.error.body as { message?: string })?.message ?? "Modification refusée")
+        ? ((save.error.body as { message?: string })?.message ?? "Update failed")
         : null;
     return (
       <tr className="bg-zinc-50 dark:bg-zinc-800/50">
@@ -72,13 +72,13 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
           <div className="flex gap-1">
             <input
               className={input}
-              aria-label="Prénom"
+              aria-label="First name"
               value={form.prenom}
               onChange={(e) => setForm({ ...form, prenom: e.target.value })}
             />
             <input
               className={input}
-              aria-label="Nom"
+              aria-label="Last name"
               value={form.nom}
               onChange={(e) => setForm({ ...form, nom: e.target.value })}
             />
@@ -95,16 +95,16 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
           {err ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{err}</p> : null}
           {form.email !== entry.email && entry.status === "claimed" ? (
             <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-              Changer l'e-mail révoquera le rattachement de l'étudiant.
+              Changing the e-mail will revoke the student's claim.
             </p>
           ) : null}
         </td>
         <td className={`${cell} text-right whitespace-nowrap`}>
-          <IconButton label="Enregistrer" onClick={() => save.mutate()} disabled={save.isPending}>
+          <IconButton label="Save" onClick={() => save.mutate()} disabled={save.isPending}>
             <Check className="size-4" />
           </IconButton>
           <IconButton
-            label="Annuler"
+            label="Cancel"
             onClick={() => {
               setEditing(false);
               setForm({ nom: entry.nom, prenom: entry.prenom, email: entry.email });
@@ -126,15 +126,15 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
       <td className={cell}>
         {entry.conflictFlag ? (
           <Badge tone="red" icon={AlertTriangle}>
-            conflit
+            conflict
           </Badge>
         ) : entry.status === "claimed" ? (
           <Badge tone="green" icon={CheckCircle2}>
-            réclamé
+            claimed
           </Badge>
         ) : (
           <Badge tone="amber" icon={Clock}>
-            en attente
+            pending
           </Badge>
         )}
       </td>
@@ -148,15 +148,15 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
         )}
       </td>
       <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
-        {entry.lastLoginAt ? new Date(entry.lastLoginAt).toLocaleString("fr-CH") : "—"}
+        {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
       </td>
       <td className={`${cell} text-right whitespace-nowrap`}>
-        <IconButton label="Modifier" onClick={() => setEditing(true)}>
+        <IconButton label="Edit" onClick={() => setEditing(true)}>
           <Pencil className="size-4" />
         </IconButton>
         {entry.status === "claimed" || entry.conflictFlag ? (
           <IconButton
-            label="Révoquer le rattachement"
+            label="Revoke claim"
             onClick={() => unclaim.mutate()}
             disabled={unclaim.isPending}
           >
@@ -164,10 +164,10 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
           </IconButton>
         ) : null}
         <IconButton
-          label="Supprimer l'étudiant"
+          label="Remove student"
           danger
           onClick={() => {
-            if (window.confirm(`Supprimer ${entry.prenom} ${entry.nom} du roster ?`)) {
+            if (window.confirm(`Remove ${entry.prenom} ${entry.nom} from the roster?`)) {
               remove.mutate();
             }
           }}
@@ -189,8 +189,8 @@ export function RosterTable({
 }) {
   if (roster.length === 0) {
     return (
-      <EmptyState icon={Users} title="Roster vide">
-        Importe la liste des étudiants au format CSV ou Excel pour démarrer.
+      <EmptyState icon={Users} title="Empty roster">
+        Import the student list from a CSV or Excel file to get started.
       </EmptyState>
     );
   }
@@ -199,11 +199,11 @@ export function RosterTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            <th className={`${cell} font-medium`}>Étudiant</th>
+            <th className={`${cell} font-medium`}>Student</th>
             <th className={`${cell} font-medium`}>E-mail</th>
-            <th className={`${cell} font-medium`}>Statut</th>
+            <th className={`${cell} font-medium`}>Status</th>
             <th className={`${cell} font-medium`}>GitHub</th>
-            <th className={`${cell} font-medium`}>Dernière connexion</th>
+            <th className={`${cell} font-medium`}>Last sign-in</th>
             <th className={cell} aria-label="Actions" />
           </tr>
         </thead>

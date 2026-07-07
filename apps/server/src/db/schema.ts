@@ -137,6 +137,7 @@ export const assignments = pgTable(
     sourceAheadSha: text("source_ahead_sha"),
     deadlineAppliedAt: timestamp("deadline_applied_at", { withTimezone: true }),
     frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

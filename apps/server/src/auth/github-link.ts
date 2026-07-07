@@ -69,7 +69,7 @@ export async function githubLinkPlugin(
       if (!config.GITHUB_OAUTH_CLIENT_ID) {
         return reply
           .code(503)
-          .send({ error: "github_oauth_unconfigured", message: "OAuth App non configurée" });
+          .send({ error: "github_oauth_unconfigured", message: "OAuth App not configured" });
       }
       const state = randomBytes(16).toString("base64url");
       reply.setCookie(STATE_COOKIE, state, {
@@ -98,7 +98,7 @@ export async function githubLinkPlugin(
       const unsigned = raw ? req.unsignCookie(raw) : { valid: false as const, value: null };
       reply.clearCookie(STATE_COOKIE, { path: "/app/auth/github" });
       if (!q.code || !q.state || !unsigned.valid || unsigned.value !== q.state) {
-        return reply.code(400).send({ error: "github_state", message: "State invalide" });
+        return reply.code(400).send({ error: "github_state", message: "Invalid state" });
       }
 
       let gh: GithubUser;

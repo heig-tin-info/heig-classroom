@@ -1,4 +1,70 @@
+import { X } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+
+/** Local ISO date-time: `2026-09-01 08:00`. */
+export function isoDateTime(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Current local time formatted for a datetime-local input. */
+export function localDateTimeInputValue(date = new Date()): string {
+  const d = new Date(date);
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().slice(0, 16);
+}
+
+export function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div
+        className="mt-10 w-full max-w-3xl rounded-xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-4 flex items-center gap-2">
+          <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+          <span className="flex-1" />
+          <button
+            aria-label="Close"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Indeterminate progress bar (unknown duration work). */
+export function Progress({ label }: { label: string }) {
+  return (
+    <div className="space-y-1.5" role="status" aria-label={label}>
+      <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
+      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+        <div className="h-full w-1/3 animate-[progress_1.2s_ease-in-out_infinite] rounded-full bg-accent" />
+      </div>
+      <style>{`@keyframes progress { 0% { margin-left: -33%; } 100% { margin-left: 100%; } }`}</style>
+    </div>
+  );
+}
 
 /** Marque GitHub (les icônes de marques ont quitté lucide). */
 export function GithubIcon({ className = "size-4" }: { className?: string }) {

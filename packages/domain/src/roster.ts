@@ -107,7 +107,7 @@ export function rosterFromRows(input: readonly (readonly Cell[])[]): RosterParse
     .map((cells, i) => ({ line: i + 1, cells }))
     .filter(({ cells }) => cells.some((c) => cellText(c) !== ""));
   if (numbered.length === 0) {
-    return { ok: false, errors: [{ line: 1, message: "Fichier vide" }] };
+    return { ok: false, errors: [{ line: 1, message: "Empty file" }] };
   }
 
   const located = locateColumns(numbered.map((r) => r.cells));
@@ -118,7 +118,7 @@ export function rosterFromRows(input: readonly (readonly Cell[])[]): RosterParse
         {
           line: 1,
           message:
-            "Colonnes introuvables : attendu un en-tête nom / prenom / email (ou une colonne d'e-mails identifiable)",
+            "Could not identify columns: expected a nom / prenom / email header (or a recognizable e-mail column)",
         },
       ],
     };
@@ -134,16 +134,16 @@ export function rosterFromRows(input: readonly (readonly Cell[])[]): RosterParse
     const email = cellText(cells[located.columns.email]).toLowerCase();
 
     if (!nom || !prenom) {
-      errors.push({ line, message: "nom et prenom sont obligatoires" });
+      errors.push({ line, message: "nom and prenom are required" });
       continue;
     }
     if (!EMAIL_RE.test(email)) {
-      errors.push({ line, message: `e-mail invalide : « ${email} »` });
+      errors.push({ line, message: `invalid e-mail: “${email}”` });
       continue;
     }
     const first = seen.get(email);
     if (first !== undefined) {
-      errors.push({ line, message: `doublon de « ${email} » (déjà en ligne ${first})` });
+      errors.push({ line, message: `duplicate “${email}” (already on line ${first})` });
       continue;
     }
     seen.set(email, line);
@@ -152,7 +152,7 @@ export function rosterFromRows(input: readonly (readonly Cell[])[]): RosterParse
 
   if (errors.length > 0) return { ok: false, errors };
   if (rows.length === 0) {
-    return { ok: false, errors: [{ line: 1, message: "Aucune ligne de données" }] };
+    return { ok: false, errors: [{ line: 1, message: "No data rows" }] };
   }
   return { ok: true, rows };
 }

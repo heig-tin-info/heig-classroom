@@ -114,7 +114,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     const raw = req.cookies[LOGIN_STASH_COOKIE];
     const unsigned = raw ? req.unsignCookie(raw) : { valid: false as const, value: null };
     if (!unsigned.valid || !unsigned.value) {
-      return reply.code(400).send({ error: "login_state", message: "État de login absent ou invalide" });
+      return reply.code(400).send({ error: "login_state", message: "Missing or invalid login state" });
     }
     const stash = JSON.parse(unsigned.value) as {
       codeVerifier: string;
@@ -129,7 +129,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
       claims = await provider.completeLogin(callbackUrl, stash);
     } catch (err) {
       req.log.warn({ err }, "échec de l'échange OIDC");
-      return reply.code(401).send({ error: "oidc", message: "Authentification refusée" });
+      return reply.code(401).send({ error: "oidc", message: "Authentication refused" });
     }
 
     const user = await upsertUser(app, config, claims);

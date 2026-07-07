@@ -31,7 +31,7 @@ describe("parseRosterCsv (AU-13..16)", () => {
   it("rejette un doublon intra-fichier avec les deux lignes citées", () => {
     const e = errs(parseRosterCsv("nom,prenom,email\nA,B,a@b.ch\nC,D,A@B.CH"));
     expect(e[0]?.line).toBe(3);
-    expect(e[0]?.message).toMatch(/ligne 2/);
+    expect(e[0]?.message).toMatch(/line 2/);
   });
 
   it("rejette e-mail invalide et champs manquants (import atomique)", () => {
@@ -40,8 +40,8 @@ describe("parseRosterCsv (AU-13..16)", () => {
   });
 
   it("rejette un fichier sans données", () => {
-    expect(errs(parseRosterCsv("nom,prenom,email\n"))[0]?.message).toMatch(/Aucune ligne/);
-    expect(errs(parseRosterCsv(""))[0]?.message).toMatch(/vide/);
+    expect(errs(parseRosterCsv("nom,prenom,email\n"))[0]?.message).toMatch(/No data/);
+    expect(errs(parseRosterCsv(""))[0]?.message).toMatch(/Empty/);
   });
 });
 
@@ -92,7 +92,7 @@ describe("rosterFromRows — identification permissive (Excel)", () => {
 
   it("échec explicite quand rien n'est identifiable", () => {
     const e = errs(rosterFromRows([["a", "b"], ["c", "d"]]));
-    expect(e[0]?.message).toMatch(/Colonnes introuvables/);
+    expect(e[0]?.message).toMatch(/Could not identify/);
   });
 
   it("les numéros de ligne rapportés sont ceux du document d'origine", () => {

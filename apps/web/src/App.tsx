@@ -62,18 +62,18 @@ function Landing() {
       <div className="text-center">
         <h1 className="text-3xl font-semibold tracking-tight">HEIG GitHub Classroom</h1>
         <p className="mt-2 max-w-md text-zinc-500 dark:text-zinc-400">
-          Travaux pratiques sur GitHub : dépôts individuels, deadlines automatiques et
-          note indicative après chaque passage du CI.
+          Practical work on GitHub: individual repositories, automatic deadlines and an
+          indicative grade after every CI run.
         </p>
       </div>
       <a
         href="/app/auth/login"
         className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white shadow-sm transition-colors hover:bg-accent-hover"
       >
-        Se connecter avec Switch edu-ID
+        Sign in with Switch edu-ID
       </a>
       <p className="text-xs text-zinc-400 dark:text-zinc-500">
-        HEIG-VD — Département TIN
+        HEIG-VD — TIN Department
       </p>
     </main>
   );
@@ -84,7 +84,7 @@ function ThemeToggle() {
   return (
     <Button
       variant="ghost"
-      aria-label="Basculer le thème"
+      aria-label="Toggle theme"
       onClick={() => {
         const next = theme === "dark" ? "light" : "dark";
         setTheme(next);
@@ -110,8 +110,8 @@ function GithubLink({ me }: { me: Me }) {
         </Badge>
         <Button
           variant="ghost"
-          aria-label="Délier le compte GitHub"
-          title="Délier le compte GitHub"
+          aria-label="Unlink GitHub account"
+          title="Unlink GitHub account"
           onClick={() => unlink.mutate()}
         >
           <X className="size-3.5" />
@@ -124,7 +124,7 @@ function GithubLink({ me }: { me: Me }) {
       href="/app/auth/github/link"
       className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
     >
-      <GithubIcon className="size-4" /> Lier GitHub
+      <GithubIcon className="size-4" /> Link GitHub
     </a>
   );
 }
@@ -140,7 +140,7 @@ function GithubBanner() {
   if (status === "linked") {
     return (
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">
-        <CheckCircle2 className="size-4" /> Compte GitHub lié.
+        <CheckCircle2 className="size-4" /> GitHub account linked.
       </div>
     );
   }
@@ -148,8 +148,8 @@ function GithubBanner() {
     <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-500/10 dark:text-red-300">
       <AlertTriangle className="size-4" />
       {status === "conflict"
-        ? "Ce compte GitHub est déjà lié à un autre utilisateur."
-        : "La liaison GitHub a échoué — réessaie."}
+        ? "This GitHub account is already linked to another user."
+        : "GitHub linking failed — try again."}
     </div>
   );
 }
@@ -168,13 +168,13 @@ function Header({ me }: { me: Me }) {
         <span className="flex-1" />
         <GithubLink me={me} />
         <Badge tone="zinc" icon={me.role === "teacher" ? School : GraduationCap}>
-          {me.role === "teacher" ? "enseignant" : "étudiant"}
+          {me.role}
         </Badge>
         <span className="hidden text-sm text-zinc-500 sm:inline dark:text-zinc-400">
           {me.givenName} {me.familyName}
         </span>
         <ThemeToggle />
-        <Button variant="ghost" aria-label="Se déconnecter" onClick={() => logout.mutate()}>
+        <Button variant="ghost" aria-label="Sign out" onClick={() => logout.mutate()}>
           <LogOut className="size-4" />
         </Button>
       </div>
@@ -189,7 +189,7 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
   });
 
   if (detail.isLoading) return null;
-  if (!detail.data) return <p>Classroom introuvable.</p>;
+  if (!detail.data) return <p>Classroom not found.</p>;
   const room = detail.data;
 
   return (
@@ -208,11 +208,11 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
         </Badge>
         {room.org?.installationId ? (
           <Badge tone="green" icon={CheckCircle2}>
-            GitHub App installée
+            GitHub App installed
           </Badge>
         ) : (
           <Badge tone="amber" icon={Clock}>
-            GitHub App non installée
+            GitHub App not installed
           </Badge>
         )}
       </div>
@@ -257,7 +257,7 @@ function TeacherHome() {
   if (selected) return <ClassroomView id={selected} onBack={() => setSelected(null)} />;
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Mes classrooms</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
 
       {rooms.data?.length ? (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -273,10 +273,10 @@ function TeacherHome() {
                 </p>
                 <div className="mt-3 flex gap-2">
                   <Badge tone="zinc" icon={Users}>
-                    {c.students} étudiant{c.students > 1 ? "s" : ""}
+                    {c.students} student{c.students > 1 ? "s" : ""}
                   </Badge>
                   <Badge tone="green" icon={CheckCircle2}>
-                    {c.claimed} réclamé{c.claimed > 1 ? "s" : ""}
+                    {c.claimed} claimed
                   </Badge>
                 </div>
               </Card>
@@ -285,8 +285,8 @@ function TeacherHome() {
         </div>
       ) : (
         <Card>
-          <EmptyState icon={School} title="Aucune classroom">
-            Crée ta première classroom pour distribuer des assignments à tes étudiants.
+          <EmptyState icon={School} title="No classrooms">
+            Create your first classroom to distribute assignments to your students.
           </EmptyState>
         </Card>
       )}
@@ -294,7 +294,7 @@ function TeacherHome() {
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">
           <Plus className="size-4 text-zinc-400" />
-          <h2 className="font-medium">Nouvelle classroom</h2>
+          <h2 className="font-medium">New classroom</h2>
         </div>
         <form
           className="flex flex-wrap items-end gap-3"
@@ -304,25 +304,25 @@ function TeacherHome() {
           }}
         >
           <Field
-            label="Nom"
+            label="Name"
             placeholder="PRG1 2026"
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
           />
           <Field
-            label="Organisation GitHub"
+            label="GitHub organization"
             placeholder="heig-tin-info"
             value={org}
             onChange={(e) => setOrg(e.target.value)}
             required
           />
           <Button disabled={create.isPending}>
-            <Plus className="size-4" /> Créer
+            <Plus className="size-4" /> Create
           </Button>
         </form>
         {create.isError ? (
-          <p className="mt-2 text-sm text-red-600 dark:text-red-400">Création refusée.</p>
+          <p className="mt-2 text-sm text-red-600 dark:text-red-400">Creation failed.</p>
         ) : null}
       </Card>
     </div>
@@ -332,13 +332,13 @@ function TeacherHome() {
 function StudentHome({ me }: { me: Me }) {
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Mes assignments</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">My assignments</h1>
       <Card>
-        <EmptyState icon={ClipboardList} title="Aucun assignment pour l'instant">
-          Ils apparaîtront ici dès que ton enseignant en publiera. En attendant,
+        <EmptyState icon={ClipboardList} title="No assignments yet">
+          They will appear here as soon as your teacher publishes one. Meanwhile,
           {me.githubLogin
-            ? " tout est prêt de ton côté."
-            : " pense à lier ton compte GitHub (bientôt disponible)."}
+            ? " everything is ready on your side."
+            : " remember to link your GitHub account."}
         </EmptyState>
       </Card>
     </div>

@@ -169,7 +169,7 @@ export async function classroomsPlugin(
       prenom: z.string().min(1).max(200).optional(),
       email: z.email().optional(),
     })
-    .refine((b) => b.nom || b.prenom || b.email, { message: "Aucun champ à modifier" });
+    .refine((b) => b.nom || b.prenom || b.email, { message: "Nothing to update" });
 
   /** Charge l'entrée si la classroom appartient au teacher courant. */
   async function ownedEnrollment(req: FastifyRequest, reply: FastifyReply) {
@@ -233,7 +233,7 @@ export async function classroomsPlugin(
         // UNIQUE(classroom_id, email)
         return reply
           .code(409)
-          .send({ error: "duplicate_email", message: "Cet e-mail est déjà dans le roster" });
+          .send({ error: "duplicate_email", message: "This e-mail is already in the roster" });
       }
     },
   );
@@ -334,7 +334,7 @@ export async function classroomsPlugin(
         if (!parsed.success) {
           return reply.code(400).send({
             error: "validation",
-            message: "Corps attendu : text/csv, ou JSON { rows: Cell[][] }",
+            message: "Expected body: text/csv, or JSON { rows: Cell[][] }",
           });
         }
         source = { rows: parsed.data.rows };
