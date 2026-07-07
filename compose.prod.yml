@@ -5,6 +5,7 @@
 services:
   app:
     build: .
+    image: hgc-server:prod
     restart: always
     env_file: .env.prod
     environment:
