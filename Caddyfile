@@ -9,11 +9,6 @@ classroom.chevallier.io {
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
-	# IdP transitoire (Keycloak) — à retirer à la bascule edu-ID
-	handle /kc/* {
-		reverse_proxy localhost:8080
-	}
-
 	# SSE : flux non bufferisé (docs/03, ADR-005)
 	handle /app/events {
 		reverse_proxy localhost:3000 {

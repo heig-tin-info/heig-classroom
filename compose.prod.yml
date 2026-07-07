@@ -58,9 +58,10 @@ services:
           sleep 86400
         done
 
-  # IdP transitoire tant que SWITCH edu-ID est en validation. À retirer ensuite
-  # (trois variables d'env dans .env.prod). Servi sous /kc/ par Caddy.
+  # IdP de secours (edu-ID est approuvé : inactif par défaut).
+  # Activer si besoin : docker compose --profile keycloak ... up -d
   keycloak:
+    profiles: ["keycloak"]
     image: quay.io/keycloak/keycloak:26.4
     restart: always
     command: start --import-realm --proxy-headers xforwarded --http-enabled true
