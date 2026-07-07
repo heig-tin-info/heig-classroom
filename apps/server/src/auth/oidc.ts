@@ -92,12 +92,20 @@ export class OidcProvider {
     });
     // AU-09/NFR-02 : les tokens ne sont ni persistés ni retournés — seules les
     // claims d'identité sortent d'ici.
-    const claims = tokens.claims();
-    if (!claims) throw new Error("ID token sans claims");
+    const idClaims = tokens.claims();
+    if (!idClaims) throw new Error("ID token sans claims");
+    // Selon la configuration de l'IdP (edu-ID notamment), les attributs
+    // peuvent n'être délivrés que par l'endpoint userinfo : repli si l'ID
+    // token ne porte pas l'e-mail.
+    let claims: Record<string, unknown> = idClaims;
+    if (typeof claims.email !== "string") {
+      const userinfo = await oidc.fetchUserInfo(config, tokens.access_token, idClaims.sub);
+      claims = { ...userinfo, ...idClaims, email: userinfo.email, email_verified: userinfo.email_verified, given_name: userinfo.given_name, family_name: userinfo.family_name };
+    }
     const email = typeof claims.email === "string" ? claims.email : "";
-    if (!email) throw new Error("Claim email absente");
+    if (!email) throw new Error("Claim email absente (ID token et userinfo)");
     return {
-      sub: claims.sub,
+      sub: idClaims.sub,
       email: email.trim().toLowerCase(),
       emailVerified: claims.email_verified === true,
       givenName: typeof claims.given_name === "string" ? claims.given_name : "",
