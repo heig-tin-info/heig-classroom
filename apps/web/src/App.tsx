@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
+  BookOpen,
+  ChevronDown,
   Settings as SettingsIcon,
   Trash2,
   ArrowLeft,
@@ -35,7 +37,7 @@ import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import { Avatar, SettingsPage } from "./SettingsPage";
 import { applyTheme, initialTheme, type Theme } from "./theme";
-import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime, Modal } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime, Modal, OrgAvatar } from "./ui";
 
 function useMe() {
   return useQuery<Me | null>({
@@ -126,33 +128,86 @@ function GithubBanner() {
   );
 }
 
-function Header({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) {
+function UserMenu({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const logout = useMutation({
     mutationFn: () => api("/app/auth/logout", { method: "POST" }),
     onSuccess: () => qc.setQueryData(["me"], null),
   });
   return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-label="User menu"
+        aria-expanded={open}
+        className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+      >
+        <span className="hidden text-sm text-zinc-600 sm:inline dark:text-zinc-300">
+          {me.givenName} {me.familyName}
+        </span>
+        <Avatar me={me} className="size-8 text-xs" />
+        <ChevronDown className={`size-3.5 text-zinc-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-20 mt-2 w-44 overflow-hidden rounded-xl bg-white py-1 shadow-[0_4px_24px_rgb(0_0_0/0.15)] dark:bg-zinc-900 dark:shadow-[0_4px_24px_rgb(0_0_0/0.5)]">
+            <button
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <SettingsIcon className="size-4 text-zinc-400" /> Settings
+            </button>
+            <button
+              onClick={() => logout.mutate()}
+              className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <LogOut className="size-4 text-zinc-400" /> Sign out
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function Header({
+  me,
+  onOpenSettings,
+  onHome,
+}: {
+  me: Me;
+  onOpenSettings: () => void;
+  onHome: () => void;
+}) {
+  return (
     <header className="sticky top-0 z-10 bg-white/80 shadow-[0_1px_8px_rgb(0_0_0/0.06)] backdrop-blur dark:bg-zinc-950/80 dark:shadow-[0_1px_8px_rgb(0_0_0/0.4)]">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4">
-        <Logo className="size-5" />
-        <span className="font-semibold tracking-tight">HEIG Classroom</span>
-        <span className="flex-1" />
         <button
-          onClick={onOpenSettings}
-          aria-label="Open settings"
-          title="Settings"
-          className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          onClick={onHome}
+          className="flex items-center gap-3 rounded-lg transition-opacity hover:opacity-80"
+          title="Home"
         >
-          <span className="hidden text-sm text-zinc-500 sm:inline dark:text-zinc-400">
-            {me.givenName} {me.familyName}
-          </span>
-          <Avatar me={me} className="size-8 text-xs" />
+          <Logo className="size-5" />
+          <span className="font-semibold tracking-tight">HEIG Classroom</span>
         </button>
+        <span className="flex-1" />
+        <a
+          href="https://heig-tin-info.github.io/heig-classroom/"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Documentation"
+          title="Documentation"
+          className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        >
+          <BookOpen className="size-4" />
+        </a>
         <ThemeToggle />
-        <Button variant="ghost" aria-label="Sign out" onClick={() => logout.mutate()}>
-          <LogOut className="size-4" />
-        </Button>
+        <UserMenu me={me} onOpenSettings={onOpenSettings} />
       </div>
     </header>
   );
@@ -276,6 +331,7 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
       </button>
 
       <div className="flex flex-wrap items-center gap-3">
+        {room.org ? <OrgAvatar login={room.org.login} className="size-8" /> : null}
         <h1 className="text-2xl font-semibold tracking-tight">{room.name}</h1>
         <Badge tone="zinc" icon={Building2}>
           {room.org?.login}
@@ -364,7 +420,7 @@ function TeacherHome() {
             <button key={c.id} onClick={() => setSelected(c.id)} className="text-left">
               <Card className="p-4 hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgb(0_0_0/0.06),0_12px_28px_rgb(0_0_0/0.08)]">
                 <div className="flex items-center gap-2">
-                  <FolderGit2 className="size-5 text-accent" />
+                  <OrgAvatar login={c.orgLogin} className="size-6" />
                   <span className="font-medium">{c.name}</span>
                 </div>
                 <p className="mt-1 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -574,7 +630,7 @@ function StudentHome({ me }: { me: Me }) {
           {rooms.data.map((room) => (
             <Card key={room.id} className="p-4">
               <div className="flex items-center gap-2">
-                <School className="size-5 text-accent" />
+                <OrgAvatar login={room.orgLogin} className="size-6" />
                 <span className="font-medium">{room.name}</span>
               </div>
               <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
@@ -616,7 +672,11 @@ export default function App() {
   const role = me.data.role;
   return (
     <div className="min-h-dvh">
-      <Header me={me.data} onOpenSettings={() => setView("settings")} />
+      <Header
+        me={me.data}
+        onOpenSettings={() => setView("settings")}
+        onHome={() => setView("home")}
+      />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
         {view === "settings" ? (

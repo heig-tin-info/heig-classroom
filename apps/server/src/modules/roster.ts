@@ -6,7 +6,7 @@ import { parseRosterCsv, rosterFromRows, type Cell, type RosterParse } from "@hg
 import { audit } from "../audit.js";
 import { publish } from "../events.js";
 import type { Db } from "../db/client.js";
-import { enrollments, users } from "../db/schema.js";
+import { avatars, enrollments, users } from "../db/schema.js";
 
 export interface RosterImportSummary {
   inserted: number;
@@ -151,7 +151,7 @@ export async function claimForExistingUsers(db: Db, classroomId: string) {
 
 /** Tableau roster du teacher (US-01) : identité, statut, GitHub, dernière connexion. */
 export async function rosterView(db: Db, classroomId: string) {
-  return db
+  const rows = await db
     .select({
       id: enrollments.id,
       nom: enrollments.nom,
@@ -162,9 +162,22 @@ export async function rosterView(db: Db, classroomId: string) {
       claimedAt: enrollments.claimedAt,
       githubLogin: users.githubLogin,
       lastLoginAt: users.lastLoginAt,
+      userId: users.id,
+      pictureUrl: users.pictureUrl,
+      avatarAt: avatars.updatedAt,
     })
     .from(enrollments)
     .leftJoin(users, eq(enrollments.userId, users.id))
+    .leftJoin(avatars, eq(avatars.userId, users.id))
     .where(eq(enrollments.classroomId, classroomId))
     .orderBy(enrollments.nom, enrollments.prenom);
+  // Avatar : upload > claim IdP > avatar GitHub public > (initiales côté client)
+  return rows.map(({ avatarAt, pictureUrl, ...r }) => ({
+    ...r,
+    avatarUrl:
+      avatarAt && r.userId
+        ? `/app/api/users/${r.userId}/avatar?v=${avatarAt.getTime()}`
+        : (pictureUrl ??
+          (r.githubLogin ? `https://github.com/${r.githubLogin}.png?size=48` : null)),
+  }));
 }

@@ -1,6 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   Check,
   CheckCircle2,
   Clock,
@@ -10,7 +12,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { api, ApiError, type RosterEntry } from "./api";
 import { Badge, EmptyState, GithubIcon, isoDateTime } from "./ui";
@@ -35,6 +37,27 @@ function IconButton({
 }
 
 const cell = "px-3 py-2";
+
+function StudentAvatar({ entry }: { entry: RosterEntry }) {
+  const [failed, setFailed] = useState(false);
+  if (entry.avatarUrl && !failed) {
+    return (
+      <img
+        src={entry.avatarUrl}
+        alt=""
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="size-7 shrink-0 rounded-full object-cover"
+      />
+    );
+  }
+  const initials = `${entry.prenom.charAt(0)}${entry.nom.charAt(0)}`.toUpperCase();
+  return (
+    <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
+      {initials}
+    </span>
+  );
+}
 const input =
   "w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 dark:border-zinc-700 dark:bg-zinc-950";
 
@@ -119,7 +142,12 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
 
   return (
     <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-      <td className={`${cell} font-medium`}>{entry.nom}</td>
+      <td className={`${cell} font-medium`}>
+        <span className="flex items-center gap-2">
+          <StudentAvatar entry={entry} />
+          {entry.nom}
+        </span>
+      </td>
       <td className={cell}>{entry.prenom}</td>
       <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>{entry.email}</td>
       <td className={cell}>
@@ -179,6 +207,8 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
   );
 }
 
+type SortKey = "nom" | "prenom" | "email" | "status" | "githubLogin" | "lastLoginAt";
+
 export function RosterTable({
   classroomId,
   roster,
@@ -186,6 +216,41 @@ export function RosterTable({
   classroomId: string;
   roster: RosterEntry[];
 }) {
+  const [sortKey, setSortKey] = useState<SortKey>("nom");
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
+  const sorted = useMemo(() => {
+    const data = [...roster];
+    data.sort((a, b) => {
+      const x = a[sortKey] ?? "";
+      const y = b[sortKey] ?? "";
+      return String(x).localeCompare(String(y), undefined, { sensitivity: "base" }) * sortDir;
+    });
+    return data;
+  }, [roster, sortKey, sortDir]);
+
+  function SortHeader({ k, children }: { k: SortKey; children: React.ReactNode }) {
+    const active = sortKey === k;
+    return (
+      <th className={`${cell} font-medium`}>
+        <button
+          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
+          onClick={() => {
+            if (active) setSortDir((d) => (d === 1 ? -1 : 1));
+            else {
+              setSortKey(k);
+              setSortDir(1);
+            }
+          }}
+        >
+          {children}
+          {active ? (
+            sortDir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+          ) : null}
+        </button>
+      </th>
+    );
+  }
+
   if (roster.length === 0) {
     return (
       <EmptyState icon={Users} title="Empty roster">
@@ -197,18 +262,18 @@ export function RosterTable({
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            <th className={`${cell} font-medium`}>Last name</th>
-            <th className={`${cell} font-medium`}>First name</th>
-            <th className={`${cell} font-medium`}>E-mail</th>
-            <th className={`${cell} font-medium`}>Status</th>
-            <th className={`${cell} font-medium`}>GitHub</th>
-            <th className={`${cell} font-medium`}>Last sign-in</th>
+          <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
+            <SortHeader k="nom">Last name</SortHeader>
+            <SortHeader k="prenom">First name</SortHeader>
+            <SortHeader k="email">E-mail</SortHeader>
+            <SortHeader k="status">Status</SortHeader>
+            <SortHeader k="githubLogin">GitHub</SortHeader>
+            <SortHeader k="lastLoginAt">Last sign-in</SortHeader>
             <th className={cell} aria-label="Actions" />
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {roster.map((r) => (
+          {sorted.map((r) => (
             <Row key={r.id} classroomId={classroomId} entry={r} />
           ))}
         </tbody>

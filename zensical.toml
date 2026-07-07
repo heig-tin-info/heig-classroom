@@ -14,7 +14,8 @@ nav = [
     { "About" = "guide/about.md" },
     { "GitHub applications" = "guide/github-apps.md" },
   ] },
-  { "Specifications (French)" = [
+  { "Development" = [
+    "development/index.md",
     { "Analyse des besoins" = "00-analyse-besoins.md" },
     { "Cahier des charges" = "01-cahier-des-charges.md" },
     { "Spécifications fonctionnelles" = "02-specs-fonctionnelles.md" },

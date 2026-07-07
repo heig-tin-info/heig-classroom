@@ -1,5 +1,21 @@
-import { X } from "lucide-react";
+import { Building2, X } from "lucide-react";
+import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
+
+/** Avatar public GitHub d'une organisation, avec repli sur une icône. */
+export function OrgAvatar({ login, className = "size-5" }: { login: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return <Building2 className={`${className} text-zinc-400`} />;
+  return (
+    <img
+      src={`https://github.com/${login}.png?size=64`}
+      alt=""
+      referrerPolicy="no-referrer"
+      onError={() => setFailed(true)}
+      className={`rounded ${className}`}
+    />
+  );
+}
 
 /** Local ISO date-time: `2026-09-01 08:00`. */
 export function isoDateTime(iso: string): string {
