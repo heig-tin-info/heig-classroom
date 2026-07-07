@@ -1,45 +1,89 @@
 # What is HEIG Classroom
 
-GitHub deprecated GitHub Classroom in ... , a tool used to orchestrate students repository in assignments. It proposes two alternatives, one free and one not (name the services). However, the need in department TIN for teacher computer science is pretty basic, our needs are:
+GitHub announced in May 2026 that GitHub Classroom, its tool for orchestrating
+student repositories around assignments, would be retired on August 28, 2026,
+after 18 months in maintenance mode. The official transition points educators to
+two partner products: [Codio](https://www.codio.com/), a commercial hands-on
+learning platform, and Classroom 50, a free open-source alternative maintained by
+the Fifty Foundation.
 
-- Automatically create student repositories from a common template assignment
-- Manage write access and hooks on each commit to gather CI results
-- Automatically lock the repository passed the deadline
-- Have one single source of assignments for each student easy access
-- Gather in one single view the results of all CI and get the grade
-- Easily Reuse assignments from one year to another
-- Allow PR on students repo if fixes needed to be pushed on common repository
-- Lock some files on student repo (tests, CI...)
-- Squash branches or commits to hide solution or history on the master lab repo which should remain private
-- Link GitHub accounts to EDU Id student identificaiton
+Neither of them fits the way computer science is taught in the TIN department at
+HEIG-VD, where the needs are basic but specific. A teacher writes an assignment as
+a regular Git repository, students each get their own private copy with push
+access, a CI workflow grades every push, and the whole thing locks itself at the
+deadline. Around that core we want a single source of truth per assignment, a
+one-page view of who pushed what and which tests pass, protected files that
+students cannot tamper with (tests, CI configuration), the ability to squash the
+assignment history so the solution never leaks from the private master repository,
+a clean path to push fixes to every student repo through pull requests, easy reuse
+of assignments from one year to the next, and login through Switch edu-ID with the
+GitHub account linked to the student's academic identity.
 
-It seemed easier to build a new platform from scratch for the rentrée académique de l'automne 2026. 
+Rather than bending a generic platform to do all that, we built HEIG Classroom
+from scratch for the Fall 2026 semester. It is a small Fastify monolith on top of
+PostgreSQL, driving GitHub through a GitHub App. GitHub stays the source of truth
+for everything Git; the portal orchestrates.
 
 ## Teacher workflow
 
-This portal is attempted to be used as follow:
+The teacher writes the assignment wherever they like, as a normal repository with
+a `grading.yml` CI workflow that prints the earned and maximum points (an LLM
+based code review can slot in here just as well as plain unit tests). Student
+repositories live in a GitHub organization, typically one per course such as
+`heig-info2-tin-b`, upgraded to the Team plan for free through GitHub Education.
+The HEIG Classroom GitHub App is installed on that organization once.
 
-1. A teacher create whereever a GH repository for the lab assignment. He configures the CI to evaluate the work, peut-être avec un LLM pour l'analyse de code, qui retourne le nombre de points obtenus et le nombre de points total
-2. An organisation is created to host student repositories, usually the name of the course aka heig-info2-tin-b for the TIN course Info2. A single org for different courses can also be chosen
-3. The organisation is promoted into Teams using academic education discount, by applying on GitHub Education
-4. The HEIG-Classroom GH App is then installed on the organisation
-5. The master assignment repo is forked into the organisation it will live there usually untouched
-6. From HEIG-Classroom the teacher creates a new classroom and import the roster from GAPS student list (xlsx file or csv)
-7. Then he creates a new assignment linked to the lab repository
-8. Once the assignment published students can join
+From there everything happens in the portal:
 
-In the mean time HEIG-Classroom will squash all commits into a new reposotiry with suffix `-squashed` which is the SSOT for students assignment. The teacher can clone and append commits into this assignment. Classroom can then automatically create PR on students repo to push some changes. Or classroom may fork this repository to ease this process.
+1. Create a classroom bound to the organization.
+2. Import the roster from the GAPS student list, dropped as an Excel or CSV file.
+   Column detection is permissive, so the export works as is.
+3. Create an assignment pointing at the source repository, pick the dates, the
+   deadline strategy and the protected files directly in the repository tree.
+4. Publish. Students can now accept the assignment.
+
+At creation time the portal squashes the source into a sibling repository with the
+`-squashed` suffix. That repository is the single source of truth distributed to
+students: full content, no history, so the solution and the drafting process stay
+private. The teacher can keep committing to it, and the portal can later open pull
+requests on every student repository to distribute fixes.
 
 ## Student workflow
 
-The student login using Switch EDU ID on the HEIG Classroom portal. The first step is to link with the Student GitHub Account. HEIG Classroom will display all assignment per classroom allowing the student to initiate the fork phase then get the clone URL. 
+Students sign in with Switch edu-ID. On first login the portal matches their
+verified e-mail against the roster and attaches them automatically, so there is no
+invitation code to type. The one manual step is linking their GitHub account,
+which uses a minimal `read:user` OAuth scope.
 
-1. Login into the platform
-2. Link GitHub Account
-3. Select assignment
-4. Wait for initialisation phase
-5. Get clone link and clone his repository
-6. Work, commit, push...
-7. Once the deadline occurs, the repository may be write locked or a signed empty commit "Deadline Reached" can be automatically pushed to lock the history at the deadline
-8. The student can get its grade from the interface if a CI was configured by the teacher
+After that the student picks an assignment, clicks accept, waits a few seconds
+while their private repository is provisioned (created from the squashed source,
+protected against force pushes, with push access granted), then clones it and
+works normally: commit, push, repeat. Every push triggers the grading CI and the
+indicative grade shows up in the portal. When the deadline hits, the repository is
+either write-locked or stamped with a signed empty commit, depending on the
+strategy the teacher chose. If a CI was configured, the grade is right there in
+the interface.
 
+## Traceability
+
+The deadline commit is authored by the App bot and force pushes are blocked by a
+repository ruleset, so the history up to the deadline can be trusted as evidence.
+For assignments that need intermediate checkpoints, the same trick generalizes
+into milestones: a bot commit dropped on demand or at a scheduled time. GitHub has
+no atomic "commit everywhere at once" primitive, but revoking push access,
+committing, and restoring access gets close enough in practice.
+
+## CLI
+
+A companion CLI (a `gh` extension) talks to the portal API with a teacher API key.
+It clones or syncs a whole assignment or classroom in one go, which is handy for
+grading offline or keeping a local backup:
+
+```bash
+$ gh classroom
+Select your classroom
+> (dropdown)
+Select your assignment
+> (dropdown with all)
+... then it clones
+```

@@ -1,6 +1,6 @@
 # Phase 1 — Réanalyse des besoins
 
-> Source : [IDEA.md](../IDEA.md) — HEIG GitHub Classroom, portail web deux rôles (student / teacher).
+> Source : `IDEA.md` — HEIG GitHub Classroom, portail web deux rôles (student / teacher).
 > Statut : draft d'analyse. Les points marqués ❓ sont des décisions à prendre ou à vérifier avant la phase 2.
 
 ## 1. Vision

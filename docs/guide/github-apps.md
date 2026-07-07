@@ -1,32 +1,41 @@
-# Configurer les applications GitHub de production
+# Setting up the production GitHub applications
 
-Le portail utilise deux applications GitHub distinctes (GH-01, AU-08) :
+The portal talks to GitHub through two distinct applications. The GitHub App does
+everything the server does on repositories (provisioning, rulesets, webhooks) and
+signs its work as the `hgc-prod[bot]` identity. The OAuth App only serves one
+purpose: letting students link their GitHub account, with the minimal `read:user`
+scope.
 
-| Application | Rôle | Identité |
-| --- | --- | --- |
-| **GitHub App** `hgc-prod` | Provisionnement des dépôts, rulesets, webhooks — tout ce que fait le serveur | bot `hgc-prod[bot]` |
-| **OAuth App** | Liaison du compte GitHub des étudiants (scope `read:user` uniquement) | — |
-
-Les applications de **dev** (`hgc-dev`, callbacks `localhost:3000`) restent en place
-pour le développement local : une OAuth App GitHub n'accepte qu'**un seul** callback,
-on ne la fait donc pas pointer vers la prod — on crée une paire dédiée.
+The development pair (`hgc-dev`, callbacks on `localhost:3000`) stays untouched. A
+GitHub OAuth App accepts a single callback URL, so pointing it at production would
+break local development. Production gets its own pair.
 
 ## 1. GitHub App `hgc-prod`
 
-Créer dans l'organisation cible :
-`https://github.com/organizations/<org>/settings/apps/new`
+Create it inside the target organization at
+`https://github.com/organizations/<org>/settings/apps/new` and fill in:
 
-- **Name** : `hgc-prod` (le slug devient l'identité des commits bot)
-- **Homepage URL** : `https://classroom.chevallier.io`
-- **Callback URL** : vide ; décocher *Request user authorization (OAuth) during installation*
-- **Webhook** : décocher *Active* pour l'instant — il sera activé au jalon M3 avec
-  l'URL `https://classroom.chevallier.io/webhooks/github` et un secret
-  (`openssl rand -hex 32`, à reporter dans `GITHUB_WEBHOOK_SECRET`)
-- **Repository permissions** (table GH-02, rien de plus) :
+- **Name**: `hgc-prod` (the slug becomes the bot identity on commits)
+- **Description** (shown to users on the installation and authorization screens):
 
-| Permission | Niveau |
+```text
+HEIG Classroom drives the student repositories of this organization: it creates
+one private repository per student and assignment, grants push access, protects
+assignment files, collects CI results, and locks repositories at the deadline.
+Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.io
+```
+
+- **Homepage URL**: `https://classroom.chevallier.io`
+- **Callback URL**: leave empty, and uncheck *Request user authorization (OAuth)
+  during installation* (the App is server-only)
+- **Webhook**: uncheck *Active* for now. It will be enabled with milestone M3,
+  using `https://classroom.chevallier.io/webhooks/github` and a secret generated
+  with `openssl rand -hex 32` (mirrored in `GITHUB_WEBHOOK_SECRET`)
+- **Repository permissions** (the GH-02 table, nothing more):
+
+| Permission | Level |
 | --- | --- |
-| Metadata | Read (automatique) |
+| Metadata | Read (automatic) |
 | Administration | Read & write |
 | Contents | Read & write |
 | Workflows | Read & write |
@@ -34,70 +43,75 @@ Créer dans l'organisation cible :
 | Checks | Read |
 | Actions | Read |
 
-- **Organization permissions** : Members → Read (optionnel)
-- **Where can this App be installed** : *Only on this account*
+- **Organization permissions**: Members, Read (optional)
+- **Where can this App be installed**: *Only on this account*
 
-Après création :
+Once created, note the **App ID** (the `Iv23…` Client ID works too), generate a
+**private key** under *Private keys* (a `.pem` file downloads), then open
+**Install App** in the left menu and install it on the organization with
+**All repositories**.
 
-1. Noter l'**App ID** (ou le Client ID `Iv23…`, accepté aussi).
-2. *Private keys* → **Generate a private key** → le `.pem` se télécharge.
-3. **Install App** (menu de gauche) → l'organisation → **All repositories**.
+## 2. Production OAuth App
 
-## 2. OAuth App de production
+Create it at `https://github.com/organizations/<org>/settings/applications/new`:
 
-`https://github.com/organizations/<org>/settings/applications/new`
+- **Application name**: `HEIG Classroom`
+- **Application description**:
 
-- **Application name** : `HEIG Classroom`
-- **Homepage URL** : `https://classroom.chevallier.io`
-- **Authorization callback URL** :
+```text
+Links your GitHub account to your HEIG Classroom profile so assignments can be
+delivered to you. Read-only access to your public profile, nothing else.
+```
+
+- **Homepage URL**: `https://classroom.chevallier.io`
+- **Authorization callback URL**:
   `https://classroom.chevallier.io/app/auth/github/callback`
 
-Noter le **Client ID**, puis *Generate a new client secret*.
+Note the **Client ID** and generate a client secret.
 
-## 3. Installer les valeurs sur le serveur
+## 3. Install the values on the server
 
 ```bash
-# Depuis le poste : déposer le PEM téléchargé
+# From your workstation, ship the downloaded PEM
 scp hgc-prod.*.private-key.pem root@classroom.chevallier.io:/opt/heig-classroom/secrets/hgc-prod.private-key.pem
 
 ssh root@classroom.chevallier.io
 chmod 600 /opt/heig-classroom/secrets/hgc-prod.private-key.pem
-chown 1000:1000 /opt/heig-classroom/secrets/hgc-prod.private-key.pem   # uid du conteneur
+chown 1000:1000 /opt/heig-classroom/secrets/hgc-prod.private-key.pem   # container uid
 ```
 
-Dans `/opt/heig-classroom/.env.prod` :
+In `/opt/heig-classroom/.env.prod`:
 
 ```bash
-GITHUB_APP_ID=<App ID de hgc-prod>
+GITHUB_APP_ID=<hgc-prod App ID>
 GITHUB_APP_PRIVATE_KEY_PATH=secrets/hgc-prod.private-key.pem
 GITHUB_APP_SLUG=hgc-prod
-GITHUB_WEBHOOK_SECRET=            # au jalon M3
-GITHUB_OAUTH_CLIENT_ID=<Client ID de l'OAuth App>
+GITHUB_WEBHOOK_SECRET=            # milestone M3
+GITHUB_OAUTH_CLIENT_ID=<OAuth App Client ID>
 GITHUB_OAUTH_CLIENT_SECRET=<client secret>
 ```
 
-Puis redémarrer l'app :
+Then restart the app:
 
 ```bash
 cd /opt/heig-classroom
 docker compose -f compose.prod.yml --env-file .env.prod up -d app
 ```
 
-## 4. Vérifier
+## 4. Verify
 
-1. Portail → ouvrir une classroom adossée à l'organisation : badge
-   **GitHub App installed** (la résolution d'installation se fait à la consultation).
-2. En haut à droite : **Link GitHub** → autorisation `read:user` → badge vert avec
-   le login GitHub.
-3. Publier un assignment de test et l'accepter avec un compte étudiant : le dépôt
-   `slug-<login>` apparaît dans l'organisation, protégé par le ruleset `hgc-protect`.
+Open a classroom bound to the organization: the **GitHub App installed** badge
+should turn green (installation is resolved on view). In the header, **Link
+GitHub** should walk you through the `read:user` authorization and come back with
+your login as a green badge. Finally, publish a test assignment and accept it
+with a student account: the `slug-<login>` repository appears in the
+organization, protected by the `hgc-protect` ruleset.
 
 ## Notes
 
-- L'organisation liée à une classroom est celle où l'App est **installée** ; une
-  App par organisation d'enseignement (`heig-test-classroom`, `heig-tin-info`, …)
-  n'est pas nécessaire : une seule App installée sur chaque organisation suffit.
-- La clé PEM ne va **ni dans git ni en base** (ADR-010) ; copie chiffrée dans le
-  coffre. Rotation : GitHub accepte deux clés actives simultanément.
-- En cas de changement d'App (dev → prod), les dépôts déjà provisionnés restent
-  valides : l'App de prod doit simplement être installée sur la même organisation.
+One App installed per teaching organization is all it takes; the same App serves
+every classroom bound to that organization. The PEM key never goes into git or
+into the database (ADR-010), keep an encrypted copy in the vault. GitHub accepts
+two active keys at once, which makes rotation painless. Switching from the dev App
+to the prod App does not invalidate repositories that were already provisioned, as
+long as the new App is installed on the same organization.
