@@ -10,7 +10,7 @@ import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { enrollments, classrooms, organizations } from "../db/schema.js";
 import { resolveOrgInstallation } from "../github/app.js";
-import { importRoster, rosterView } from "./roster.js";
+import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
 
 const IdParam = z.object({ id: z.uuid() });
 
@@ -352,6 +352,9 @@ export async function classroomsPlugin(
         subjectId: room.id,
         payload: { rows: parse.rows.length },
       });
+      // Les étudiants déjà inscrits sur la plateforme sont rattachés
+      // immédiatement, sans attendre leur prochain login.
+      await claimForExistingUsers(app.db, room.id);
       return reply.code(200).send({ rows: parse.rows.length, ...summary });
     },
   );

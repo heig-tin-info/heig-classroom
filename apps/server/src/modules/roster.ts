@@ -105,6 +105,47 @@ export async function claimEnrollments(db: Db, user: { id: string; email: string
   return claimed;
 }
 
+/**
+ * Claim inverse (après import ou édition d'e-mail) : rattache les entrées
+ * `pending` d'une classroom aux comptes déjà existants dont l'e-mail vérifié
+ * correspond — l'étudiant n'a pas besoin de se reconnecter.
+ */
+export async function claimForExistingUsers(db: Db, classroomId: string) {
+  const matches = await db
+    .select({ enrollmentId: enrollments.id, userId: users.id, userEmail: users.email })
+    .from(enrollments)
+    .innerJoin(
+      users,
+      and(
+        sql`lower(${users.email}) = lower(${enrollments.email})`,
+        eq(users.emailVerified, true),
+      ),
+    )
+    .where(and(eq(enrollments.classroomId, classroomId), eq(enrollments.status, "pending")));
+
+  for (const m of matches) {
+    try {
+      await db
+        .update(enrollments)
+        .set({ status: "claimed", userId: m.userId, claimedAt: new Date() })
+        .where(and(eq(enrollments.id, m.enrollmentId), eq(enrollments.status, "pending")));
+      await audit(db, {
+        actorUserId: m.userId,
+        actorType: "system",
+        action: "roster.claim",
+        subjectType: "enrollment",
+        subjectId: m.enrollmentId,
+      });
+    } catch {
+      await db
+        .update(enrollments)
+        .set({ conflictFlag: true })
+        .where(eq(enrollments.id, m.enrollmentId));
+    }
+  }
+  return matches.length;
+}
+
 /** Tableau roster du teacher (US-01) : identité, statut, GitHub, dernière connexion. */
 export async function rosterView(db: Db, classroomId: string) {
   return db

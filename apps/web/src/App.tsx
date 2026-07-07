@@ -30,7 +30,7 @@ import { AssignmentsCard } from "./AssignmentsCard";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import { applyTheme, initialTheme, type Theme } from "./theme";
-import { Badge, Button, Card, EmptyState, Field, GithubIcon } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, GithubIcon, isoDateTime } from "./ui";
 
 function useMe() {
   return useQuery<Me | null>({
@@ -329,18 +329,77 @@ function TeacherHome() {
   );
 }
 
+interface StudentClassroom {
+  id: string;
+  name: string;
+  orgLogin: string;
+  teacher: string;
+  assignments: {
+    id: string;
+    name: string;
+    state: "published" | "locked";
+    startAt: string;
+    deadlineAt: string;
+  }[];
+}
+
 function StudentHome({ me }: { me: Me }) {
+  const rooms = useQuery<StudentClassroom[]>({
+    queryKey: ["student-classrooms"],
+    queryFn: () => api("/app/api/student/classrooms"),
+  });
+
+  if (rooms.isLoading) return null;
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">My assignments</h1>
-      <Card>
-        <EmptyState icon={ClipboardList} title="No assignments yet">
-          They will appear here as soon as your teacher publishes one. Meanwhile,
-          {me.githubLogin
-            ? " everything is ready on your side."
-            : " remember to link your GitHub account."}
-        </EmptyState>
-      </Card>
+      <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
+      {!me.githubLogin ? (
+        <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
+          <AlertTriangle className="size-4" />
+          Link your GitHub account (top right) to be able to accept assignments.
+        </div>
+      ) : null}
+      {rooms.data?.length ? (
+        <div className="grid gap-4 sm:grid-cols-2">
+          {rooms.data.map((room) => (
+            <Card key={room.id} className="p-4">
+              <div className="flex items-center gap-2">
+                <School className="size-5 text-accent" />
+                <span className="font-medium">{room.name}</span>
+              </div>
+              <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                <span className="inline-flex items-center gap-1">
+                  <Building2 className="size-3.5" /> {room.orgLogin}
+                </span>
+                <span>· {room.teacher}</span>
+              </p>
+              {room.assignments.length ? (
+                <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
+                  {room.assignments.map((a) => (
+                    <li key={a.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
+                      <span className="font-medium">{a.name}</span>
+                      {a.state === "locked" ? <Badge tone="red">locked</Badge> : null}
+                      <span className="flex-1" />
+                      <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
+                        <Clock className="size-3.5" /> due {isoDateTime(a.deadlineAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-3 text-sm text-zinc-400">No published assignments yet.</p>
+              )}
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card>
+          <EmptyState icon={ClipboardList} title="No classrooms yet">
+            Your teacher enrolls you through the class roster — classrooms appear here
+            automatically once you are on it.
+          </EmptyState>
+        </Card>
+      )}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { assignmentsPlugin } from "./modules/assignments.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
+import { studentPlugin } from "./modules/student.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -45,6 +46,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(githubLinkPlugin, { config });
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
+  await app.register(studentPlugin);
 
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
   if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {
