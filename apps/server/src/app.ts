@@ -13,7 +13,9 @@ import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { assignmentsPlugin } from "./modules/assignments.js";
+import { publish } from "./events.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
+import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
 
 export interface AppDeps {
@@ -41,8 +43,21 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     done(null, body),
   );
 
+  // Toute mutation HTTP réussie émet un indice de rafraîchissement SSE
+  // (ADR-005). Les changements hors mutation directe (claim automatique,
+  // acceptation, liaison GitHub) publient explicitement dans leurs modules.
+  app.addHook("onResponse", async (req, reply) => {
+    if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
+    if (reply.statusCode >= 400 || !req.user) return;
+    const classroom = /^\/app\/api\/classrooms\/([0-9a-f-]{36})/.exec(req.url);
+    if (classroom) publish("mutation", [`classroom:${classroom[1]}`]);
+    else if (req.url.startsWith("/app/api/classrooms")) publish("mutation", [`teacher:${req.user.id}`]);
+    else publish("mutation", [`user:${req.user.id}`]);
+  });
+
   await app.register(fastifyCookie, { secret: config.COOKIE_SECRET });
   await app.register(authPlugin, { config });
+  await app.register(eventsPlugin);
   await app.register(githubLinkPlugin, { config });
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });

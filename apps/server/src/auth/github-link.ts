@@ -10,8 +10,9 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
+import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
-import { users } from "../db/schema.js";
+import { enrollments, users } from "../db/schema.js";
 
 const STATE_COOKIE = "hgc_ghlink";
 
@@ -122,6 +123,14 @@ export async function githubLinkPlugin(
         // AU-10 : github_user_id UNIQUE — déjà lié à un autre compte local.
         return reply.redirect("/?github=conflict", 303);
       }
+      const rooms = await app.db
+        .select({ id: enrollments.classroomId })
+        .from(enrollments)
+        .where(eq(enrollments.userId, req.user!.id));
+      publish("github", [
+        `user:${req.user!.id}`,
+        ...rooms.map((r) => `classroom:${r.id}`),
+      ]);
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",

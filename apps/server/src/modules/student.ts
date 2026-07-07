@@ -5,6 +5,7 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../audit.js";
+import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import {
   assignments,
@@ -227,6 +228,7 @@ export async function studentPlugin(
           subjectId: repoRow!.id,
           payload: { repo: result.fullName, invitation: result.invitationStatus },
         });
+        publish("repos", [`classroom:${row.assignment.classroomId}`, `user:${me.id}`]);
         return updated;
       } catch (err) {
         req.log.error({ err }, "provisioning failed");

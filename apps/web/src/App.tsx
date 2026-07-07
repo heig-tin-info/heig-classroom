@@ -28,6 +28,7 @@ import {
   type RosterEntry,
 } from "./api";
 import { AssignmentsCard } from "./AssignmentsCard";
+import { useLiveUpdates } from "./live";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import { applyTheme, initialTheme, type Theme } from "./theme";
@@ -476,6 +477,7 @@ function StudentHome({ me }: { me: Me }) {
 
 export default function App() {
   const me = useMe();
+  useLiveUpdates(me.data != null);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
   return (

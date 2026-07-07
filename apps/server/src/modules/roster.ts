@@ -4,6 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { parseRosterCsv, rosterFromRows, type Cell, type RosterParse } from "@hgc/domain";
 
 import { audit } from "../audit.js";
+import { publish } from "../events.js";
 import type { Db } from "../db/client.js";
 import { enrollments, users } from "../db/schema.js";
 
@@ -79,6 +80,7 @@ export async function claimEnrollments(db: Db, user: { id: string; email: string
         .set({ status: "claimed", userId: user.id, claimedAt: new Date() })
         .where(and(eq(enrollments.id, entry.id), eq(enrollments.status, "pending")));
       claimed += 1;
+      publish("roster", [`classroom:${entry.classroomId}`, `user:${user.id}`]);
       await audit(db, {
         actorUserId: user.id,
         actorType: "system",
@@ -136,6 +138,7 @@ export async function claimForExistingUsers(db: Db, classroomId: string) {
         subjectType: "enrollment",
         subjectId: m.enrollmentId,
       });
+      publish("roster", [`classroom:${classroomId}`, `user:${m.userId}`]);
     } catch {
       await db
         .update(enrollments)
