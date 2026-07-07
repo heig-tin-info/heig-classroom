@@ -12,6 +12,15 @@ import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+/** Dépôt bare : `--git-dir` explicite (compatible `safe.bareRepository=explicit`). */
+function gitBare(gitDir: string, ...args: string[]) {
+  return (
+    execFileSync("git", ["--git-dir", gitDir, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args], {
+      stdio: "pipe",
+    })?.toString() ?? ""
+  );
+}
+
 function git(cwd: string, ...args: string[]) {
   return (
     execFileSync("git", ["-C", cwd, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args], {
@@ -59,9 +68,9 @@ export async function createSquashedRepo(opts: {
       git(work, "clone", "--quiet", "--bare", auth(sourceRepo), "src.git");
       const src = join(work, "src.git");
       const refspecs = branches.map((b) => `refs/heads/${b}:refs/heads/${b}`);
-      git(src, "push", "--quiet", auth(targetRepo), ...refspecs);
+      gitBare(src, "push", "--quiet", auth(targetRepo), ...refspecs);
       for (const b of branches) {
-        heads[b] = git(src, "rev-parse", `refs/heads/${b}`).trim();
+        heads[b] = gitBare(src, "rev-parse", `refs/heads/${b}`).trim();
       }
     } else {
       for (const branch of branches) {

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 import { z } from "zod";
 
 /**
@@ -75,5 +77,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((e) => e.trim().toLowerCase())
       .filter((e) => e.length > 0),
   );
-  return { ...parsed.data, teacherEmails };
+  return {
+    ...parsed.data,
+    // Chemin du PEM absolu dès le chargement : le processus ne dépend plus
+    // de son répertoire de lancement (ADR-010, secret en fichier).
+    GITHUB_APP_PRIVATE_KEY_PATH: parsed.data.GITHUB_APP_PRIVATE_KEY_PATH
+      ? resolve(parsed.data.GITHUB_APP_PRIVATE_KEY_PATH)
+      : "",
+    teacherEmails,
+  };
 }

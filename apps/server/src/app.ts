@@ -46,7 +46,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(githubLinkPlugin, { config });
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
-  await app.register(studentPlugin);
+  await app.register(studentPlugin, { config });
 
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
   if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {

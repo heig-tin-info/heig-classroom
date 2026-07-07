@@ -153,6 +153,41 @@ export const assignments = pgTable(
   ],
 );
 
+export const studentRepos = pgTable(
+  "student_repos",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => assignments.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    githubRepoId: bigint("github_repo_id", { mode: "number" }).unique(),
+    fullName: text("full_name"),
+    defaultBranch: text("default_branch"),
+    provisionStatus: text("provision_status", { enum: ["pending", "ok", "error"] })
+      .notNull()
+      .default("pending"),
+    provisionError: text("provision_error"),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
+    invitationStatus: text("invitation_status", { enum: ["none", "pending", "accepted"] })
+      .notNull()
+      .default("none"),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    rulesetId: bigint("ruleset_id", { mode: "number" }),
+    lastCommitSha: text("last_commit_sha"),
+    lastCommitAt: timestamp("last_commit_at", { withTimezone: true }),
+    ciStatus: text("ci_status", { enum: ["none", "pending", "pass", "fail"] })
+      .notNull()
+      .default("none"),
+  },
+  (t) => [
+    // Clé d'idempotence du provisionnement (GH-20, NFR-09).
+    uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
+  ],
+);
+
 export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   actorUserId: uuid("actor_user_id"),

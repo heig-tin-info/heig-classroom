@@ -40,7 +40,7 @@ export async function installationClient(
   installationId: number,
 ): Promise<InstallationClient> {
   const app = githubApp(config);
-  if (!app) throw new Error("GitHub App non configurée");
+  if (!app) throw new Error("GitHub App is not configured (missing app id or PEM file)");
   const octokit = await app.getInstallationOctokit(installationId);
   const { token } = (await octokit.auth({ type: "installation" })) as { token: string };
   return { octokit, token };

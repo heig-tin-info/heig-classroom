@@ -269,6 +269,38 @@ export async function assignmentsPlugin(
   );
 
   app.post(
+    "/app/api/classrooms/:id/assignments/:aid/publish",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(req, reply);
+      if (!owned) return reply;
+      if (owned.assignment.state !== "draft") {
+        return reply
+          .code(409)
+          .send({ error: "not_draft", message: "Only draft assignments can be published" });
+      }
+      if (owned.assignment.deadlineAt <= new Date()) {
+        return reply
+          .code(400)
+          .send({ error: "deadline_past", message: "Deadline is in the past" });
+      }
+      const [updated] = await app.db
+        .update(assignments)
+        .set({ state: "published" })
+        .where(eq(assignments.id, owned.assignment.id))
+        .returning();
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "assignment.publish",
+        subjectType: "assignment",
+        subjectId: owned.assignment.id,
+      });
+      return updated;
+    },
+  );
+
+  app.post(
     "/app/api/classrooms/:id/assignments/:aid/archive",
     { preHandler: requireTeacher },
     async (req, reply) => {

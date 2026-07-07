@@ -69,20 +69,20 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
     return (
       <tr className="bg-zinc-50 dark:bg-zinc-800/50">
         <td className={cell}>
-          <div className="flex gap-1">
-            <input
-              className={input}
-              aria-label="First name"
-              value={form.prenom}
-              onChange={(e) => setForm({ ...form, prenom: e.target.value })}
-            />
-            <input
-              className={input}
-              aria-label="Last name"
-              value={form.nom}
-              onChange={(e) => setForm({ ...form, nom: e.target.value })}
-            />
-          </div>
+          <input
+            className={input}
+            aria-label="Last name"
+            value={form.nom}
+            onChange={(e) => setForm({ ...form, nom: e.target.value })}
+          />
+        </td>
+        <td className={cell}>
+          <input
+            className={input}
+            aria-label="First name"
+            value={form.prenom}
+            onChange={(e) => setForm({ ...form, prenom: e.target.value })}
+          />
         </td>
         <td className={cell} colSpan={3}>
           <input
@@ -119,9 +119,8 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
 
   return (
     <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-      <td className={`${cell} font-medium`}>
-        {entry.prenom} {entry.nom}
-      </td>
+      <td className={`${cell} font-medium`}>{entry.nom}</td>
+      <td className={cell}>{entry.prenom}</td>
       <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>{entry.email}</td>
       <td className={cell}>
         {entry.conflictFlag ? (
@@ -199,7 +198,8 @@ export function RosterTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-            <th className={`${cell} font-medium`}>Student</th>
+            <th className={`${cell} font-medium`}>Last name</th>
+            <th className={`${cell} font-medium`}>First name</th>
             <th className={`${cell} font-medium`}>E-mail</th>
             <th className={`${cell} font-medium`}>Status</th>
             <th className={`${cell} font-medium`}>GitHub</th>

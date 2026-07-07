@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
+  Send,
   CalendarClock,
   ClipboardList,
   ExternalLink,
@@ -447,6 +448,10 @@ function AssignmentRow({
     mutationFn: () => api(`${base}/archive`, { method: "POST" }),
     onSuccess: invalidate,
   });
+  const publish = useMutation({
+    mutationFn: () => api(`${base}/publish`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
   const remove = useMutation({
     mutationFn: () => api(base, { method: "DELETE" }),
     onSuccess: invalidate,
@@ -467,9 +472,26 @@ function AssignmentRow({
       </span>
       <span className="flex items-center">
         {a.state === "draft" ? (
-          <IconButton label="Edit" onClick={onEdit}>
-            <Pencil className="size-4" />
-          </IconButton>
+          <>
+            <IconButton
+              label="Publish"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Publish “${a.name}”? Students will see it and can accept it.`,
+                  )
+                ) {
+                  publish.mutate();
+                }
+              }}
+              disabled={publish.isPending}
+            >
+              <Send className="size-4" />
+            </IconButton>
+            <IconButton label="Edit" onClick={onEdit}>
+              <Pencil className="size-4" />
+            </IconButton>
+          </>
         ) : null}
         <IconButton
           label="Archive"

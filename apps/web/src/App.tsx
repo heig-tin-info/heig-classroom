@@ -8,6 +8,7 @@ import {
   Clock,
   FolderGit2,
   GraduationCap,
+  Loader2,
   LogOut,
   Moon,
   Plus,
@@ -340,7 +341,83 @@ interface StudentClassroom {
     state: "published" | "locked";
     startAt: string;
     deadlineAt: string;
+    repo: {
+      fullName: string | null;
+      provisionStatus: "pending" | "ok" | "error";
+      invitationStatus: "none" | "pending" | "accepted";
+    } | null;
   }[];
+}
+
+function StudentAssignment({
+  a,
+  githubLinked,
+}: {
+  a: StudentClassroom["assignments"][number];
+  githubLinked: boolean;
+}) {
+  const qc = useQueryClient();
+  const accept = useMutation({
+    mutationFn: () => api(`/app/api/student/assignments/${a.id}/accept`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["student-classrooms"] }),
+  });
+  const acceptError =
+    accept.isError && accept.error instanceof ApiError
+      ? ((accept.error.body as { message?: string })?.message ?? "Acceptance failed")
+      : null;
+
+  return (
+    <li className="space-y-1 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{a.name}</span>
+        {a.state === "locked" ? <Badge tone="red">locked</Badge> : null}
+        <span className="flex-1" />
+        <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
+          <Clock className="size-3.5" /> due {isoDateTime(a.deadlineAt)}
+        </span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        {a.repo?.provisionStatus === "ok" && a.repo.fullName ? (
+          <>
+            <a
+              href={`https://github.com/${a.repo.fullName}`}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+            >
+              <GithubIcon className="size-4" /> Open your repository
+            </a>
+            {a.repo.invitationStatus === "pending" ? (
+              <span className="text-xs text-amber-600 dark:text-amber-400">
+                Accept the GitHub invitation first (check your notifications).
+              </span>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <Button
+              onClick={() => accept.mutate()}
+              disabled={accept.isPending || !githubLinked}
+              title={githubLinked ? undefined : "Link your GitHub account first"}
+            >
+              {accept.isPending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Creating your repository…
+                </>
+              ) : a.repo?.provisionStatus === "error" ? (
+                "Retry acceptance"
+              ) : (
+                "Accept assignment"
+              )}
+            </Button>
+            {acceptError ? (
+              <span className="text-xs text-red-600 dark:text-red-400">{acceptError}</span>
+            ) : null}
+          </>
+        )}
+      </div>
+    </li>
+  );
 }
 
 function StudentHome({ me }: { me: Me }) {
@@ -376,14 +453,7 @@ function StudentHome({ me }: { me: Me }) {
               {room.assignments.length ? (
                 <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
                   {room.assignments.map((a) => (
-                    <li key={a.id} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-                      <span className="font-medium">{a.name}</span>
-                      {a.state === "locked" ? <Badge tone="red">locked</Badge> : null}
-                      <span className="flex-1" />
-                      <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-                        <Clock className="size-3.5" /> due {isoDateTime(a.deadlineAt)}
-                      </span>
-                    </li>
+                    <StudentAssignment key={a.id} a={a} githubLinked={me.githubLogin != null} />
                   ))}
                 </ul>
               ) : (
