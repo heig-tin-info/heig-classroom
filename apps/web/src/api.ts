@@ -26,7 +26,11 @@ export async function api<T>(
   if (init.method && init.method !== "GET") {
     headers.set("x-csrf-token", csrfToken());
   }
-  if (init.body && !init.csv) headers.set("content-type", "application/json");
+  if (init.body instanceof Blob) {
+    headers.set("content-type", init.body.type || "application/octet-stream");
+  } else if (init.body && !init.csv) {
+    headers.set("content-type", "application/json");
+  }
   if (init.csv) {
     headers.set("content-type", "text/csv");
     init.body = init.csv;
@@ -46,6 +50,8 @@ export interface Me {
   role: "teacher" | "student" | "admin";
   githubLogin: string | null;
   lastLoginAt: string | null;
+  avatarUrl: string | null;
+  hasUploadedAvatar: boolean;
 }
 
 export interface ClassroomSummary {
@@ -66,6 +72,8 @@ export interface RosterEntry {
   conflictFlag: boolean;
   githubLogin: string | null;
   lastLoginAt: string | null;
+  avatarUrl: string | null;
+  hasUploadedAvatar: boolean;
 }
 
 export interface ClassroomDetail {

@@ -1,11 +1,23 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { ArrowLeft, GraduationCap, School, ShieldCheck, Unlink } from "lucide-react";
 
 import { AdminPanel } from "./AdminPanel";
+import { AvatarEditor } from "./AvatarEditor";
 import { api, type Me } from "./api";
 import { Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
 
 function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: string }) {
+  if (me.avatarUrl) {
+    return (
+      <img
+        src={me.avatarUrl}
+        alt=""
+        className={`rounded-full object-cover ${className}`}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
   const initials =
     `${me.givenName.charAt(0)}${me.familyName.charAt(0)}`.toUpperCase() || "?";
   return (
@@ -19,6 +31,7 @@ function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: str
 
 export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
   const qc = useQueryClient();
+  const [editingAvatar, setEditingAvatar] = useState(false);
   const unlink = useMutation({
     mutationFn: () => api("/app/auth/github/unlink", { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
@@ -39,7 +52,17 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
       <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
 
       <Card className="flex flex-wrap items-center gap-4 p-5">
-        <Avatar me={me} />
+        <button
+          onClick={() => setEditingAvatar(true)}
+          aria-label="Change profile picture"
+          title="Change profile picture"
+          className="group relative rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          <Avatar me={me} />
+          <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+            Edit
+          </span>
+        </button>
         <div className="min-w-0">
           <p className="text-lg font-medium">
             {me.givenName} {me.familyName}
@@ -95,6 +118,13 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
           </a>
         )}
       </Card>
+
+      {editingAvatar ? (
+        <AvatarEditor
+          hasAvatar={me.hasUploadedAvatar}
+          onClose={() => setEditingAvatar(false)}
+        />
+      ) : null}
 
       {me.role === "admin" ? (
         <div className="border-t border-zinc-200/60 pt-6 dark:border-zinc-800/60">

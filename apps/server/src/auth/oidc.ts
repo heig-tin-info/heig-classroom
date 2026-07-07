@@ -17,6 +17,8 @@ export interface OidcClaims {
   givenName: string;
   familyName: string;
   swissEduId: string | null;
+  /** Claim OIDC `picture` (URL), si l'IdP la fournit. */
+  picture: string | null;
 }
 
 export class OidcProvider {
@@ -114,6 +116,7 @@ export class OidcProvider {
         typeof claims.swissEduPersonUniqueID === "string"
           ? claims.swissEduPersonUniqueID
           : null,
+      picture: typeof claims.picture === "string" ? claims.picture : null,
     };
   }
 }

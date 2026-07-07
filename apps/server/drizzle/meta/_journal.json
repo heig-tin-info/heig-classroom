@@ -43,6 +43,13 @@
       "when": 1783426487982,
       "tag": "0005_teacher-grants",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783427693144,
+      "tag": "0006_avatars",
+      "breakpoints": true
     }
   ]
 }

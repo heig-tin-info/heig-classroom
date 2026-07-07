@@ -15,6 +15,7 @@ import { createDb } from "./db/client.js";
 import { assignmentsPlugin } from "./modules/assignments.js";
 import { publish } from "./events.js";
 import { adminPlugin } from "./modules/admin.js";
+import { avatarPlugin } from "./modules/avatar.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
 import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
@@ -43,6 +44,12 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   app.addContentTypeParser(["text/csv", "text/plain"], { parseAs: "string" }, (_req, body, done) =>
     done(null, body),
   );
+  // Avatars : image binaire brute (≤ 1 Mo, limite Fastify par défaut).
+  app.addContentTypeParser(
+    ["image/jpeg", "image/png", "image/webp"],
+    { parseAs: "buffer" },
+    (_req, body, done) => done(null, body),
+  );
 
   // Toute mutation HTTP réussie émet un indice de rafraîchissement SSE
   // (ADR-005). Les changements hors mutation directe (claim automatique,
@@ -61,6 +68,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(eventsPlugin);
   await app.register(githubLinkPlugin, { config });
   await app.register(adminPlugin, { config });
+  await app.register(avatarPlugin);
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
   await app.register(studentPlugin, { config });

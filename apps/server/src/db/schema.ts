@@ -5,6 +5,7 @@
  * d'idempotence (NFR-09).
  */
 import { sql } from "drizzle-orm";
+import { customType } from "drizzle-orm/pg-core";
 import {
   bigint,
   bigserial,
@@ -30,6 +31,8 @@ export const users = pgTable(
     givenName: text("given_name").notNull().default(""),
     familyName: text("family_name").notNull().default(""),
     swissEduId: text("swiss_edu_id"),
+    /** URL d'avatar fournie par l'IdP (claim OIDC `picture`), si présente. */
+    pictureUrl: text("picture_url"),
     role: text("role", { enum: ["student", "teacher", "admin"] })
       .notNull()
       .default("student"),
@@ -57,6 +60,22 @@ export const sessions = pgTable(
   },
   (t) => [index("sessions_expires_idx").on(t.expiresAt)],
 );
+
+const bytea = customType<{ data: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
+
+/** Avatar téléversé (recadré 256×256 côté client) — prioritaire sur `picture_url`. */
+export const avatars = pgTable("avatars", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  data: bytea("data").notNull(),
+  contentType: text("content_type").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
 
 /**
  * Teachers gérés en base par l'admin (révision de H2, 2026-07-07) : le grant

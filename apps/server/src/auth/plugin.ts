@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { teacherGrants, users } from "../db/schema.js";
+import { avatars, teacherGrants, users } from "../db/schema.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
@@ -59,6 +59,7 @@ async function upsertUser(
       givenName: claims.givenName,
       familyName: claims.familyName,
       swissEduId: claims.swissEduId,
+      pictureUrl: claims.picture,
       role,
       lastLoginAt: now, // AU-27
     })
@@ -70,6 +71,7 @@ async function upsertUser(
         givenName: claims.givenName,
         familyName: claims.familyName,
         swissEduId: claims.swissEduId,
+        pictureUrl: claims.picture,
         role,
         lastLoginAt: now,
       },
@@ -198,6 +200,15 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     { preHandler: (req, reply) => app.requireSession(req, reply) },
     async (req) => {
       const u = req.user!;
+      // Avatar téléversé prioritaire sur le claim IdP ; ?v= casse le cache.
+      const [uploaded] = await app.db
+        .select({ updatedAt: avatars.updatedAt })
+        .from(avatars)
+        .where(eq(avatars.userId, u.id))
+        .limit(1);
+      const avatarUrl = uploaded
+        ? `/app/api/users/${u.id}/avatar?v=${uploaded.updatedAt.getTime()}`
+        : u.pictureUrl;
       return {
         id: u.id,
         email: u.email,
@@ -206,6 +217,8 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
         role: u.role,
         githubLogin: u.githubLogin,
         lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+        avatarUrl,
+        hasUploadedAvatar: Boolean(uploaded),
       };
     },
   );
