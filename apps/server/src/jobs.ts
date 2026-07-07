@@ -51,6 +51,7 @@ export async function startJobs(
 
 declare module "fastify" {
   interface FastifyInstance {
-    boss: PgBoss;
+    /** Absent si le démarrage de la file a échoué (base injoignable au boot). */
+    boss?: PgBoss;
   }
 }

@@ -76,12 +76,18 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(studentPlugin, { config });
 
   // File de jobs + webhooks (M3). Le plugin webhooks est encapsulé : son
-  // parser JSON brut (HMAC) ne fuit pas sur les autres routes.
-  await startJobs(app, {
-    connectionString: config.DATABASE_URL,
-    runWorkers: config.WORKER_MODE !== "web",
-    handler: makeWebhookHandler(app, config),
-  });
+  // parser JSON brut (HMAC) ne fuit pas sur les autres routes. Une base
+  // injoignable au boot ne tue pas le serveur : healthz reste dégradé et
+  // l'endpoint webhook répond 503 jusqu'au redémarrage.
+  try {
+    await startJobs(app, {
+      connectionString: config.DATABASE_URL,
+      runWorkers: config.WORKER_MODE !== "web",
+      handler: makeWebhookHandler(app, config),
+    });
+  } catch (err) {
+    app.log.error({ err }, "pg-boss start failed — job queue disabled");
+  }
   await app.register(webhooksPlugin, { config });
 
   // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).

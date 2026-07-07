@@ -215,7 +215,7 @@ export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppCo
   );
 
   app.post("/webhooks/github", async (req, reply) => {
-    if (!config.GITHUB_WEBHOOK_SECRET) {
+    if (!config.GITHUB_WEBHOOK_SECRET || !app.boss) {
       return reply.code(503).send({ error: "webhooks_unconfigured" });
     }
     const raw = req.body as Buffer;
