@@ -3,6 +3,9 @@
  * et `nonce`, via openid-client (certifié). L'IdP est Switch edu-ID en
  * production, Keycloak local en développement — le code est identique.
  */
+import { createPrivateKey } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import * as oidc from "openid-client";
 
 import type { AppConfig } from "../config.js";
@@ -27,11 +30,30 @@ export class OidcProvider {
     if (this.config) return this.config;
     const execute =
       this.app.NODE_ENV === "production" ? [] : [oidc.allowInsecureRequests];
+    // `private_key_jwt` (SWITCH edu-ID) quand une clé est fournie, sinon
+    // client_secret (Keycloak de dev) — même flux dans les deux cas.
+    let clientAuth: oidc.ClientAuth;
+    if (this.app.OIDC_PRIVATE_KEY_PATH) {
+      const der = createPrivateKey(readFileSync(this.app.OIDC_PRIVATE_KEY_PATH)).export({
+        type: "pkcs8",
+        format: "der",
+      });
+      const key = await crypto.subtle.importKey(
+        "pkcs8",
+        der,
+        { name: "ECDSA", namedCurve: "P-256" },
+        false,
+        ["sign"],
+      );
+      clientAuth = oidc.PrivateKeyJwt({ key, kid: this.app.OIDC_PRIVATE_KEY_KID });
+    } else {
+      clientAuth = oidc.ClientSecretBasic(this.app.OIDC_CLIENT_SECRET);
+    }
     this.config = await oidc.discovery(
       new URL(this.app.OIDC_ISSUER),
       this.app.OIDC_CLIENT_ID,
-      this.app.OIDC_CLIENT_SECRET,
       undefined,
+      clientAuth,
       { execute },
     );
     return this.config;

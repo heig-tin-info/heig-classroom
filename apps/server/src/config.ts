@@ -27,6 +27,13 @@ const EnvSchema = z.object({
   OIDC_ISSUER: z.string().default("http://localhost:8080/realms/hgc-dev"),
   OIDC_CLIENT_ID: z.string().default("hgc-portal"),
   OIDC_CLIENT_SECRET: z.string().default("dev-secret-not-for-production"),
+  /**
+   * Authentification client `private_key_jwt` (recommandée par SWITCH) :
+   * chemin d'une clé privée PKCS8 dont le JWK public est enregistré au
+   * Resource Registry. Vide = client_secret (Keycloak de dev).
+   */
+  OIDC_PRIVATE_KEY_PATH: z.string().default(""),
+  OIDC_PRIVATE_KEY_KID: z.string().default("hgc-eduid-2026"),
 
   /** Signature des cookies d'état de login (pas des sessions, qui vivent en base). */
   COOKIE_SECRET: z.string().min(16).default("dev-cookie-secret-change-me"),
@@ -83,6 +90,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     // de son répertoire de lancement (ADR-010, secret en fichier).
     GITHUB_APP_PRIVATE_KEY_PATH: parsed.data.GITHUB_APP_PRIVATE_KEY_PATH
       ? resolve(parsed.data.GITHUB_APP_PRIVATE_KEY_PATH)
+      : "",
+    OIDC_PRIVATE_KEY_PATH: parsed.data.OIDC_PRIVATE_KEY_PATH
+      ? resolve(parsed.data.OIDC_PRIVATE_KEY_PATH)
       : "",
     teacherEmails,
   };
