@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 
-import { App } from "octokit";
+import { App, Octokit } from "octokit";
 
 import type { AppConfig } from "../config.js";
 
@@ -27,6 +27,23 @@ export function githubApp(config: AppConfig): App | null {
 export interface OrgInstallation {
   installationId: number;
   githubOrgId: number;
+}
+
+export interface InstallationClient {
+  octokit: Octokit;
+  token: string;
+}
+
+/** Octokit authentifié sur une installation + token pour les opérations git. */
+export async function installationClient(
+  config: AppConfig,
+  installationId: number,
+): Promise<InstallationClient> {
+  const app = githubApp(config);
+  if (!app) throw new Error("GitHub App non configurée");
+  const octokit = await app.getInstallationOctokit(installationId);
+  const { token } = (await octokit.auth({ type: "installation" })) as { token: string };
+  return { octokit, token };
 }
 
 /** GET /orgs/{org}/installation — null si l'App n'y est pas installée. */

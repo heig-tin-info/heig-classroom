@@ -15,6 +15,13 @@
       "when": 1783180569553,
       "tag": "0001_jazzy_shiva",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783403212458,
+      "tag": "0002_curious_leo",
+      "breakpoints": true
     }
   ]
 }

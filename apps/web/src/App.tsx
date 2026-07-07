@@ -26,6 +26,7 @@ import {
   type Me,
   type RosterEntry,
 } from "./api";
+import { AssignmentsCard } from "./AssignmentsCard";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import { applyTheme, initialTheme, type Theme } from "./theme";
@@ -215,6 +216,8 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
           </Badge>
         )}
       </div>
+
+      <AssignmentsCard classroomId={room.id} appInstalled={room.org?.installationId != null} />
 
       <Card>
         <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">

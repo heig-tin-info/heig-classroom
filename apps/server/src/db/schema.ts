@@ -11,6 +11,7 @@ import {
   boolean,
   char,
   index,
+  integer,
   jsonb,
   pgTable,
   text,
@@ -102,6 +103,52 @@ export const enrollments = pgTable(
     uniqueIndex("enrollments_classroom_email_uq").on(t.classroomId, t.email),
     uniqueIndex("enrollments_classroom_user_uq").on(t.classroomId, t.userId),
     index("enrollments_email_idx").on(sql`lower(${t.email})`),
+  ],
+);
+
+export const assignments = pgTable(
+  "assignments",
+  {
+    id: uuid("id").primaryKey(),
+    classroomId: uuid("classroom_id")
+      .notNull()
+      .references(() => classrooms.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    /** Cycle de vie US-08 : brouillon → publié → verrouillé. */
+    state: text("state", { enum: ["draft", "published", "locked"] })
+      .notNull()
+      .default("draft"),
+    startAt: timestamp("start_at", { withTimezone: true }).notNull(),
+    deadlineAt: timestamp("deadline_at", { withTimezone: true }).notNull(),
+    graceMinutes: integer("grace_minutes").notNull().default(30),
+    sourceRepoId: bigint("source_repo_id", { mode: "number" }).notNull(),
+    sourceFullName: text("source_full_name").notNull(),
+    squashedRepoId: bigint("squashed_repo_id", { mode: "number" }),
+    squashedFullName: text("squashed_full_name"),
+    sourceStrategy: text("source_strategy", { enum: ["whole", "squash"] })
+      .notNull()
+      .default("squash"),
+    deadlineStrategy: text("deadline_strategy", { enum: ["lock", "commit"] })
+      .notNull()
+      .default("lock"),
+    branches: text("branches").array().notNull(),
+    protectedFiles: text("protected_files").array().notNull(),
+    sourceAheadSha: text("source_ahead_sha"),
+    deadlineAppliedAt: timestamp("deadline_applied_at", { withTimezone: true }),
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("assignments_classroom_slug_uq").on(t.classroomId, t.slug),
+    // Scan du ticker deadline (ADR-006) : publiés, échus, non appliqués.
+    index("assignments_deadline_pending_idx")
+      .on(t.deadlineAt)
+      .where(sql`${t.state} = 'published' AND ${t.deadlineAppliedAt} IS NULL`),
+    // Gel définitif après le délai de grâce (ADR-012).
+    index("assignments_freeze_pending_idx")
+      .on(t.deadlineAt)
+      .where(sql`${t.deadlineAppliedAt} IS NOT NULL AND ${t.frozenAt} IS NULL`),
   ],
 );
 
