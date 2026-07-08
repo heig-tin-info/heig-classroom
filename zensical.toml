@@ -13,6 +13,7 @@ nav = [
   { "Guide" = [
     { "About" = "guide/about.md" },
     { "GitHub applications" = "guide/github-apps.md" },
+    { "Automatic grading" = "guide/grading.md" },
   ] },
   { "Development" = [
     "development/index.md",

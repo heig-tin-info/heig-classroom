@@ -10,6 +10,7 @@ import {
   assignments,
   botCommits,
   classrooms,
+  organizations,
   pushReceipts,
   reverts,
   studentRepos,
@@ -18,6 +19,7 @@ import {
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { revertProtectedFiles } from "../github/revert.js";
+import { ingestCompletedRun, isEligible } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
 
 const MAX_REVERTS_PER_HOUR = 5; // plafond anti-boucle (H10, GH-33)
@@ -36,9 +38,15 @@ interface WorkflowRunPayload {
   action?: string;
   repository?: { id: number };
   workflow_run?: {
+    id?: number;
+    run_attempt?: number;
+    head_branch?: string | null;
     head_sha?: string;
     status?: string;
     conclusion?: string | null;
+    path?: string;
+    check_suite_id?: number;
+    updated_at?: string;
   };
 }
 
@@ -53,10 +61,16 @@ function verifySignature(secret: string, raw: Buffer, header: string | undefined
 
 async function repoContext(db: Db, githubRepoId: number) {
   const [row] = await db
-    .select({ repo: studentRepos, assignment: assignments, classroomId: classrooms.id })
+    .select({
+      repo: studentRepos,
+      assignment: assignments,
+      classroomId: classrooms.id,
+      installationId: organizations.installationId,
+    })
     .from(studentRepos)
     .innerJoin(assignments, eq(studentRepos.assignmentId, assignments.id))
     .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
+    .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
     .where(eq(studentRepos.githubRepoId, githubRepoId))
     .limit(1);
   return row ?? null;
@@ -76,7 +90,7 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
       if (delivery.event === "push") {
         await handlePush(app, config, delivery.payload as PushPayload);
       } else if (delivery.event === "workflow_run") {
-        await handleWorkflowRun(app, delivery.payload as WorkflowRunPayload);
+        await handleWorkflowRun(app, config, delivery.payload as WorkflowRunPayload);
       }
       await app.db
         .update(webhookDeliveries)
@@ -146,14 +160,9 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
 
   const [org, repoName] = ctx.repo.fullName!.split("/") as [string, string];
   const [, squashedName] = (ctx.assignment.squashedFullName ?? "").split("/") as [string, string];
-  const orgRes = await app.db.execute(
-    sql`SELECT installation_id FROM organizations o JOIN classrooms c ON c.org_id = o.id WHERE c.id = ${ctx.classroomId}`,
-  );
-  const installationId = (orgRes.rows[0] as { installation_id: number | null } | undefined)
-    ?.installation_id;
-  if (!installationId || !squashedName) return;
+  if (ctx.installationId === null || !squashedName) return;
 
-  const client = await installationClient(config, installationId);
+  const client = await installationClient(config, ctx.installationId);
   const result = await revertProtectedFiles({
     octokit: client.octokit,
     org,
@@ -184,25 +193,43 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 
-async function handleWorkflowRun(app: FastifyInstance, p: WorkflowRunPayload) {
+/** GR-04/05 : statut pending sur run éligible, ingestion complète au completed. */
+async function handleWorkflowRun(
+  app: FastifyInstance,
+  config: AppConfig,
+  p: WorkflowRunPayload,
+) {
   if (p.action !== "completed" && p.action !== "requested" && p.action !== "in_progress") return;
-  if (!p.repository?.id) return;
+  if (!p.repository?.id || !p.workflow_run) return;
   const ctx = await repoContext(app.db, p.repository.id);
   if (!ctx) return;
   const run = p.workflow_run;
-  const ciStatus =
-    p.action !== "completed"
-      ? ("pending" as const)
-      : run?.conclusion === "success"
-        ? ("pass" as const)
-        : run?.conclusion === "failure"
-          ? ("fail" as const)
-          : ("none" as const);
-  await app.db
-    .update(studentRepos)
-    .set({ ciStatus })
-    .where(eq(studentRepos.id, ctx.repo.id));
+
+  if (!(await isEligible(app, ctx, run.head_branch, run.head_sha))) return;
+
+  if (p.action !== "completed") {
+    await app.db
+      .update(studentRepos)
+      .set({ ciStatus: "pending" })
+      .where(eq(studentRepos.id, ctx.repo.id));
+    publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+    return;
+  }
+
+  if (!run.id || !run.head_sha || !run.head_branch || ctx.installationId === null) return;
+  const client = await installationClient(config, ctx.installationId);
+  await ingestCompletedRun(app, client.octokit, ctx, {
+    workflowRunId: run.id,
+    runAttempt: run.run_attempt ?? 1,
+    headBranch: run.head_branch,
+    headSha: run.head_sha,
+    conclusion: run.conclusion ?? "unknown",
+    path: run.path ?? "",
+    checkSuiteId: run.check_suite_id ?? null,
+    completedAt: run.updated_at ? new Date(run.updated_at) : new Date(),
+  });
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 
 /** Endpoint public : HMAC, dédup, reçu synchrone, enfilage, 200 < 5 s (GH-60). */

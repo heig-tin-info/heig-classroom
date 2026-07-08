@@ -10,10 +10,12 @@ import {
   assignments,
   classrooms,
   enrollments,
+  gradeRuns,
   organizations,
   studentRepos,
   users,
 } from "../db/schema.js";
+import { gradeView, gradeViewsByIds } from "../grading.js";
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { lockStudentRepo, unlockStudentRepo } from "../github/lock.js";
@@ -313,6 +315,11 @@ export async function assignmentsPlugin(
           .update(assignments)
           .set({ state: "published", deadlineAppliedAt: null, frozenAt: null })
           .where(eq(assignments.id, updated.id));
+        // Le gel provisoire n'a plus de sens : il sera reposé à la nouvelle échéance.
+        await app.db
+          .update(studentRepos)
+          .set({ frozenGradeRunId: null })
+          .where(eq(studentRepos.assignmentId, updated.id));
         await audit(app.db, {
           actorUserId: req.user!.id,
           actorType: "user",
@@ -358,6 +365,12 @@ export async function assignmentsPlugin(
         .select()
         .from(studentRepos)
         .where(eq(studentRepos.assignmentId, a.id));
+
+      // Notes courantes et gelées (GR-11) en une requête.
+      const grades = await gradeViewsByIds(
+        app,
+        repos.flatMap((r) => [r.currentGradeRunId, r.frozenGradeRunId]),
+      );
 
       const live = new Map<string, RepoLiveState>();
 
@@ -406,6 +419,12 @@ export async function assignmentsPlugin(
                   invitationStatus: repo.invitationStatus,
                   acceptedAt: repo.acceptedAt,
                   lockedAt: repo.lockedAt,
+                  grade: repo.currentGradeRunId
+                    ? (grades.get(repo.currentGradeRunId) ?? null)
+                    : null,
+                  frozenGrade: repo.frozenGradeRunId
+                    ? (grades.get(repo.frozenGradeRunId) ?? null)
+                    : null,
                   ...(live.get(repo.id) ?? {
                     lastCommitSha: repo.lastCommitSha,
                     lastCommitAt: repo.lastCommitAt,
@@ -418,6 +437,45 @@ export async function assignmentsPlugin(
               : null,
           };
         }),
+      };
+    },
+  );
+
+  // --- Historique des GradeRuns d'un dépôt (GR-11/13, badge après-deadline) ---
+  app.get(
+    "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-runs",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(req, reply);
+      if (!owned) return reply;
+      const params = z.object({ rid: z.uuid() }).safeParse(req.params);
+      if (!params.success) return reply.code(404).send({ error: "not_found" });
+      const [repo] = await app.db
+        .select()
+        .from(studentRepos)
+        .where(
+          and(
+            eq(studentRepos.id, params.data.rid),
+            eq(studentRepos.assignmentId, owned.assignment.id),
+          ),
+        )
+        .limit(1);
+      if (!repo) return reply.code(404).send({ error: "not_found" });
+      const runs = await app.db
+        .select()
+        .from(gradeRuns)
+        .where(eq(gradeRuns.studentRepoId, repo.id))
+        .orderBy(desc(gradeRuns.completedAt))
+        .limit(100);
+      return {
+        currentGradeRunId: repo.currentGradeRunId,
+        frozenGradeRunId: repo.frozenGradeRunId,
+        runs: runs.map((r) => ({
+          id: r.id,
+          workflowRunId: r.workflowRunId,
+          runAttempt: r.runAttempt,
+          ...gradeView(r),
+        })),
       };
     },
   );

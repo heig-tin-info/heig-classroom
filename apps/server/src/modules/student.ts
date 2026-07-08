@@ -17,6 +17,7 @@ import {
 } from "../db/schema.js";
 import { installationClient } from "../github/app.js";
 import { provisionStudentRepo } from "../github/provision.js";
+import { gradeViewsByIds } from "../grading.js";
 import { claimEnrollments } from "./roster.js";
 
 /**
@@ -98,6 +99,13 @@ export async function studentPlugin(
             )
         : [];
 
+      // GR-10 : note indicative (courante, ou gelée dès que la deadline est
+      // appliquée — GR-12/13).
+      const grades = await gradeViewsByIds(
+        app,
+        repos.flatMap((sr) => [sr.currentGradeRunId, sr.frozenGradeRunId]),
+      );
+
       return rooms.map((r) => ({
         id: r.id,
         name: r.name,
@@ -107,6 +115,12 @@ export async function studentPlugin(
           .filter((a) => a.classroomId === r.id)
           .map((a) => {
             const repo = repos.find((sr) => sr.assignmentId === a.id);
+            const frozen = a.state === "locked";
+            const gradeRunId = repo
+              ? frozen
+                ? repo.frozenGradeRunId
+                : repo.currentGradeRunId
+              : null;
             return {
               ...a,
               repo: repo
@@ -114,6 +128,9 @@ export async function studentPlugin(
                     fullName: repo.fullName,
                     provisionStatus: repo.provisionStatus,
                     invitationStatus: repo.invitationStatus,
+                    ciStatus: repo.ciStatus,
+                    grade: gradeRunId ? (grades.get(gradeRunId) ?? null) : null,
+                    gradeFrozen: frozen,
                   }
                 : null,
             };

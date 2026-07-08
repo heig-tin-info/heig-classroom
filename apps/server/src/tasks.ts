@@ -21,6 +21,7 @@ import {
 import { publish } from "./events.js";
 import { githubApp, installationClient } from "./github/app.js";
 import { fetchRepoLiveState } from "./github/metrics.js";
+import { ingestCompletedRun, type RepoCtx } from "./grading.js";
 import { WEBHOOK_QUEUE } from "./jobs.js";
 
 export interface TaskDef {
@@ -34,6 +35,14 @@ export interface TaskDef {
 }
 
 export const TASK_DEFS: TaskDef[] = [
+  {
+    key: "reconcile.grades",
+    description:
+      "Re-read CI runs of repositories quiet for more than 30 minutes and capture missed grades (GR-07).",
+    defaultIntervalMinutes: 15,
+    webhookWoken: true,
+    run: reconcileGrades,
+  },
   {
     key: "reconcile.repos",
     description:
@@ -101,6 +110,86 @@ export async function runTask(app: FastifyInstance, config: AppConfig, key: stri
       .where(eq(scheduledTasks.key, key));
   }
   publish("tasks", ["admin"]);
+}
+
+/**
+ * GR-07 : re-interroge les runs des dépôts silencieux depuis plus de 30 min
+ * (aucun webhook push ni GradeRun récent) — le pipeline GR-05 est réutilisé
+ * à l'identique via `ingestCompletedRun` (idempotent par (repo, run, attempt)).
+ */
+async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise<string> {
+  const QUIET_MINUTES = 30;
+  const rows = await app.db
+    .select({
+      repo: studentRepos,
+      assignment: assignments,
+      classroomId: classrooms.id,
+      installationId: organizations.installationId,
+    })
+    .from(studentRepos)
+    .innerJoin(assignments, eq(studentRepos.assignmentId, assignments.id))
+    .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
+    .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
+    .where(
+      and(
+        eq(studentRepos.provisionStatus, "ok"),
+        isNotNull(studentRepos.fullName),
+        isNotNull(organizations.installationId),
+        isNull(assignments.archivedAt),
+        ne(assignments.state, "draft"),
+        sql`coalesce(
+          greatest(
+            (SELECT max(pr.received_at) FROM push_receipts pr WHERE pr.student_repo_id = ${studentRepos.id}),
+            (SELECT max(gr.created_at) FROM grade_runs gr WHERE gr.student_repo_id = ${studentRepos.id})
+          ),
+          to_timestamp(0)
+        ) < now() - make_interval(mins => ${QUIET_MINUTES})`,
+      ),
+    );
+  const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
+  const touched = new Set<string>();
+  let ingested = 0;
+  for (const { repo, assignment, classroomId, installationId } of rows) {
+    let client = clients.get(installationId!);
+    if (!client) {
+      client = await installationClient(config, installationId!);
+      clients.set(installationId!, client);
+    }
+    const ctx: RepoCtx = { repo, assignment, classroomId };
+    const [owner, repoName] = repo.fullName!.split("/") as [string, string];
+    try {
+      const { data } = await client.octokit.request("GET /repos/{owner}/{repo}/actions/runs", {
+        owner,
+        repo: repoName,
+        per_page: 20,
+        status: "completed",
+      });
+      for (const run of data.workflow_runs) {
+        const id = await ingestCompletedRun(app, client.octokit, ctx, {
+          workflowRunId: run.id,
+          runAttempt: run.run_attempt ?? 1,
+          headBranch: run.head_branch ?? "",
+          headSha: run.head_sha,
+          conclusion: run.conclusion ?? "unknown",
+          path: run.path,
+          checkSuiteId: run.check_suite_id ?? null,
+          completedAt: new Date(run.updated_at),
+        });
+        if (id) {
+          ingested += 1;
+          touched.add(`classroom:${classroomId}`);
+          touched.add(`user:${repo.userId}`);
+        }
+      }
+    } catch (err) {
+      app.log.warn({ err, repo: repo.fullName }, "reconcile.grades: repo fetch failed");
+    }
+  }
+  if (touched.size > 0) {
+    publish("grades", [...touched]);
+    publish("repos", [...touched]);
+  }
+  return `${rows.length} quiet repositories checked, ${ingested} runs captured`;
 }
 
 /** GR-15 en secours : mêmes métriques que la vue détail, source réconciliation. */

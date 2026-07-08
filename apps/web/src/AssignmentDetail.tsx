@@ -1,19 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   ArrowLeft,
   CalendarClock,
   CheckCircle2,
   Clock,
   ExternalLink,
   GitCommitHorizontal,
+  History,
   Lock,
   LockOpen,
   RefreshCw,
+  Snowflake,
   XCircle,
 } from "lucide-react";
+import { useState } from "react";
 
 import { api } from "./api";
-import { Badge, Button, GithubIcon, isoDateTime } from "./ui";
+import { Badge, Button, GithubIcon, isoDateTime, Modal } from "./ui";
+
+export interface GradeView {
+  points: number | null;
+  max: number | null;
+  parseStatus: "ok" | "no_annotation" | "malformed" | "multiple" | "fallback";
+  conclusion: string;
+  sha: string;
+  branch: string;
+  afterDeadline: boolean;
+  completedAt: string;
+}
 
 interface DetailStudent {
   enrollmentId: string;
@@ -29,6 +44,8 @@ interface DetailStudent {
     invitationStatus: "none" | "pending" | "accepted";
     acceptedAt: string;
     lockedAt: string | null;
+    grade: GradeView | null;
+    frozenGrade: GradeView | null;
     lastCommitSha: string | null;
     lastCommitAt: string | null;
     commitCount: number | null;
@@ -73,17 +90,155 @@ function CiBadge({ s }: { s: DetailStudent["repo"] }) {
   );
 }
 
+/** Note x/y (GR-11) : gelée (flocon) dès que la deadline est appliquée. */
+export function GradeBadge({
+  grade,
+  frozen,
+}: {
+  grade: GradeView | null;
+  frozen: boolean;
+}) {
+  if (!grade) return <span className="text-zinc-400">—</span>;
+  if (grade.parseStatus === "ok") {
+    return (
+      <Badge tone={frozen ? "zinc" : "green"} icon={frozen ? Snowflake : undefined}>
+        {grade.points}/{grade.max}
+      </Badge>
+    );
+  }
+  if (grade.parseStatus === "fallback") return <span className="text-zinc-400">—</span>;
+  return (
+    <Badge tone="amber" icon={AlertTriangle}>
+      {grade.parseStatus === "multiple" ? "multiple GRADE" : grade.parseStatus.replace("_", " ")}
+    </Badge>
+  );
+}
+
+interface HistoryRun extends GradeView {
+  id: string;
+  workflowRunId: number;
+  runAttempt: number;
+}
+
+/** Historique des passes CI d'un étudiant (GR-11/13). */
+function GradeHistoryModal({
+  classroomId,
+  assignmentId,
+  repoId,
+  fullName,
+  student,
+  onClose,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  repoId: string;
+  fullName: string | null;
+  student: string;
+  onClose: () => void;
+}) {
+  const history = useQuery<{
+    currentGradeRunId: string | null;
+    frozenGradeRunId: string | null;
+    runs: HistoryRun[];
+  }>({
+    queryKey: ["grade-runs", repoId],
+    queryFn: () =>
+      api(
+        `/app/api/classrooms/${classroomId}/assignments/${assignmentId}/repos/${repoId}/grade-runs`,
+      ),
+  });
+  const d = history.data;
+  return (
+    <Modal title={`Grade history — ${student}`} onClose={onClose}>
+      {history.isLoading ? (
+        <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+      ) : !d || d.runs.length === 0 ? (
+        <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
+          No CI run captured yet.
+        </p>
+      ) : (
+        <div className="max-h-96 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                <th className={cell}>Run</th>
+                <th className={cell}>Commit</th>
+                <th className={cell}>Grade</th>
+                <th className={cell}>Conclusion</th>
+                <th className={cell} />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {d.runs.map((r) => (
+                <tr key={r.id}>
+                  <td className={`${cell} whitespace-nowrap text-zinc-500 dark:text-zinc-400`}>
+                    {isoDateTime(r.completedAt)}
+                    {r.runAttempt > 1 ? (
+                      <span className="ml-1 text-xs text-zinc-400">#{r.runAttempt}</span>
+                    ) : null}
+                  </td>
+                  <td className={`${cell} font-mono text-xs`}>
+                    {fullName ? (
+                      <a
+                        href={`https://github.com/${fullName}/commit/${r.sha}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:underline"
+                      >
+                        {r.sha.slice(0, 7)}
+                      </a>
+                    ) : (
+                      r.sha.slice(0, 7)
+                    )}
+                    <span className="ml-1 text-zinc-400">{r.branch}</span>
+                  </td>
+                  <td className={cell}>
+                    <GradeBadge grade={r} frozen={false} />
+                  </td>
+                  <td className={cell}>
+                    {r.conclusion === "success" ? (
+                      <Badge tone="green" icon={CheckCircle2}>
+                        success
+                      </Badge>
+                    ) : (
+                      <Badge tone="red" icon={XCircle}>
+                        {r.conclusion}
+                      </Badge>
+                    )}
+                  </td>
+                  <td className={`${cell} whitespace-nowrap`}>
+                    {r.id === d.frozenGradeRunId ? (
+                      <Badge tone="zinc" icon={Snowflake}>
+                        frozen
+                      </Badge>
+                    ) : null}
+                    {r.afterDeadline ? <Badge tone="amber">after deadline</Badge> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 const cell = "px-3 py-2";
 
 function StudentRow({
   classroomId,
   assignmentId,
+  frozen,
   s,
 }: {
   classroomId: string;
   assignmentId: string;
+  /** Deadline appliquée (state locked) : la note affichée est la note gelée. */
+  frozen: boolean;
   s: DetailStudent;
 }) {
+  const [showHistory, setShowHistory] = useState(false);
   const qc = useQueryClient();
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ["assignment-detail", assignmentId] });
@@ -152,6 +307,31 @@ function StudentRow({
       <td className={`${cell} text-right`}>{r?.commitCount ?? "—"}</td>
       <td className={cell}>
         <CiBadge s={r} />
+      </td>
+      <td className={`${cell} whitespace-nowrap`}>
+        <span className="inline-flex items-center gap-1">
+          <GradeBadge grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
+          {r?.provisionStatus === "ok" ? (
+            <button
+              aria-label="Grade history"
+              title="Grade history"
+              onClick={() => setShowHistory(true)}
+              className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <History className="size-3.5" />
+            </button>
+          ) : null}
+        </span>
+        {showHistory && r ? (
+          <GradeHistoryModal
+            classroomId={classroomId}
+            assignmentId={assignmentId}
+            repoId={r.id}
+            fullName={r.fullName}
+            student={`${s.prenom} ${s.nom}`.trim()}
+            onClose={() => setShowHistory(false)}
+          />
+        ) : null}
       </td>
       <td className={`${cell} text-right whitespace-nowrap`}>
         {r?.provisionStatus === "ok" && r.fullName ? (
@@ -257,6 +437,7 @@ export function AssignmentDetail({
               <th className={`${cell} font-medium`}>Date</th>
               <th className={`${cell} font-medium text-right`}>Commits</th>
               <th className={`${cell} font-medium`}>Checks</th>
+              <th className={`${cell} font-medium`}>Grade</th>
               <th className={cell} aria-label="Actions" />
             </tr>
           </thead>
@@ -266,6 +447,7 @@ export function AssignmentDetail({
                 key={s.enrollmentId}
                 classroomId={classroomId}
                 assignmentId={assignmentId}
+                frozen={a.state === "locked"}
                 s={s}
               />
             ))}

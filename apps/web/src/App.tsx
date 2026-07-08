@@ -31,6 +31,7 @@ import {
   type Me,
   type RosterEntry,
 } from "./api";
+import type { GradeView } from "./AssignmentDetail";
 import { AssignmentsCard } from "./AssignmentsCard";
 import { useLiveUpdates } from "./live";
 import { RosterImport } from "./RosterImport";
@@ -534,6 +535,9 @@ interface StudentClassroom {
       fullName: string | null;
       provisionStatus: "pending" | "ok" | "error";
       invitationStatus: "none" | "pending" | "accepted";
+      ciStatus: "none" | "pending" | "pass" | "fail";
+      grade: GradeView | null;
+      gradeFrozen: boolean;
     } | null;
   }[];
 }
@@ -580,6 +584,33 @@ function StudentAssignment({
               <span className="text-xs text-amber-600 dark:text-amber-400">
                 Accept the GitHub invitation first (check your notifications).
               </span>
+            ) : null}
+            {a.repo.ciStatus === "pending" ? (
+              <Badge tone="amber" icon={Loader2}>
+                CI running
+              </Badge>
+            ) : a.repo.grade && a.repo.grade.parseStatus === "ok" ? (
+              <span
+                className="inline-flex items-center gap-1.5"
+                title={`Evaluated commit ${a.repo.grade.sha.slice(0, 7)} — ${isoDateTime(a.repo.grade.completedAt)}. Indicative grade, not contractual.`}
+              >
+                <Badge tone={a.repo.gradeFrozen ? "zinc" : "green"}>
+                  {a.repo.gradeFrozen ? "final " : ""}grade {a.repo.grade.points}/{a.repo.grade.max}
+                </Badge>
+                <a
+                  href={`https://github.com/${a.repo.fullName}/commit/${a.repo.grade.sha}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-mono text-xs text-zinc-400 hover:underline"
+                >
+                  {a.repo.grade.sha.slice(0, 7)}
+                </a>
+                <span className="text-xs text-zinc-400">indicative, not contractual</span>
+              </span>
+            ) : a.repo.ciStatus === "pass" ? (
+              <Badge tone="green">CI pass</Badge>
+            ) : a.repo.ciStatus === "fail" ? (
+              <Badge tone="red">CI fail</Badge>
             ) : null}
           </>
         ) : (

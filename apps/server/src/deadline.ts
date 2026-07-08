@@ -14,6 +14,7 @@ import { publish } from "./events.js";
 import { installationClient } from "./github/app.js";
 import { pushEmptyCommit, zurichIso } from "./github/commit.js";
 import { lockStudentRepo } from "./github/lock.js";
+import { selectGradeRun } from "./grading.js";
 
 export interface DeadlineJob {
   assignmentId: string;
@@ -57,6 +58,21 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
           isNotNull(studentRepos.fullName),
         ),
       );
+
+    // Gel provisoire (GR-12) : la note courante au moment de la deadline.
+    // Pendant la grâce, les runs sur commits reçus avant la deadline peuvent
+    // encore l'améliorer (GR-14.4, via refreshGradeSelection) ; `frozen_at`
+    // la fige définitivement.
+    if (!a.frozenAt) {
+      for (const repo of repos) {
+        const selected = await selectGradeRun(app, repo.id);
+        await app.db
+          .update(studentRepos)
+          .set({ frozenGradeRunId: selected })
+          .where(eq(studentRepos.id, repo.id));
+      }
+    }
+
     if (repos.length === 0 || row.installationId === null) {
       publish("assignments", [`classroom:${row.classroomId}`]);
       return;

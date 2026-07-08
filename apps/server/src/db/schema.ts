@@ -11,6 +11,7 @@ import {
   bigserial,
   boolean,
   char,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -219,10 +220,48 @@ export const studentRepos = pgTable(
     ciStatus: text("ci_status", { enum: ["none", "pending", "pass", "fail"] })
       .notNull()
       .default("none"),
+    /** GradeRun retenu (GR-09) — pas de FK : référence croisée avec grade_runs. */
+    currentGradeRunId: uuid("current_grade_run_id"),
+    /** Note gelée à la deadline (GR-12), immuable après deadline+grace (GR-14.4). */
+    frozenGradeRunId: uuid("frozen_grade_run_id"),
   },
   (t) => [
     // Clé d'idempotence du provisionnement (GH-20, NFR-09).
     uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
+  ],
+);
+
+/**
+ * Passes CI capturées (GR-08) : un enregistrement immuable par run éligible
+ * (branche sélectionnée, commit non-bot). L'unicité (repo, run, attempt) est
+ * l'idempotence — webhook rejoué ou réconciliation ne dupliquent jamais.
+ */
+export const gradeRuns = pgTable(
+  "grade_runs",
+  {
+    id: uuid("id").primaryKey(),
+    studentRepoId: uuid("student_repo_id")
+      .notNull()
+      .references(() => studentRepos.id, { onDelete: "cascade" }),
+    workflowRunId: bigint("workflow_run_id", { mode: "number" }).notNull(),
+    runAttempt: integer("run_attempt").notNull().default(1),
+    headBranch: text("head_branch").notNull(),
+    headSha: char("head_sha", { length: 40 }).notNull(),
+    conclusion: text("conclusion").notNull(),
+    gradePoints: doublePrecision("grade_points"),
+    gradeMax: doublePrecision("grade_max"),
+    parseStatus: text("parse_status", {
+      enum: ["ok", "no_annotation", "malformed", "multiple", "fallback"],
+    }).notNull(),
+    /** Critère GR-14 : heure de réception serveur du commit, jamais git. */
+    afterDeadline: boolean("after_deadline").notNull().default(false),
+    completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("grade_runs_repo_run_attempt_uq").on(t.studentRepoId, t.workflowRunId, t.runAttempt),
+    // Sélection GR-09 : le plus récent éligible par dépôt.
+    index("grade_runs_selection_idx").on(t.studentRepoId, t.completedAt),
   ],
 );
 
