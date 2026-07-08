@@ -14,10 +14,11 @@ import {
   Clock,
   ExternalLink,
   FolderGit2,
-  GraduationCap,
   LayoutGrid,
   List,
   Loader2,
+  Lock,
+  GitCommitHorizontal,
   LogOut,
   Moon,
   Plus,
@@ -28,7 +29,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   api,
@@ -40,8 +41,11 @@ import {
 } from "./api";
 import type { GradeView } from "./AssignmentDetail";
 import { AssignmentDetail } from "./AssignmentDetail";
+import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
+import { formatDuration, useI18n, useT } from "./i18n";
+import { OctocatGrad } from "./Logo";
 import { useRoute, type Route } from "./router";
 import { TimelineView } from "./Timeline";
 import { AssignmentsCard } from "./AssignmentsCard";
@@ -70,41 +74,38 @@ function useMe() {
 function Logo({ className = "size-6" }: { className?: string }) {
   return (
     <span className="inline-flex items-center justify-center rounded-lg bg-accent p-1.5 text-white">
-      <GraduationCap className={className} />
+      <OctocatGrad className={className} />
     </span>
   );
 }
 
 function Landing() {
+  const t = useT();
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center gap-6 px-4">
       <Logo className="size-10" />
       <div className="text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">HEIG GitHub Classroom</h1>
-        <p className="mt-2 max-w-md text-zinc-500 dark:text-zinc-400">
-          Practical work on GitHub: individual repositories, automatic deadlines and an
-          indicative grade after every CI run.
-        </p>
+        <h1 className="text-3xl font-semibold tracking-tight">{t("app.title")}</h1>
+        <p className="mt-2 max-w-md text-zinc-500 dark:text-zinc-400">{t("landing.tagline")}</p>
       </div>
       <a
         href="/app/auth/login"
         className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover hover:shadow-md"
       >
-        Sign in with Switch edu-ID
+        {t("landing.signin")}
       </a>
-      <p className="text-xs text-zinc-400 dark:text-zinc-500">
-        HEIG-VD — TIN Department
-      </p>
+      <p className="text-xs text-zinc-400 dark:text-zinc-500">{t("landing.footer")}</p>
     </main>
   );
 }
 
 function ThemeToggle() {
+  const t = useT();
   const [theme, setTheme] = useState<Theme>(initialTheme);
   return (
     <Button
       variant="ghost"
-      aria-label="Toggle theme"
+      aria-label={t("menu.toggleTheme")}
       onClick={() => {
         const next = theme === "dark" ? "light" : "dark";
         setTheme(next);
@@ -118,6 +119,7 @@ function ThemeToggle() {
 
 /** Return banner for the linking flow (?github=linked|conflict|error). */
 function GithubBanner() {
+  const t = useT();
   const [status] = useState(() => {
     const s = new URLSearchParams(window.location.search).get("github");
     if (s) window.history.replaceState(null, "", "/");
@@ -127,21 +129,20 @@ function GithubBanner() {
   if (status === "linked") {
     return (
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">
-        <CheckCircle2 className="size-4" /> GitHub account linked.
+        <CheckCircle2 className="size-4" /> {t("github.linked")}
       </div>
     );
   }
   return (
     <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-500/10 dark:text-red-300">
       <AlertTriangle className="size-4" />
-      {status === "conflict"
-        ? "This GitHub account is already linked to another user."
-        : "GitHub linking failed — try again."}
+{status === "conflict" ? t("github.conflict") : t("github.failed")}
     </div>
   );
 }
 
 function UserMenu({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const logout = useMutation({
@@ -152,7 +153,7 @@ function UserMenu({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        aria-label="User menu"
+        aria-label={t("menu.user")}
         aria-expanded={open}
         className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-zinc-100 dark:hover:bg-zinc-800"
       >
@@ -173,13 +174,13 @@ function UserMenu({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }
               }}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <SettingsIcon className="size-4 text-zinc-400" /> Settings
+              <SettingsIcon className="size-4 text-zinc-400" /> {t("menu.settings")}
             </button>
             <button
               onClick={() => logout.mutate()}
               className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >
-              <LogOut className="size-4 text-zinc-400" /> Sign out
+              <LogOut className="size-4 text-zinc-400" /> {t("menu.signout")}
             </button>
           </div>
         </>
@@ -197,6 +198,7 @@ function Header({
   onOpenSettings: () => void;
   onHome: () => void;
 }) {
+  const t = useT();
   return (
     <header className="sticky top-0 z-10 bg-white/80 shadow-[0_1px_8px_rgb(0_0_0/0.06)] backdrop-blur dark:bg-zinc-950/80 dark:shadow-[0_1px_8px_rgb(0_0_0/0.4)]">
       <div className="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4">
@@ -213,8 +215,8 @@ function Header({
           href="https://github.com/heig-tin-info/heig-classroom"
           target="_blank"
           rel="noreferrer"
-          aria-label="Project sources on GitHub"
-          title="Project sources on GitHub"
+          aria-label={t("header.sources")}
+          title={t("header.sources")}
           className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
         >
           <GithubIcon className="size-4" />
@@ -223,8 +225,8 @@ function Header({
           href="https://heig-tin-info.github.io/heig-classroom/"
           target="_blank"
           rel="noreferrer"
-          aria-label="Documentation"
-          title="Documentation"
+          aria-label={t("header.docs")}
+          title={t("header.docs")}
           className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
         >
           <BookOpen className="size-4" />
@@ -366,6 +368,7 @@ function AssignmentPage({
   assignmentId: string;
   navigate: (r: Route) => void;
 }) {
+  const t = useT();
   const room = useQuery<ClassroomDetail>({
     queryKey: ["classroom", classroomId],
     queryFn: () => api(`/app/api/classrooms/${classroomId}`),
@@ -374,12 +377,12 @@ function AssignmentPage({
     <div className="space-y-4">
       <Breadcrumb
         items={[
-          { label: "Classrooms", onClick: () => navigate({ view: "home" }) },
+          { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
           {
             label: room.data?.name ?? "…",
             onClick: () => navigate({ view: "classroom", id: classroomId }),
           },
-          { label: "Assignment" },
+          { label: t("nav.assignment") },
         ]}
       />
       <Card className="p-4">
@@ -390,6 +393,7 @@ function AssignmentPage({
 }
 
 function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
+  const t = useT();
   const [showSettings, setShowSettings] = useState(false);
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
@@ -404,7 +408,7 @@ function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => v
     <div className="space-y-4">
       <Breadcrumb
         items={[
-          { label: "Classrooms", onClick: () => navigate({ view: "home" }) },
+          { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
           { label: room.name },
         ]}
       />
@@ -472,13 +476,14 @@ type ClassroomsViewMode = "cards" | "list" | "timeline";
 
 /** Hover popover on the student badges: the roster at a glance. */
 function RosterPopover({ room, children }: { room: ClassroomSummary; children: React.ReactNode }) {
+  const t = useT();
   return (
     <span className="group/pop relative inline-flex">
       {children}
       {room.roster.length > 0 ? (
         <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-64 rounded-xl bg-white p-3 text-left shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
-            Roster
+            {t("classrooms.roster")}
           </span>
           <span className="grid max-h-56 gap-0.5 overflow-hidden text-xs">
             {room.roster.slice(0, 16).map((s, i) => (
@@ -492,7 +497,7 @@ function RosterPopover({ room, children }: { room: ClassroomSummary; children: R
               </span>
             ))}
             {room.roster.length > 16 ? (
-              <span className="text-zinc-400">… and {room.roster.length - 16} more</span>
+              <span className="text-zinc-400">{t("classrooms.andMore", { n: room.roster.length - 16 })}</span>
             ) : null}
           </span>
         </span>
@@ -524,6 +529,7 @@ function ClassroomsList({
   rooms: ClassroomSummary[];
   onOpen: (id: string) => void;
 }) {
+  const t = useT();
   type Key = "name" | "org" | "students" | "claimed" | "assignments" | "createdAt";
   const [sortKey, setSortKey] = useState<Key>("name");
   const [dir, setDir] = useState<1 | -1>(1);
@@ -575,18 +581,18 @@ function ClassroomsList({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-              <Th k="name">Name</Th>
-              <Th k="org">Organization</Th>
+              <Th k="name">{t("classrooms.col.name")}</Th>
+              <Th k="org">{t("classrooms.col.org")}</Th>
               <Th k="students" right>
-                Students
+                {t("classrooms.col.students")}
               </Th>
               <Th k="claimed" right>
-                Claimed
+                {t("classrooms.col.claimed")}
               </Th>
               <Th k="assignments" right>
-                Assignments
+                {t("classrooms.col.assignments")}
               </Th>
-              <Th k="createdAt">Created</Th>
+              <Th k="createdAt">{t("classrooms.col.created")}</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -624,6 +630,7 @@ function ClassroomsList({
 }
 
 function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [org, setOrg] = useState("");
@@ -678,24 +685,24 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("classrooms.title")}</h1>
         <HelpIcon topic="classrooms" />
         <span className="flex-1" />
         <label className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
           <input
             type="search"
-            placeholder="Search…"
+            placeholder={t("common.search")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-            aria-label="Search classrooms"
+            aria-label={t("common.search")}
           />
         </label>
         <span className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
-          {toggle("cards", LayoutGrid, "Card view")}
-          {toggle("list", List, "List view")}
-          {toggle("timeline", CalendarRange, "Timeline view")}
+          {toggle("cards", LayoutGrid, t("view.cards"))}
+          {toggle("list", List, t("view.list"))}
+          {toggle("timeline", CalendarRange, t("view.timeline"))}
         </span>
       </div>
 
@@ -733,16 +740,16 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                   <div className="mt-3 flex flex-wrap gap-2">
                     <RosterPopover room={c}>
                       <Badge tone="zinc" icon={Users}>
-                        {c.students} student{c.students === 1 ? "" : "s"}
+                        {t(c.students === 1 ? "classrooms.students.one" : "classrooms.students", { n: c.students })}
                       </Badge>
                     </RosterPopover>
                     <RosterPopover room={c}>
                       <Badge tone="green" icon={CheckCircle2}>
-                        {c.claimed} claimed
+                        {t("classrooms.claimed", { n: c.claimed })}
                       </Badge>
                     </RosterPopover>
                     <Badge tone="zinc" icon={ClipboardList}>
-                      {c.assignments.length} assignment{c.assignments.length === 1 ? "" : "s"}
+                      {t(c.assignments.length === 1 ? "classrooms.assignments.one" : "classrooms.assignments", { n: c.assignments.length })}
                     </Badge>
                   </div>
                 </Card>
@@ -752,8 +759,8 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
         )
       ) : (
         <Card>
-          <EmptyState icon={School} title="No classrooms">
-            Create your first classroom to distribute assignments to your students.
+          <EmptyState icon={School} title={t("classrooms.empty.title")}>
+            {t("classrooms.empty.body")}
           </EmptyState>
         </Card>
       )}
@@ -761,7 +768,7 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
       <Card className="p-4">
         <div className="mb-3 flex items-center gap-2">
           <Plus className="size-4 text-zinc-400" />
-          <h2 className="font-medium">New classroom</h2>
+          <h2 className="font-medium">{t("classrooms.new")}</h2>
           <HelpIcon topic="new-classroom" />
         </div>
         <form
@@ -772,7 +779,7 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
           }}
         >
           <Field
-            label="Name"
+            label={t("classrooms.name")}
             placeholder="PRG1 2026"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -781,7 +788,7 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
           {installedOrgs.data?.length && !customOrg ? (
             <label className="flex flex-col gap-1 text-sm">
               <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                GitHub organization
+                {t("classrooms.org")}
               </span>
               <select
                 className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
@@ -797,19 +804,19 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                 required
               >
                 <option value="" disabled>
-                  Pick an organization (App installed)
+                  {t("classrooms.orgPick")}
                 </option>
                 {installedOrgs.data.map((o) => (
                   <option key={o} value={o}>
                     {o}
                   </option>
                 ))}
-                <option value="__other__">Other organization…</option>
+                <option value="__other__">{t("classrooms.orgOther")}</option>
               </select>
             </label>
           ) : (
             <Field
-              label="GitHub organization"
+              label={t("classrooms.org")}
               placeholder="heig-tin-info"
               value={org}
               onChange={(e) => setOrg(e.target.value)}
@@ -817,7 +824,7 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
             />
           )}
           <Button disabled={create.isPending}>
-            <Plus className="size-4" /> Create
+            <Plus className="size-4" /> {t("classrooms.create")}
           </Button>
         </form>
         {create.isError ? (
@@ -833,35 +840,99 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
 }
 
 
+interface StudentRepo {
+  fullName: string | null;
+  provisionStatus: "pending" | "ok" | "error";
+  invitationStatus: "none" | "pending" | "accepted";
+  ciStatus: "none" | "pending" | "pass" | "fail";
+  lockedAt: string | null;
+  commitCount: number | null;
+  checksPassed: number | null;
+  checksTotal: number | null;
+  grade: GradeView | null;
+  gradeFrozen: boolean;
+}
+
+interface StudentAssignmentT {
+  id: string;
+  name: string;
+  state: "published" | "locked";
+  startAt: string;
+  deadlineAt: string;
+  repo: StudentRepo | null;
+}
+
 interface StudentClassroom {
   id: string;
   name: string;
   orgLogin: string;
   teacher: string;
-  assignments: {
-    id: string;
-    name: string;
-    state: "published" | "locked";
-    startAt: string;
-    deadlineAt: string;
-    repo: {
-      fullName: string | null;
-      provisionStatus: "pending" | "ok" | "error";
-      invitationStatus: "none" | "pending" | "accepted";
-      ciStatus: "none" | "pending" | "pass" | "fail";
-      grade: GradeView | null;
-      gradeFrozen: boolean;
-    } | null;
-  }[];
+  assignments: StudentAssignmentT[];
+}
+
+/** Live countdown to (or since) the deadline, refreshed every 30 s. */
+function Countdown({ deadline }: { deadline: string }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+  const ms = new Date(deadline).getTime() - now;
+  const dur = formatDuration(Math.abs(ms), t);
+  return (
+    <span className={ms < 0 ? "text-zinc-400" : "font-medium text-zinc-600 dark:text-zinc-300"}>
+      {ms < 0 ? t("student.overdue", { duration: dur }) : t("student.until", { duration: dur })}
+    </span>
+  );
+}
+
+/** Metrics row for an accepted repository: commits, CI donut, grade scale. */
+function RepoMetrics({ repo }: { repo: StudentRepo }) {
+  const t = useT();
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {repo.commitCount !== null ? (
+        <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+          <GitCommitHorizontal className="size-3.5" />
+          {t(repo.commitCount === 1 ? "student.commits.one" : "student.commits", {
+            n: repo.commitCount,
+          })}
+        </span>
+      ) : null}
+      {repo.checksTotal ? (
+        <span className="inline-flex items-center gap-1.5">
+          <TestDonut passed={repo.checksPassed ?? 0} total={repo.checksTotal} size={40} />
+          <span className="text-xs text-zinc-400">{t("student.tests")}</span>
+        </span>
+      ) : repo.ciStatus === "pending" ? (
+        <Badge tone="amber" icon={Loader2}>
+          {t("student.ciRunning")}
+        </Badge>
+      ) : null}
+      {repo.grade && repo.grade.parseStatus === "ok" ? (
+        <span className="inline-flex items-center gap-1.5">
+          {repo.gradeFrozen ? <Lock className="size-3.5 text-zinc-400" /> : null}
+          <GradeScale points={repo.grade.points!} max={repo.grade.max!} />
+          <span className="text-xs text-zinc-400">{t("student.indicative")}</span>
+        </span>
+      ) : repo.ciStatus === "pass" ? (
+        <Badge tone="green">{t("student.ciPass")}</Badge>
+      ) : repo.ciStatus === "fail" ? (
+        <Badge tone="red">{t("student.ciFail")}</Badge>
+      ) : null}
+    </div>
+  );
 }
 
 function StudentAssignment({
   a,
   githubLinked,
 }: {
-  a: StudentClassroom["assignments"][number];
+  a: StudentAssignmentT;
   githubLinked: boolean;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const accept = useMutation({
     mutationFn: () => api(`/app/api/student/assignments/${a.id}/accept`, { method: "POST" }),
@@ -871,16 +942,19 @@ function StudentAssignment({
     accept.isError && accept.error instanceof ApiError
       ? ((accept.error.body as { message?: string })?.message ?? "Acceptance failed")
       : null;
+  const locked = a.state === "locked" || a.repo?.lockedAt != null;
 
   return (
-    <li className="space-y-1 py-2 text-sm">
+    <li className={`space-y-1.5 py-2.5 text-sm ${locked ? "opacity-60" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
+        {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
         <span className="font-medium">{a.name}</span>
-        {a.state === "locked" ? <Badge tone="red">locked</Badge> : null}
+        {locked ? <Badge tone="red">{t("student.locked")}</Badge> : null}
         <span className="flex-1" />
         <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-          <Clock className="size-3.5" /> due {isoDateTime(a.deadlineAt)}
+          <Clock className="size-3.5" /> {isoDateTime(a.deadlineAt)}
         </span>
+        <Countdown deadline={a.deadlineAt} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         {a.repo?.provisionStatus === "ok" && a.repo.fullName ? (
@@ -891,56 +965,30 @@ function StudentAssignment({
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
             >
-              <GithubIcon className="size-4" /> Open your repository
+              <GithubIcon className="size-4" /> {t("student.openRepo")}
             </a>
             {a.repo.invitationStatus === "pending" ? (
               <span className="text-xs text-amber-600 dark:text-amber-400">
-                Accept the GitHub invitation first (check your notifications).
+                {t("student.acceptInvite")}
               </span>
             ) : null}
-            {a.repo.ciStatus === "pending" ? (
-              <Badge tone="amber" icon={Loader2}>
-                CI running
-              </Badge>
-            ) : a.repo.grade && a.repo.grade.parseStatus === "ok" ? (
-              <span
-                className="inline-flex items-center gap-1.5"
-                title={`Evaluated commit ${a.repo.grade.sha.slice(0, 7)} — ${isoDateTime(a.repo.grade.completedAt)}. Indicative grade, not contractual.`}
-              >
-                <Badge tone={a.repo.gradeFrozen ? "zinc" : "green"}>
-                  {a.repo.gradeFrozen ? "final " : ""}grade {a.repo.grade.points}/{a.repo.grade.max}
-                </Badge>
-                <a
-                  href={`https://github.com/${a.repo.fullName}/commit/${a.repo.grade.sha}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-mono text-xs text-zinc-400 hover:underline"
-                >
-                  {a.repo.grade.sha.slice(0, 7)}
-                </a>
-                <span className="text-xs text-zinc-400">indicative, not contractual</span>
-              </span>
-            ) : a.repo.ciStatus === "pass" ? (
-              <Badge tone="green">CI pass</Badge>
-            ) : a.repo.ciStatus === "fail" ? (
-              <Badge tone="red">CI fail</Badge>
-            ) : null}
+            <RepoMetrics repo={a.repo} />
           </>
         ) : (
           <>
             <Button
               onClick={() => accept.mutate()}
               disabled={accept.isPending || !githubLinked}
-              title={githubLinked ? undefined : "Link your GitHub account first"}
+              title={githubLinked ? undefined : t("student.linkPrompt")}
             >
               {accept.isPending ? (
                 <>
-                  <Loader2 className="size-4 animate-spin" /> Creating your repository…
+                  <Loader2 className="size-4 animate-spin" /> {t("student.creating")}
                 </>
               ) : a.repo?.provisionStatus === "error" ? (
-                "Retry acceptance"
+                t("student.retry")
               ) : (
-                "Accept assignment"
+                t("student.accept")
               )}
             </Button>
             {acceptError ? (
@@ -953,25 +1001,156 @@ function StudentAssignment({
   );
 }
 
+type StudentView = "cards" | "list";
+
 function StudentHome({ me }: { me: Me }) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [view, setView] = useState<StudentView>(
+    () => (localStorage.getItem("hgc-student-view") as StudentView) || "cards",
+  );
+  const setStudentView = (v: StudentView) => {
+    setView(v);
+    localStorage.setItem("hgc-student-view", v);
+  };
   const rooms = useQuery<StudentClassroom[]>({
     queryKey: ["student-classrooms"],
     queryFn: () => api("/app/api/student/classrooms"),
   });
 
   if (rooms.isLoading) return null;
+  const linked = me.githubLogin != null;
+
+  // Flat, searchable list of (classroom, assignment) pairs.
+  const flat = (rooms.data ?? []).flatMap((room) =>
+    room.assignments.map((a) => ({ room, a })),
+  );
+  const filteredFlat = fuzzyFilter(query, flat, ({ room, a }) => `${a.name} ${room.name}`);
+  const roomMatches = fuzzyFilter(query, rooms.data ?? [], (r) => r.name);
+  const cell = "px-3 py-2";
+
+  const toggle = (v: StudentView, Icon: typeof LayoutGrid, label: string) => (
+    <button
+      aria-label={label}
+      title={label}
+      onClick={() => setStudentView(v)}
+      className={`rounded-md p-1.5 transition-colors ${
+        view === v
+          ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+          : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+      }`}
+    >
+      <Icon className="size-4" />
+    </button>
+  );
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
-      {!me.githubLogin ? (
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">{t("student.title")}</h1>
+        <span className="flex-1" />
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="search"
+            placeholder={t("common.search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+            aria-label={t("common.search")}
+          />
+        </label>
+        <span className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
+          {toggle("cards", LayoutGrid, t("view.cards"))}
+          {toggle("list", List, t("view.list"))}
+        </span>
+      </div>
+
+      {!linked ? (
         <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-300">
           <AlertTriangle className="size-4" />
-          Link your GitHub account (top right) to be able to accept assignments.
+          {t("student.linkPrompt")}
         </div>
       ) : null}
-      {rooms.data?.length ? (
+
+      {!rooms.data?.length ? (
+        <Card>
+          <EmptyState icon={ClipboardList} title={t("student.empty.title")}>
+            {t("student.empty.body")}
+          </EmptyState>
+        </Card>
+      ) : view === "list" ? (
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  <th className={cell}>{t("nav.classrooms")}</th>
+                  <th className={cell}>{t("nav.assignment")}</th>
+                  <th className={cell}>{t("student.deadlineCol")}</th>
+                  <th className={cell}>{t("assignment.col.status")}</th>
+                  <th className={cell}>{t("assignment.col.grade")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {filteredFlat.map(({ room, a }) => {
+                  const locked = a.state === "locked" || a.repo?.lockedAt != null;
+                  return (
+                    <tr key={a.id} className={locked ? "opacity-60" : ""}>
+                      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>{room.name}</td>
+                      <td className={`${cell} font-medium`}>
+                        <span className="inline-flex items-center gap-1.5">
+                          {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
+                          {a.repo?.provisionStatus === "ok" && a.repo.fullName ? (
+                            <a
+                              href={`https://github.com/${a.repo.fullName}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="hover:text-accent hover:underline"
+                            >
+                              {a.name}
+                            </a>
+                          ) : (
+                            a.name
+                          )}
+                        </span>
+                      </td>
+                      <td className={cell}>
+                        <div className="flex flex-col">
+                          <span className="text-zinc-500 dark:text-zinc-400">
+                            {isoDateTime(a.deadlineAt)}
+                          </span>
+                          <span className="text-xs">
+                            <Countdown deadline={a.deadlineAt} />
+                          </span>
+                        </div>
+                      </td>
+                      <td className={cell}>
+                        {a.repo?.provisionStatus === "ok" ? (
+                          <Badge tone="green" icon={CheckCircle2}>
+                            {t("status.accepted")}
+                          </Badge>
+                        ) : (
+                          <Badge tone="zinc">{t("status.notAccepted")}</Badge>
+                        )}
+                      </td>
+                      <td className={cell}>
+                        {a.repo?.grade && a.repo.grade.parseStatus === "ok" ? (
+                          <GradeScale points={a.repo.grade.points!} max={a.repo.grade.max!} />
+                        ) : (
+                          <span className="text-zinc-400">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          {rooms.data.map((room) => (
+          {roomMatches.map((room) => (
             <Card key={room.id} className="p-4">
               <div className="flex items-center gap-2">
                 <OrgAvatar login={room.orgLogin} className="size-6" />
@@ -986,22 +1165,15 @@ function StudentHome({ me }: { me: Me }) {
               {room.assignments.length ? (
                 <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
                   {room.assignments.map((a) => (
-                    <StudentAssignment key={a.id} a={a} githubLinked={me.githubLogin != null} />
+                    <StudentAssignment key={a.id} a={a} githubLinked={linked} />
                   ))}
                 </ul>
               ) : (
-                <p className="mt-3 text-sm text-zinc-400">No published assignments yet.</p>
+                <p className="mt-3 text-sm text-zinc-400">{t("student.noAssignments")}</p>
               )}
             </Card>
           ))}
         </div>
-      ) : (
-        <Card>
-          <EmptyState icon={ClipboardList} title="No classrooms yet">
-            Your teacher enrolls you through the class roster — classrooms appear here
-            automatically once you are on it.
-          </EmptyState>
-        </Card>
       )}
     </div>
   );
@@ -1010,7 +1182,14 @@ function StudentHome({ me }: { me: Me }) {
 export default function App() {
   const me = useMe();
   const [route, navigate] = useRoute();
+  const { setLocale } = useI18n();
   useLiveUpdates(me.data != null);
+  // The account's saved language wins on load, so the choice follows the user
+  // across devices (no re-persist: adopt only).
+  const serverLocale = me.data?.locale ?? null;
+  useEffect(() => {
+    if (serverLocale) setLocale(serverLocale, false);
+  }, [serverLocale, setLocale]);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
   const role = me.data.role;

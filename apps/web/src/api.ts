@@ -52,6 +52,7 @@ export interface Me {
   lastLoginAt: string | null;
   avatarUrl: string | null;
   hasUploadedAvatar: boolean;
+  locale: "en" | "fr" | null;
 }
 
 export interface ClassroomSummary {

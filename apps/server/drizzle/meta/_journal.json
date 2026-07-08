@@ -85,6 +85,13 @@
       "when": 1783496697326,
       "tag": "0011_sync-prs",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1783509491345,
+      "tag": "0012_user-locale",
+      "breakpoints": true
     }
   ]
 }

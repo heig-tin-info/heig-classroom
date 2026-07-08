@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, BellRing, GraduationCap, School, ShieldCheck, Unlink } from "lucide-react";
+import { ArrowLeft, BellRing, GraduationCap, Languages, School, ShieldCheck, Unlink } from "lucide-react";
 
 import { AdminPanel } from "./AdminPanel";
 import { HelpIcon } from "./help";
+import { useI18n, LOCALES } from "./i18n";
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref, type NoticeKind } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
 import { api, type Me } from "./api";
@@ -33,6 +34,7 @@ function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: str
 
 /** Per-kind toggles for the real-time toasts; stored in this browser. */
 function NotificationSettings() {
+  const { t } = useI18n();
   const [prefs, setPrefs] = useState(notifyPrefs);
   const toggle = (kind: NoticeKind) => {
     const next = !prefs[kind];
@@ -43,12 +45,12 @@ function NotificationSettings() {
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
         <BellRing className="size-4 text-zinc-400" />
-        <h2 className="font-medium">Notifications</h2>
+        <h2 className="font-medium">{t("settings.notifications")}</h2>
         <HelpIcon topic="notifications" />
-        <span className="text-xs text-zinc-400">Real-time toasts, bottom left.</span>
+        <span className="text-xs text-zinc-400">{t("settings.notificationsHint")}</span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {NOTICE_KINDS.map(({ kind, label }) => (
+        {NOTICE_KINDS.map(({ kind }) => (
           <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -56,7 +58,7 @@ function NotificationSettings() {
               onChange={() => toggle(kind)}
               className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
             />
-            {label}
+            {t(`notify.${kind}` as Parameters<typeof t>[0])}
           </label>
         ))}
       </div>
@@ -66,6 +68,7 @@ function NotificationSettings() {
 
 export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
   const qc = useQueryClient();
+  const { t, locale, setLocale } = useI18n();
   const [editingAvatar, setEditingAvatar] = useState(false);
   const unlink = useMutation({
     mutationFn: () => api("/app/auth/github/unlink", { method: "POST" }),
@@ -81,10 +84,34 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
         onClick={onBack}
         className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
       >
-        <ArrowLeft className="size-4" /> Back
+        <ArrowLeft className="size-4" /> {t("common.back")}
       </button>
 
-      <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("settings.title")}</h1>
+
+      <Card className="p-5">
+        <h2 className="mb-1 flex items-center gap-2 font-medium">
+          <Languages className="size-4 text-zinc-400" /> {t("settings.language")}
+        </h2>
+        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          {t("settings.languageHint")}
+        </p>
+        <div className="flex gap-2">
+          {LOCALES.map((l) => (
+            <button
+              key={l.code}
+              onClick={() => setLocale(l.code)}
+              className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+                locale === l.code
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {l.label}
+            </button>
+          ))}
+        </div>
+      </Card>
 
       <Card className="flex flex-wrap items-center gap-4 p-5">
         <button
@@ -118,10 +145,10 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
 
       <Card className="p-5">
         <h2 className="mb-1 flex items-center gap-2 font-medium">
-          <GithubIcon className="size-4" /> GitHub account
+          <GithubIcon className="size-4" /> {t("settings.github")}
         </h2>
         <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-          Your GitHub account is used to deliver assignment repositories to you.
+          {t("settings.githubHint")}
         </p>
         {me.githubLogin ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -141,7 +168,7 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
               }}
               disabled={unlink.isPending}
             >
-              <Unlink className="size-4" /> Unlink GitHub account
+              <Unlink className="size-4" /> {t("settings.unlink")}
             </Button>
           </div>
         ) : (
@@ -149,7 +176,7 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
             href="/app/auth/github/link"
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
           >
-            <GithubIcon className="size-4" /> Link GitHub account
+            <GithubIcon className="size-4" /> {t("settings.link")}
           </a>
         )}
       </Card>

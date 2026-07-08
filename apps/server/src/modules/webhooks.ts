@@ -94,6 +94,8 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
         await handleWorkflowRun(app, config, delivery.payload as WorkflowRunPayload);
       } else if (delivery.event === "pull_request") {
         await handlePullRequest(app, delivery.payload as PullRequestPayload);
+      } else if (delivery.event === "member") {
+        await handleMember(app, delivery.payload as MemberPayload);
       }
       await app.db
         .update(webhookDeliveries)
@@ -237,6 +239,29 @@ interface PullRequestPayload {
     merged?: boolean;
     head?: { ref?: string };
   };
+}
+
+interface MemberPayload {
+  action?: string;
+  repository?: { id: number };
+  member?: { login?: string };
+}
+
+/**
+ * A student accepting the collaborator invitation becomes a member: the
+ * `member` event (action `added`) fires. This clears the "accept the GitHub
+ * invitation first" hint in real time (the reconciliation is the fallback).
+ */
+async function handleMember(app: FastifyInstance, p: MemberPayload) {
+  if (p.action !== "added" || !p.repository?.id || !p.member?.login) return;
+  const ctx = await repoContext(app.db, p.repository.id);
+  if (!ctx) return;
+  if (ctx.repo.invitationStatus === "accepted") return;
+  await app.db
+    .update(studentRepos)
+    .set({ invitationStatus: "accepted" })
+    .where(eq(studentRepos.id, ctx.repo.id));
+  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 
 /** GH-52: sync PR state (open / merged / closed) aggregated in the teacher view. */

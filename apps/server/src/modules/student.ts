@@ -16,6 +16,7 @@ import {
   users,
 } from "../db/schema.js";
 import { installationClient } from "../github/app.js";
+import { fetchRepoLiveState } from "../github/metrics.js";
 import { provisionStudentRepo } from "../github/provision.js";
 import { gradeViewsByIds } from "../grading.js";
 import { claimEnrollments } from "./roster.js";
@@ -106,6 +107,41 @@ export async function studentPlugin(
         repos.flatMap((sr) => [sr.currentGradeRunId, sr.frozenGradeRunId]),
       );
 
+      // Live commit count and check-run breakdown (for the dashboard charts).
+      // Cheap here: a student only has a handful of provisioned repositories.
+      const live = new Map<string, Awaited<ReturnType<typeof fetchRepoLiveState>>>();
+      const provisioned = repos.filter((sr) => sr.provisionStatus === "ok" && sr.fullName);
+      if (provisioned.length > 0) {
+        const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
+        const orgByRoom = new Map(
+          await app.db
+            .select({ classroomId: classrooms.id, installationId: organizations.installationId })
+            .from(classrooms)
+            .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
+            .where(inArray(classrooms.id, roomIds))
+            .then((rows) => rows.map((x) => [x.classroomId, x.installationId] as const)),
+        );
+        await Promise.all(
+          provisioned.map(async (sr) => {
+            // Best effort: a student's dashboard must render even if GitHub is
+            // unreachable or the App is unavailable (falls back to cached ci).
+            try {
+              const a = published.find((x) => x.id === sr.assignmentId);
+              const installationId = a ? orgByRoom.get(a.classroomId) : null;
+              if (!installationId) return;
+              let client = clients.get(installationId);
+              if (!client) {
+                client = await installationClient(config, installationId);
+                clients.set(installationId, client);
+              }
+              live.set(sr.id, await fetchRepoLiveState(client.octokit, sr.fullName!));
+            } catch (err) {
+              req.log.warn({ err, repo: sr.fullName }, "student live state fetch failed");
+            }
+          }),
+        );
+      }
+
       return rooms.map((r) => ({
         id: r.id,
         name: r.name,
@@ -121,6 +157,7 @@ export async function studentPlugin(
                 ? repo.frozenGradeRunId
                 : repo.currentGradeRunId
               : null;
+            const state = repo ? live.get(repo.id) : null;
             return {
               ...a,
               repo: repo
@@ -128,7 +165,11 @@ export async function studentPlugin(
                     fullName: repo.fullName,
                     provisionStatus: repo.provisionStatus,
                     invitationStatus: repo.invitationStatus,
-                    ciStatus: repo.ciStatus,
+                    ciStatus: state?.ciStatus ?? repo.ciStatus,
+                    lockedAt: repo.lockedAt?.toISOString() ?? null,
+                    commitCount: state?.commitCount ?? null,
+                    checksPassed: state?.checksPassed ?? null,
+                    checksTotal: state?.checksTotal ?? null,
                     grade: gradeRunId ? (grades.get(gradeRunId) ?? null) : null,
                     gradeFrozen: frozen,
                   }

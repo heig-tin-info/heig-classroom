@@ -41,6 +41,8 @@ export const users = pgTable(
     githubLogin: text("github_login"),
     githubLinkedAt: timestamp("github_linked_at", { withTimezone: true }),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    /** Interface language chosen by the user; null falls back to English. */
+    locale: text("locale", { enum: ["en", "fr"] }),
     emailOptIn: boolean("email_opt_in").notNull().default(false),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

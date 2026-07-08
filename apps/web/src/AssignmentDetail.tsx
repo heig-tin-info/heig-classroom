@@ -23,6 +23,7 @@ import { useState } from "react";
 import { api } from "./api";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
+import { useT } from "./i18n";
 import { Badge, Button, GithubIcon, isoDateTime, Modal } from "./ui";
 
 export interface GradeView {
@@ -234,7 +235,7 @@ function GradeHistoryModal({
   );
 }
 
-const cell = "px-3 py-2";
+const cell = "px-3 py-1.5 whitespace-nowrap align-middle";
 
 function StudentRow({
   classroomId,
@@ -248,6 +249,7 @@ function StudentRow({
   frozen: boolean;
   s: DetailStudent;
 }) {
+  const t = useT();
   const [showHistory, setShowHistory] = useState(false);
   const qc = useQueryClient();
   const invalidate = () =>
@@ -262,8 +264,9 @@ function StudentRow({
   });
 
   const r = s.repo;
+  const locked = r?.lockedAt != null;
   return (
-    <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
+    <tr className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${locked ? "opacity-55" : ""}`}>
       <td className={`${cell} font-medium`}>{s.nom}</td>
       <td className={cell}>{s.prenom}</td>
       <td className={cell}>
@@ -277,14 +280,16 @@ function StudentRow({
       </td>
       <td className={cell}>
         {r?.provisionStatus === "ok" ? (
-          <span className="inline-flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5">
             <Badge tone="green" icon={CheckCircle2}>
-              accepted
+              {t("status.accepted")}
             </Badge>
             {r.lockedAt ? (
-              <Badge tone="red" icon={Lock}>
-                locked
-              </Badge>
+              <span title="Repository locked">
+                <Badge tone="red" icon={Lock}>
+                  {t("status.locked")}
+                </Badge>
+              </span>
             ) : null}
             {r.syncPr && r.fullName ? (
               <a
@@ -313,20 +318,20 @@ function StudentRow({
             ) : null}
             {r.missing ? (
               <Badge tone="red" icon={XCircle}>
-                repo missing
+                {t("status.repoMissing")}
               </Badge>
             ) : null}
           </span>
         ) : r?.provisionStatus === "error" ? (
           <Badge tone="red" icon={XCircle}>
-            provision error
+            {t("status.provisionError")}
           </Badge>
         ) : s.claimStatus === "claimed" ? (
           <Badge tone="amber" icon={Clock}>
-            not accepted
+            {t("status.notAccepted")}
           </Badge>
         ) : (
-          <Badge tone="zinc">not claimed</Badge>
+          <Badge tone="zinc">{t("status.notClaimed")}</Badge>
         )}
       </td>
       <td className={`${cell} font-mono text-xs`}>
@@ -470,6 +475,7 @@ export function AssignmentDetail({
   classroomId: string;
   assignmentId: string;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("nom");
   const [dir, setDir] = useState<1 | -1>(1);
@@ -553,29 +559,29 @@ export function AssignmentDetail({
         <span className="font-medium">{a.name}</span>
         <HelpIcon topic="assignment-detail" />
         <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "red" : "zinc"}>
-          {a.state}
+          {t(`state.${a.state}` as Parameters<typeof t>[0])}
         </Badge>
         <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
           <CalendarClock className="size-3.5" />
           {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
         </span>
         <Badge tone="zinc" icon={GitCommitHorizontal}>
-          {accepted}/{students.length} accepted
+          {t("assignment.accepted", { n: accepted, total: students.length })}
         </Badge>
         <span className="flex-1" />
         <label className="relative">
           <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
           <input
             type="search"
-            placeholder="Search students…"
+            placeholder={t("assignment.searchStudents")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-            aria-label="Search students"
+            aria-label={t("assignment.searchStudents")}
           />
         </label>
         <Button variant="ghost" onClick={() => detail.refetch()} disabled={detail.isFetching}>
-          <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> Refresh
+          <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> {t("common.refresh")}
         </Button>
       </div>
 
@@ -585,17 +591,17 @@ export function AssignmentDetail({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-              <Th k="nom">Last name</Th>
-              <Th k="prenom">First name</Th>
-              <Th k="github">GitHub</Th>
-              <Th k="status">Status</Th>
-              <th className={`${cell} font-medium uppercase tracking-wide`}>Last commit</th>
-              <Th k="lastCommitAt">Date</Th>
+              <Th k="nom">{t("assignment.col.lastName")}</Th>
+              <Th k="prenom">{t("assignment.col.firstName")}</Th>
+              <Th k="github">{t("assignment.col.github")}</Th>
+              <Th k="status">{t("assignment.col.status")}</Th>
+              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.lastCommit")}</th>
+              <Th k="lastCommitAt">{t("assignment.col.date")}</Th>
               <Th k="commitCount" right>
-                Commits
+                {t("assignment.col.commits")}
               </Th>
-              <th className={`${cell} font-medium uppercase tracking-wide`}>Checks</th>
-              <Th k="grade">Grade</Th>
+              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.checks")}</th>
+              <Th k="grade">{t("assignment.col.grade")}</Th>
               <th className={cell} aria-label="Actions" />
             </tr>
           </thead>

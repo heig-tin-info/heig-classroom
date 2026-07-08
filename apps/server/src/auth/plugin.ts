@@ -219,7 +219,23 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
         lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
         avatarUrl,
         hasUploadedAvatar: Boolean(uploaded),
+        locale: u.locale,
       };
+    },
+  );
+
+  // Interface language, persisted so it follows the user across devices.
+  app.patch(
+    "/app/api/me",
+    { preHandler: (req, reply) => app.requireSession(req, reply) },
+    async (req, reply) => {
+      const body = req.body as { locale?: unknown };
+      const locale = body?.locale;
+      if (locale !== "en" && locale !== "fr" && locale !== null) {
+        return reply.code(400).send({ error: "validation", message: "Unsupported locale" });
+      }
+      await app.db.update(users).set({ locale }).where(eq(users.id, req.user!.id));
+      return { locale };
     },
   );
 }

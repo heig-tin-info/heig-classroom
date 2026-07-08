@@ -16,6 +16,7 @@ import {
   scheduledTasks,
   sessions,
   studentRepos,
+  users,
   webhookDeliveries,
 } from "./db/schema.js";
 import { publish } from "./events.js";
@@ -199,11 +200,13 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
       repo: studentRepos,
       classroomId: classrooms.id,
       installationId: organizations.installationId,
+      githubLogin: users.githubLogin,
     })
     .from(studentRepos)
     .innerJoin(assignments, eq(studentRepos.assignmentId, assignments.id))
     .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
     .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
+    .innerJoin(users, eq(studentRepos.userId, users.id))
     .where(
       and(
         eq(studentRepos.provisionStatus, "ok"),
@@ -215,11 +218,37 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
   const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
   const touched = new Set<string>();
   let updated = 0;
-  for (const { repo, classroomId, installationId } of rows) {
+  for (const { repo, classroomId, installationId, githubLogin } of rows) {
     let client = clients.get(installationId!);
     if (!client) {
       client = await installationClient(config, installationId!);
       clients.set(installationId!, client);
+    }
+    const notify = () => {
+      touched.add(`classroom:${classroomId}`);
+      touched.add(`user:${repo.userId}`);
+    };
+    // Invitation acceptance has no reliable retro-active webhook: a pending
+    // invite whose invitee is now a collaborator has been accepted (204),
+    // otherwise the collaborators endpoint answers 404.
+    if (repo.invitationStatus === "pending" && githubLogin) {
+      const [owner, name] = repo.fullName!.split("/") as [string, string];
+      try {
+        await client.octokit.request(
+          "GET /repos/{owner}/{repo}/collaborators/{username}",
+          { owner, repo: name, username: githubLogin, request: { retries: 0 } },
+        );
+        await app.db
+          .update(studentRepos)
+          .set({ invitationStatus: "accepted" })
+          .where(eq(studentRepos.id, repo.id));
+        updated += 1;
+        notify();
+      } catch (err) {
+        if ((err as { status?: number }).status !== 404) {
+          app.log.warn({ err, repo: repo.fullName }, "reconcile.repos: collaborator check failed");
+        }
+      }
     }
     try {
       const state = await fetchRepoLiveState(client.octokit, repo.fullName!);
@@ -234,8 +263,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
         })
         .where(eq(studentRepos.id, repo.id));
       updated += 1;
-      touched.add(`classroom:${classroomId}`);
-      touched.add(`user:${repo.userId}`);
+      notify();
     } catch (err) {
       app.log.warn({ err, repo: repo.fullName }, "reconcile.repos: repo fetch failed");
     }

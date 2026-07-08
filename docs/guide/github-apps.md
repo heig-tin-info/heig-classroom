@@ -46,11 +46,11 @@ Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.
 - **Organization permissions**: Members, Read (optional)
 - **Subscribe to events**: once the webhook is active, subscribe to **Push**
   (repository metrics, protected files, source-ahead detection), **Workflow
-  run** (CI status and grading) and **Pull request** (sync pull request
-  tracking). **Repository** and **Member** are useful additions for
-  out-of-band renames and membership changes. The available checkboxes depend
-  on the permissions above; installation events are always delivered to
-  GitHub Apps, no subscription needed.
+  run** (CI status and grading), **Pull request** (sync pull request tracking)
+  and **Member** (clears the "accept the GitHub invitation" hint the moment a
+  student accepts). **Repository** is a useful addition for out-of-band renames.
+  The available checkboxes depend on the permissions above; installation events
+  are always delivered to GitHub Apps, no subscription needed.
 - **Where can this App be installed**: *Only on this account*
 
 Once created, note the **App ID** (the `Iv23…` Client ID works too), generate a
