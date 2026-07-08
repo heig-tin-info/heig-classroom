@@ -14,6 +14,7 @@ import {
   Clock,
   ExternalLink,
   FolderGit2,
+  GraduationCap,
   LayoutGrid,
   List,
   Loader2,
@@ -45,7 +46,6 @@ import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useI18n, useT } from "./i18n";
-import { OctocatGrad } from "./Logo";
 import { useRoute, type Route } from "./router";
 import { TimelineView } from "./Timeline";
 import { AssignmentsCard } from "./AssignmentsCard";
@@ -74,7 +74,7 @@ function useMe() {
 function Logo({ className = "size-6" }: { className?: string }) {
   return (
     <span className="inline-flex items-center justify-center rounded-lg bg-accent p-1.5 text-white">
-      <OctocatGrad className={className} />
+      <GraduationCap className={className} />
     </span>
   );
 }
