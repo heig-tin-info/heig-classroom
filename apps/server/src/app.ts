@@ -21,6 +21,7 @@ import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
 import { makeWebhookHandler, webhooksPlugin } from "./modules/webhooks.js";
 import { makeDeadlineHandler } from "./deadline.js";
+import { makeSyncHandler } from "./sync.js";
 import { startJobs } from "./jobs.js";
 import { runTask, seedTasks } from "./tasks.js";
 import { startTicker } from "./ticker.js";
@@ -89,6 +90,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
       runWorkers,
       webhookHandler: makeWebhookHandler(app, config),
       deadlineHandler: makeDeadlineHandler(app, config),
+      syncHandler: makeSyncHandler(app, config),
       taskRunner: (key) => runTask(app, config, key),
     });
     await seedTasks(app);

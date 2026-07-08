@@ -44,12 +44,13 @@ Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.
 | Workflows | Read & write |
 
 - **Organization permissions**: Members, Read (optional)
-- **Subscribe to events**: nothing for now. The portal will consume webhook
-  events starting with milestone M3; when you activate the webhook, come back
-  and subscribe to **Push**, **Workflow run**, **Pull request**, **Repository**
-  and **Member** (the available checkboxes depend on the permissions above).
-  Installation events are always delivered to GitHub Apps, no subscription
-  needed.
+- **Subscribe to events**: once the webhook is active, subscribe to **Push**
+  (repository metrics, protected files, source-ahead detection), **Workflow
+  run** (CI status and grading) and **Pull request** (sync pull request
+  tracking). **Repository** and **Member** are useful additions for
+  out-of-band renames and membership changes. The available checkboxes depend
+  on the permissions above; installation events are always delivered to
+  GitHub Apps, no subscription needed.
 - **Where can this App be installed**: *Only on this account*
 
 Once created, note the **App ID** (the `Iv23…` Client ID works too), generate a

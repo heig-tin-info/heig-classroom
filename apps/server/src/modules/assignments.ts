@@ -16,6 +16,7 @@ import {
   users,
 } from "../db/schema.js";
 import { gradeView, gradeViewsByIds } from "../grading.js";
+import { SYNC_QUEUE } from "../jobs.js";
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { lockStudentRepo, unlockStudentRepo } from "../github/lock.js";
@@ -419,6 +420,10 @@ export async function assignmentsPlugin(
                   invitationStatus: repo.invitationStatus,
                   acceptedAt: repo.acceptedAt,
                   lockedAt: repo.lockedAt,
+                  syncPr:
+                    repo.syncPrNumber !== null
+                      ? { number: repo.syncPrNumber, state: repo.syncPrState }
+                      : null,
                   grade: repo.currentGradeRunId
                     ? (grades.get(repo.currentGradeRunId) ?? null)
                     : null,
@@ -438,6 +443,41 @@ export async function assignmentsPlugin(
           };
         }),
       };
+    },
+  );
+
+  // --- Explicit sync trigger (GH-50/51): the teacher propagates the update ---
+  app.post(
+    "/app/api/classrooms/:id/assignments/:aid/sync",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(req, reply);
+      if (!owned) return reply;
+      const a = owned.assignment;
+      if (a.state === "draft" || a.archivedAt) {
+        return reply
+          .code(409)
+          .send({ error: "not_published", message: "Only published assignments can be synced" });
+      }
+      if (!a.squashedFullName) {
+        return reply
+          .code(409)
+          .send({ error: "no_squashed", message: "This assignment has no distribution repository" });
+      }
+      if (!app.boss) {
+        return reply
+          .code(503)
+          .send({ error: "jobs_down", message: "The job queue is not running" });
+      }
+      await app.boss.send(SYNC_QUEUE, { assignmentId: a.id }, { singletonKey: a.id });
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "assignment.sync_requested",
+        subjectType: "assignment",
+        subjectId: a.id,
+      });
+      return reply.code(202).send({ ok: true });
     },
   );
 

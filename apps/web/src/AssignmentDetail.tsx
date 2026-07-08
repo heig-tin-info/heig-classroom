@@ -7,9 +7,11 @@ import {
   Clock,
   ExternalLink,
   GitCommitHorizontal,
+  GitPullRequest,
   History,
   Lock,
   LockOpen,
+  Loader2,
   RefreshCw,
   Snowflake,
   XCircle,
@@ -44,6 +46,7 @@ interface DetailStudent {
     invitationStatus: "none" | "pending" | "accepted";
     acceptedAt: string;
     lockedAt: string | null;
+    syncPr: { number: number; state: "open" | "merged" | "closed" | null } | null;
     grade: GradeView | null;
     frozenGrade: GradeView | null;
     lastCommitSha: string | null;
@@ -63,6 +66,9 @@ interface Detail {
     state: "draft" | "published" | "locked";
     startAt: string;
     deadlineAt: string;
+    sourceAheadSha: string | null;
+    sourcePushedAt: string | null;
+    syncedAt: string | null;
   };
   students: DetailStudent[];
 }
@@ -276,6 +282,31 @@ function StudentRow({
                 locked
               </Badge>
             ) : null}
+            {r.syncPr && r.fullName ? (
+              <a
+                href={`https://github.com/${r.fullName}/pull/${r.syncPr.number}`}
+                target="_blank"
+                rel="noreferrer"
+                title={`Sync pull request #${r.syncPr.number}`}
+              >
+                <Badge
+                  tone={
+                    r.syncPr.state === "merged"
+                      ? "green"
+                      : r.syncPr.state === "open"
+                        ? "amber"
+                        : "zinc"
+                  }
+                  icon={GitPullRequest}
+                >
+                  {r.syncPr.state === "merged"
+                    ? "synced"
+                    : r.syncPr.state === "open"
+                      ? `sync PR #${r.syncPr.number}`
+                      : "sync PR closed"}
+                </Badge>
+              </a>
+            ) : null}
             {r.missing ? (
               <Badge tone="red" icon={XCircle}>
                 repo missing
@@ -373,6 +404,52 @@ function StudentRow({
   );
 }
 
+/**
+ * GH-50: the source moved ahead of what students received. The teacher
+ * triggers the propagation explicitly; the bot opens one PR per repository.
+ */
+function SyncBanner({
+  classroomId,
+  a,
+}: {
+  classroomId: string;
+  a: Detail["assignment"];
+}) {
+  const sync = useMutation({
+    mutationFn: () =>
+      api(`/app/api/classrooms/${classroomId}/assignments/${a.id}/sync`, { method: "POST" }),
+  });
+  const ahead =
+    a.sourcePushedAt !== null &&
+    (a.syncedAt === null || new Date(a.sourcePushedAt) > new Date(a.syncedAt));
+  const syncing = sync.isSuccess && !ahead ? false : sync.isSuccess;
+  if (!ahead && !syncing) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <GitPullRequest className="size-4 shrink-0" />
+      <span>
+        The source repository has new commits
+        {a.sourceAheadSha ? (
+          <code className="mx-1 font-mono text-xs">{a.sourceAheadSha.slice(0, 7)}</code>
+        ) : null}
+        . Syncing opens a pull request on each student repository; students merge it themselves.
+      </span>
+      <span className="flex-1" />
+      <Button onClick={() => sync.mutate()} disabled={sync.isPending || syncing}>
+        {sync.isPending || syncing ? (
+          <>
+            <Loader2 className="size-4 animate-spin" /> Syncing…
+          </>
+        ) : (
+          <>
+            <GitPullRequest className="size-4" /> Sync student repositories
+          </>
+        )}
+      </Button>
+    </div>
+  );
+}
+
 export function AssignmentDetail({
   classroomId,
   assignmentId,
@@ -424,6 +501,8 @@ export function AssignmentDetail({
           <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </div>
+
+      <SyncBanner classroomId={classroomId} a={a} />
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

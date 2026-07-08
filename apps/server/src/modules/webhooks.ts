@@ -1,7 +1,7 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
@@ -88,9 +88,12 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
 
     try {
       if (delivery.event === "push") {
+        await handleSourcePush(app, delivery.payload as PushPayload);
         await handlePush(app, config, delivery.payload as PushPayload);
       } else if (delivery.event === "workflow_run") {
         await handleWorkflowRun(app, config, delivery.payload as WorkflowRunPayload);
+      } else if (delivery.event === "pull_request") {
+        await handlePullRequest(app, delivery.payload as PullRequestPayload);
       }
       await app.db
         .update(webhookDeliveries)
@@ -104,6 +107,29 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
       throw err; // pg-boss retry, then dead-letter
     }
   };
+}
+
+/**
+ * GH-50: a push on a selected branch of a SOURCE repository makes the sync
+ * available in the teacher view. No auto-propagation: the teacher triggers
+ * it explicitly (avoids spamming students with PRs on every commit).
+ */
+async function handleSourcePush(app: FastifyInstance, p: PushPayload) {
+  if (!p.repository?.id || !p.after || /^0+$/.test(p.after)) return;
+  const branch = p.ref?.replace("refs/heads/", "") ?? "";
+  const affected = await app.db
+    .update(assignments)
+    .set({ sourceAheadSha: p.after, sourcePushedAt: new Date() })
+    .where(
+      and(
+        eq(assignments.sourceRepoId, p.repository.id),
+        ne(assignments.state, "draft"),
+        isNull(assignments.archivedAt),
+        sql`${branch} = ANY(${assignments.branches})`,
+      ),
+    )
+    .returning({ classroomId: assignments.classroomId });
+  for (const a of affected) publish("assignments", [`classroom:${a.classroomId}`]);
 }
 
 async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayload) {
@@ -190,6 +216,35 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
     subjectId: ctx.repo.id,
     payload: { files: result.files, sha: result.sha },
   });
+  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+}
+
+interface PullRequestPayload {
+  action?: string;
+  repository?: { id: number };
+  pull_request?: {
+    number?: number;
+    merged?: boolean;
+    head?: { ref?: string };
+  };
+}
+
+/** GH-52: sync PR state (open / merged / closed) aggregated in the teacher view. */
+async function handlePullRequest(app: FastifyInstance, p: PullRequestPayload) {
+  if (!p.repository?.id || !p.pull_request?.number) return;
+  if (!p.pull_request.head?.ref?.startsWith("sync/")) return;
+  const ctx = await repoContext(app.db, p.repository.id);
+  if (!ctx) return;
+  const state =
+    p.action === "closed"
+      ? p.pull_request.merged
+        ? ("merged" as const)
+        : ("closed" as const)
+      : ("open" as const);
+  await app.db
+    .update(studentRepos)
+    .set({ syncPrNumber: p.pull_request.number, syncPrState: state })
+    .where(eq(studentRepos.id, ctx.repo.id));
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 

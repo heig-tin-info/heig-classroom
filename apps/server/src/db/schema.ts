@@ -174,6 +174,10 @@ export const assignments = pgTable(
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),
+    /** Last push received on a selected branch of the source repo (GH-50). */
+    sourcePushedAt: timestamp("source_pushed_at", { withTimezone: true }),
+    /** Last completed propagation to student repositories (GH-51). */
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
     deadlineAppliedAt: timestamp("deadline_applied_at", { withTimezone: true }),
     frozenAt: timestamp("frozen_at", { withTimezone: true }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
@@ -220,6 +224,9 @@ export const studentRepos = pgTable(
     ciStatus: text("ci_status", { enum: ["none", "pending", "pass", "fail"] })
       .notNull()
       .default("none"),
+    /** Open sync pull request (GH-51/52): one at most per repository. */
+    syncPrNumber: integer("sync_pr_number"),
+    syncPrState: text("sync_pr_state", { enum: ["open", "merged", "closed"] }),
     /** Selected GradeRun (GR-09); no FK: cross-reference with grade_runs. */
     currentGradeRunId: uuid("current_grade_run_id"),
     /** Grade frozen at the deadline (GR-12), immutable after deadline+grace (GR-14.4). */

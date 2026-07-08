@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 export const WEBHOOK_QUEUE = "webhook.process";
 export const DEADLINE_QUEUE = "deadline.apply";
 export const TASK_QUEUE = "task.run";
+export const SYNC_QUEUE = "sync.apply";
 
 export interface WebhookJob {
   deliveryId: string;
@@ -28,6 +29,7 @@ export async function startJobs(
     runWorkers: boolean;
     webhookHandler: (job: WebhookJob) => Promise<void>;
     deadlineHandler: (job: { assignmentId: string }) => Promise<void>;
+    syncHandler: (job: { assignmentId: string }) => Promise<void>;
     taskRunner: (key: string) => Promise<void>;
   },
 ) {
@@ -50,6 +52,11 @@ export async function startJobs(
   // A failed scheduled task is not retried by the queue: the status is
   // recorded and the next ticker pass will retry it.
   await boss.createQueue(TASK_QUEUE, { retryLimit: 0 });
+  await boss.createQueue(SYNC_QUEUE, {
+    retryLimit: 3,
+    retryBackoff: true,
+    retryDelay: 15,
+  });
 
   if (opts.runWorkers) {
     await boss.work<WebhookJob>(WEBHOOK_QUEUE, async (jobs) => {
@@ -57,6 +64,9 @@ export async function startJobs(
     });
     await boss.work<{ assignmentId: string }>(DEADLINE_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.deadlineHandler(job.data);
+    });
+    await boss.work<{ assignmentId: string }>(SYNC_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.syncHandler(job.data);
     });
     await boss.work<TaskJob>(TASK_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.taskRunner(job.data.key);
