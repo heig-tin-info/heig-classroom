@@ -1,35 +1,28 @@
 /**
- * Brand mark: a cat (nodding to GitHub's octocat) wearing a graduation cap —
- * the platform is GitHub-backed coursework. Drawn as a monochrome silhouette
- * in `currentColor` so it sits on the accent chip like the rest of the icons;
- * the eyes are punched out in the chip color.
+ * Brand mark: the official GitHub Octocat wearing a graduation cap — the
+ * platform is GitHub-backed coursework. The cat is the canonical
+ * `mark-github` silhouette; a mortarboard and tassel sit on top, wider than
+ * the head so the "hat" reads clearly even as a single-color silhouette on
+ * the accent chip.
  */
-export function OctocatGrad({
-  className = "size-6",
-  eye = "var(--color-accent, #b41f24)",
-}: {
-  className?: string;
-  eye?: string;
-}) {
+export function OctocatGrad({ className = "size-6" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-      {/* Head with two ears. */}
+    <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+      {/* Official GitHub mark, scaled into the lower part of the frame. */}
+      <g transform="translate(4 7.5) scale(0.9)">
+        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+      </g>
+      {/* Mortarboard board: a wide rhombus, brim extending past the head. */}
+      <path d="M12 1.8 1.5 5.3 12 8.8 22.5 5.3 12 1.8Z" />
+      {/* Tassel: cord draping off the right brim, ending in a small knob. */}
       <path
-        d="M6.9 11.5 6 8.4c-.1-.35.28-.63.6-.44l2.53 1.5a6.8 6.8 0 0 1 1.87-.26h.02c.64 0 1.27.09 1.86.26l2.53-1.5c.32-.19.7.09.6.44l-.9 3.1c.5.72.79 1.57.79 2.53 0 3.2-2.6 4.37-5.87 4.37S6.1 17.23 6.1 14.03c0-.96.29-1.81.8-2.53Z"
-        fill="currentColor"
-      />
-      {/* Eyes punched out in the chip color. */}
-      <circle cx="10.1" cy="14.2" r="1" fill={eye} />
-      <circle cx="13.9" cy="14.2" r="1" fill={eye} />
-      {/* Graduation cap: mortarboard + tassel, sitting on the head. */}
-      <path d="M12 3.2 3.4 6.5 12 9.8l8.6-3.3L12 3.2Z" fill="currentColor" />
-      <path
-        d="M20.6 6.5v3.1"
+        d="M20.4 5.7c.6 1.4.9 2.6.4 4.2"
+        fill="none"
         stroke="currentColor"
-        strokeWidth="1"
+        strokeWidth="0.9"
         strokeLinecap="round"
       />
-      <circle cx="20.6" cy="10" r="0.85" fill="currentColor" />
+      <rect x="19.7" y="9.4" width="1.5" height="2.4" rx="0.7" />
     </svg>
   );
 }
