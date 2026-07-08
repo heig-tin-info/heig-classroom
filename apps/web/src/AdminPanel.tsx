@@ -12,6 +12,7 @@ import {
 import { useMemo, useState } from "react";
 
 import { api, ApiError } from "./api";
+import { ScheduledTasksCard } from "./ScheduledTasks";
 import { Badge, Button, Card, EmptyState, Field, isoDateTime } from "./ui";
 
 interface TeacherRow {
@@ -220,6 +221,8 @@ export function AdminPanel() {
           </div>
         )}
       </Card>
+
+      <ScheduledTasksCard />
     </div>
   );
 }

@@ -64,6 +64,13 @@
       "when": 1783429779338,
       "tag": "0008_m3-webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1783460111014,
+      "tag": "0009_scheduled-tasks",
+      "breakpoints": true
     }
   ]
 }

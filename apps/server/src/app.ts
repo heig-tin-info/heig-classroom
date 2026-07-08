@@ -20,7 +20,10 @@ import { classroomsPlugin } from "./modules/classrooms.js";
 import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
 import { makeWebhookHandler, webhooksPlugin } from "./modules/webhooks.js";
+import { makeDeadlineHandler } from "./deadline.js";
 import { startJobs } from "./jobs.js";
+import { runTask, seedTasks } from "./tasks.js";
+import { startTicker } from "./ticker.js";
 
 export interface AppDeps {
   config: AppConfig;
@@ -79,12 +82,18 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   // parser JSON brut (HMAC) ne fuit pas sur les autres routes. Une base
   // injoignable au boot ne tue pas le serveur : healthz reste dégradé et
   // l'endpoint webhook répond 503 jusqu'au redémarrage.
+  const runWorkers = config.WORKER_MODE !== "web";
   try {
     await startJobs(app, {
       connectionString: config.DATABASE_URL,
-      runWorkers: config.WORKER_MODE !== "web",
-      handler: makeWebhookHandler(app, config),
+      runWorkers,
+      webhookHandler: makeWebhookHandler(app, config),
+      deadlineHandler: makeDeadlineHandler(app, config),
+      taskRunner: (key) => runTask(app, config, key),
     });
+    await seedTasks(app);
+    // Ticker deadlines + tâches planifiées (ADR-006) : côté worker seulement.
+    if (runWorkers) startTicker(app, config);
   } catch (err) {
     app.log.error({ err }, "pg-boss start failed — job queue disabled");
   }

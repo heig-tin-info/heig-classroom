@@ -334,6 +334,14 @@ aussi le plan de reprise après restauration (NFR-16).
 | `notify.email` | continu | Envoi e-mails opt-in avec retries (NT-02, NFR-17) |
 | `purge.housekeeping` | 24 h | Purge sessions expirées, payloads webhooks > 30 j, archives pg-boss |
 
+Les périodes ci-dessus sont des **valeurs par défaut** : elles sont configurables à chaud
+depuis l'écran admin (table `scheduled_tasks` — période, activation, exécution manuelle,
+état du dernier passage). Le ticker relit la table à chaque tour ; un changement de période
+prend effet sans redémarrage. Les tâches dont le domaine est aussi couvert par les webhooks
+sont marquées « webhook-woken » dans l'UI : l'événement entrant est traité immédiatement,
+la planification n'est que le filet. `reconcile.grades` arrive avec M5, `notify.email`
+avec les notifications (NT-02).
+
 # Temps réel : SSE
 
 **Choix : Server-Sent Events, pas WebSocket** (`ADR-005`).

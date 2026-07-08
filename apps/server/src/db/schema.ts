@@ -276,6 +276,22 @@ export const reverts = pgTable(
   (t) => [index("reverts_repo_time_idx").on(t.studentRepoId, t.createdAt)],
 );
 
+/**
+ * Tâches planifiées (ADR-011) : le catalogue (description, handler) vit dans
+ * le code ; la base porte la configuration admin (période, activation) et
+ * l'état de la dernière exécution. Le ticker balaie cette table — modifier
+ * la période prend effet au tick suivant, sans redémarrage.
+ */
+export const scheduledTasks = pgTable("scheduled_tasks", {
+  key: text("key").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  intervalMinutes: integer("interval_minutes").notNull(),
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  lastStatus: text("last_status", { enum: ["ok", "error", "running"] }),
+  lastError: text("last_error"),
+  lastDurationMs: integer("last_duration_ms"),
+});
+
 export const auditLog = pgTable("audit_log", {
   id: bigserial("id", { mode: "number" }).primaryKey(),
   actorUserId: uuid("actor_user_id"),

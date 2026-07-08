@@ -8,9 +8,16 @@ import { PgBoss } from "pg-boss";
 import type { FastifyInstance } from "fastify";
 
 export const WEBHOOK_QUEUE = "webhook.process";
+export const DEADLINE_QUEUE = "deadline.apply";
+export const TASK_QUEUE = "task.run";
 
 export interface WebhookJob {
   deliveryId: string;
+  [key: string]: unknown;
+}
+
+export interface TaskJob {
+  key: string;
   [key: string]: unknown;
 }
 
@@ -19,7 +26,9 @@ export async function startJobs(
   opts: {
     connectionString: string;
     runWorkers: boolean;
-    handler: (job: WebhookJob) => Promise<void>;
+    webhookHandler: (job: WebhookJob) => Promise<void>;
+    deadlineHandler: (job: { assignmentId: string }) => Promise<void>;
+    taskRunner: (key: string) => Promise<void>;
   },
 ) {
   const boss = new PgBoss({
@@ -33,12 +42,24 @@ export async function startJobs(
     retryBackoff: true,
     retryDelay: 5,
   });
+  await boss.createQueue(DEADLINE_QUEUE, {
+    retryLimit: 5,
+    retryBackoff: true,
+    retryDelay: 10,
+  });
+  // L'échec d'une tâche planifiée n'est pas retenté par la file : le statut
+  // est journalisé et le passage suivant du ticker retentera.
+  await boss.createQueue(TASK_QUEUE, { retryLimit: 0 });
 
   if (opts.runWorkers) {
     await boss.work<WebhookJob>(WEBHOOK_QUEUE, async (jobs) => {
-      for (const job of jobs) {
-        await opts.handler(job.data);
-      }
+      for (const job of jobs) await opts.webhookHandler(job.data);
+    });
+    await boss.work<{ assignmentId: string }>(DEADLINE_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.deadlineHandler(job.data);
+    });
+    await boss.work<TaskJob>(TASK_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.taskRunner(job.data.key);
     });
   }
 

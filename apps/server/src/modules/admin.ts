@@ -6,7 +6,9 @@ import { z } from "zod";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { classrooms, teacherGrants, users } from "../db/schema.js";
+import { classrooms, scheduledTasks, teacherGrants, users } from "../db/schema.js";
+import { TASK_DEFS, taskDef } from "../tasks.js";
+import { TASK_QUEUE } from "../jobs.js";
 
 /**
  * Administration (révision de H2, 2026-07-07) : le super admin (e-mail en
@@ -111,6 +113,95 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
         payload: { email: grant.email },
       });
       return reply.code(204).send();
+    },
+  );
+
+  // --- Tâches planifiées (ADR-011) : périodes et activation configurables ---
+
+  app.get("/app/api/admin/tasks", { preHandler: requireAdmin }, async () => {
+    const rows = await app.db.select().from(scheduledTasks);
+    return TASK_DEFS.map((def) => {
+      const row = rows.find((r) => r.key === def.key);
+      return {
+        key: def.key,
+        description: def.description,
+        webhookWoken: def.webhookWoken,
+        enabled: row?.enabled ?? true,
+        intervalMinutes: row?.intervalMinutes ?? def.defaultIntervalMinutes,
+        defaultIntervalMinutes: def.defaultIntervalMinutes,
+        lastRunAt: row?.lastRunAt ?? null,
+        lastStatus: row?.lastStatus ?? null,
+        lastError: row?.lastError ?? null,
+        lastDurationMs: row?.lastDurationMs ?? null,
+      };
+    });
+  });
+
+  const TaskPatch = z
+    .object({
+      enabled: z.boolean().optional(),
+      intervalMinutes: z.number().int().min(5).max(7 * 24 * 60).optional(),
+    })
+    .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update" });
+
+  app.patch("/app/api/admin/tasks/:key", { preHandler: requireAdmin }, async (req, reply) => {
+    const def = taskDef((req.params as { key: string }).key);
+    if (!def) return reply.code(404).send({ error: "not_found" });
+    const body = TaskPatch.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send({
+        error: "validation",
+        message: "Interval must be between 5 minutes and 7 days",
+      });
+    }
+    const [updated] = await app.db
+      .insert(scheduledTasks)
+      .values({
+        key: def.key,
+        intervalMinutes: body.data.intervalMinutes ?? def.defaultIntervalMinutes,
+        enabled: body.data.enabled ?? true,
+      })
+      .onConflictDoUpdate({ target: scheduledTasks.key, set: body.data })
+      .returning();
+    await audit(app.db, {
+      actorUserId: req.user!.id,
+      actorType: "user",
+      action: "task.configure",
+      subjectType: "scheduled_task",
+      subjectId: def.key,
+      payload: body.data,
+    });
+    return updated;
+  });
+
+  app.post(
+    "/app/api/admin/tasks/:key/run",
+    { preHandler: requireAdmin },
+    async (req, reply) => {
+      const def = taskDef((req.params as { key: string }).key);
+      if (!def) return reply.code(404).send({ error: "not_found" });
+      if (!app.boss) {
+        return reply
+          .code(503)
+          .send({ error: "jobs_down", message: "The job queue is not running" });
+      }
+      await app.db
+        .insert(scheduledTasks)
+        .values({ key: def.key, intervalMinutes: def.defaultIntervalMinutes })
+        .onConflictDoNothing();
+      await app.db
+        .update(scheduledTasks)
+        .set({ lastRunAt: sql`now()`, lastStatus: "running" })
+        .where(eq(scheduledTasks.key, def.key));
+      await app.boss.send(TASK_QUEUE, { key: def.key }, { singletonKey: def.key });
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "task.run_now",
+        subjectType: "scheduled_task",
+        subjectId: def.key,
+      });
+      return reply.code(202).send({ ok: true });
     },
   );
 }

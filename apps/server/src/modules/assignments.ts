@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../audit.js";
@@ -14,8 +14,10 @@ import {
   studentRepos,
   users,
 } from "../db/schema.js";
+import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { lockStudentRepo, unlockStudentRepo } from "../github/lock.js";
+import { fetchRepoLiveState, type RepoLiveState } from "../github/metrics.js";
 import { createSquashedRepo } from "../github/squash.js";
 
 const IdParam = z.object({ id: z.uuid() });
@@ -243,16 +245,16 @@ export async function assignmentsPlugin(
     async (req, reply) => {
       const owned = await ownedAssignment(req, reply);
       if (!owned) return reply;
-      if (owned.assignment.state !== "draft") {
-        // L'édition d'un assignment publié (replanification du ticker, etc.)
-        // arrive avec le jalon M4.
-        return reply
-          .code(409)
-          .send({ error: "not_draft", message: "Only draft assignments can be edited for now" });
-      }
       const body = AssignmentPatch.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
+      }
+      // Les deux stratégies sont exclusives et fixées à la publication (GH-42).
+      if (owned.assignment.state !== "draft" && body.data.deadlineStrategy) {
+        return reply.code(409).send({
+          error: "strategy_frozen",
+          message: "The deadline strategy cannot be changed after publication",
+        });
       }
       const nextStart = body.data.startAt ?? owned.assignment.startAt;
       const nextDeadline = body.data.deadlineAt ?? owned.assignment.deadlineAt;
@@ -274,6 +276,54 @@ export async function assignmentsPlugin(
         subjectId: owned.assignment.id,
         payload: body.data,
       });
+
+      // Replanification (US-08, GH-43) : repousser la deadline d'un assignment
+      // déjà échu le ré-ouvre — déverrouillage des dépôts (stratégie lock) et
+      // remise à zéro des marqueurs ; le ticker réappliquera à la nouvelle
+      // échéance. Les dépôts archivés en mode dégradé (H8) restent archivés.
+      if (
+        updated &&
+        owned.assignment.deadlineAppliedAt &&
+        updated.deadlineAt.getTime() > Date.now()
+      ) {
+        if (updated.deadlineStrategy === "lock" && owned.org.installationId !== null) {
+          const lockedRepos = await app.db
+            .select()
+            .from(studentRepos)
+            .where(
+              and(eq(studentRepos.assignmentId, updated.id), isNotNull(studentRepos.lockedAt)),
+            );
+          if (lockedRepos.length > 0) {
+            const client = await installationClient(config, owned.org.installationId);
+            for (const repo of lockedRepos) {
+              const [orgLogin, repoName] = repo.fullName!.split("/") as [string, string];
+              try {
+                await unlockStudentRepo(client.octokit, orgLogin, repoName);
+                await app.db
+                  .update(studentRepos)
+                  .set({ lockedAt: null, rulesetId: null })
+                  .where(eq(studentRepos.id, repo.id));
+              } catch (err) {
+                req.log.error({ err, repo: repo.fullName }, "reopen: unlock failed");
+              }
+            }
+          }
+        }
+        await app.db
+          .update(assignments)
+          .set({ state: "published", deadlineAppliedAt: null, frozenAt: null })
+          .where(eq(assignments.id, updated.id));
+        await audit(app.db, {
+          actorUserId: req.user!.id,
+          actorType: "user",
+          action: "assignment.deadline_reopened",
+          subjectType: "assignment",
+          subjectId: updated.id,
+          payload: { deadlineAt: updated.deadlineAt },
+        });
+        publish("assignments", [`classroom:${updated.classroomId}`]);
+        return { ...updated, state: "published", deadlineAppliedAt: null, frozenAt: null };
+      }
       return updated;
     },
   );
@@ -309,86 +359,29 @@ export async function assignmentsPlugin(
         .from(studentRepos)
         .where(eq(studentRepos.assignmentId, a.id));
 
-      interface LiveState {
-        lastCommitSha: string | null;
-        lastCommitAt: string | null;
-        commitCount: number;
-        checksPassed: number | null;
-        checksTotal: number | null;
-        ciStatus: "none" | "pending" | "pass" | "fail";
-        missing?: boolean;
-      }
-      const live = new Map<string, LiveState>();
+      const live = new Map<string, RepoLiveState>();
 
       const provisioned = repos.filter((r) => r.provisionStatus === "ok" && r.fullName);
       if (provisioned.length > 0 && owned.org.installationId !== null) {
         const client = await installationClient(config, owned.org.installationId);
         await Promise.all(
           provisioned.map(async (r) => {
-            const [orgLogin, repoName] = r.fullName!.split("/") as [string, string];
             try {
-              const commits = await client.octokit.request(
-                "GET /repos/{owner}/{repo}/commits",
-                { owner: orgLogin, repo: repoName, per_page: 1, request: { retries: 0 } },
-              );
-              const head = commits.data[0];
-              if (!head) throw Object.assign(new Error("empty"), { status: 409 });
-              const lastPage = /[?&]page=(\d+)>; rel="last"/.exec(commits.headers.link ?? "");
-              const commitCount = lastPage ? Number(lastPage[1]) : commits.data.length;
-              const checks = await client.octokit.request(
-                "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
-                { owner: orgLogin, repo: repoName, ref: head.sha, request: { retries: 0 } },
-              );
-              // skipped/neutral (ex. condition anti-bot GH-44) ≠ échec.
-              const runs = checks.data.check_runs.filter(
-                (c) => !["skipped", "neutral"].includes(c.conclusion ?? ""),
-              );
-              const passed = runs.filter((c) => c.conclusion === "success").length;
-              const pending = runs.some((c) => c.status !== "completed");
-              const ciStatus =
-                runs.length === 0 ? "none" : pending ? "pending" : passed === runs.length ? "pass" : "fail";
-              const state: LiveState = {
-                lastCommitSha: head.sha,
-                lastCommitAt: head.commit.committer?.date ?? head.commit.author?.date ?? null,
-                commitCount,
-                checksPassed: runs.length ? passed : null,
-                checksTotal: runs.length ? runs.length : null,
-                ciStatus,
-              };
+              const state = await fetchRepoLiveState(client.octokit, r.fullName!);
+              if (!state) return;
               live.set(r.id, state);
-              await app.db
-                .update(studentRepos)
-                .set({
-                  lastCommitSha: state.lastCommitSha,
-                  lastCommitAt: state.lastCommitAt ? new Date(state.lastCommitAt) : null,
-                  ciStatus,
-                })
-                .where(eq(studentRepos.id, r.id));
-            } catch (err) {
-              const status = (err as { status?: number }).status;
-              if (status === 409) {
-                // dépôt vide : provisionné mais aucun commit lisible
-                live.set(r.id, {
-                  lastCommitSha: null,
-                  lastCommitAt: null,
-                  commitCount: 0,
-                  checksPassed: null,
-                  checksTotal: null,
-                  ciStatus: "none",
-                });
-              } else if (status === 404) {
-                live.set(r.id, {
-                  lastCommitSha: null,
-                  lastCommitAt: null,
-                  commitCount: 0,
-                  checksPassed: null,
-                  checksTotal: null,
-                  ciStatus: "none",
-                  missing: true,
-                });
-              } else {
-                req.log.warn({ err, repo: r.fullName }, "live state fetch failed");
+              if (state.lastCommitSha) {
+                await app.db
+                  .update(studentRepos)
+                  .set({
+                    lastCommitSha: state.lastCommitSha,
+                    lastCommitAt: state.lastCommitAt ? new Date(state.lastCommitAt) : null,
+                    ciStatus: state.ciStatus,
+                  })
+                  .where(eq(studentRepos.id, r.id));
               }
+            } catch (err) {
+              req.log.warn({ err, repo: r.fullName }, "live state fetch failed");
             }
           }),
         );
