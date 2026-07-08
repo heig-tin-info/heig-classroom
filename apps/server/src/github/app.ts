@@ -58,9 +58,24 @@ export async function listInstalledOrgs(config: AppConfig): Promise<string[]> {
   return logins.sort();
 }
 
-/** Does the organization exist on GitHub? (public, unauthenticated lookup).
- *  `null` = inconclusive (rate limit, network): let it through. */
-export async function orgExistsOnGithub(login: string): Promise<boolean | null> {
+/** Does the organization exist on GitHub? Authenticated through the App
+ *  JWT when configured (the anonymous quota is 60 req/h and exhausts fast);
+ *  `null` = indeterminate (rate limit, network): let it through. */
+export async function orgExistsOnGithub(
+  login: string,
+  config?: AppConfig,
+): Promise<boolean | null> {
+  const app = config ? githubApp(config) : null;
+  if (app) {
+    try {
+      await app.octokit.request("GET /orgs/{org}", { org: login, request: { retries: 0 } });
+      return true;
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 404) return false;
+      // fall through to the anonymous lookup
+    }
+  }
   try {
     const res = await fetch(`https://api.github.com/orgs/${encodeURIComponent(login)}`, {
       headers: { accept: "application/vnd.github+json", "user-agent": "hgc-server" },

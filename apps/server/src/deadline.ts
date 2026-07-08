@@ -158,7 +158,10 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
         failures,
       },
     });
-    publish("assignments", [`classroom:${row.classroomId}`]);
+    publish("assignments", [`classroom:${row.classroomId}`], {
+      kind: "deadline_applied",
+      message: `Deadline enforced on “${a.name}” (${repos.length - failures.length}/${repos.length} repositories)`,
+    });
     publish(
       "repos",
       repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),

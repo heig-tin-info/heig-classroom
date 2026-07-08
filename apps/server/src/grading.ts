@@ -12,6 +12,7 @@ import type { Octokit } from "octokit";
 
 import { extractGrade, GRADE_ANNOTATION_TITLE } from "@hgc/domain";
 import { assignments, botCommits, gradeRuns, pushReceipts, studentRepos } from "./db/schema.js";
+import { publish } from "./events.js";
 
 export const GRADING_WORKFLOW_PATH = ".github/workflows/grading.yml";
 
@@ -244,6 +245,12 @@ export async function ingestCompletedRun(
   if (inserted.length === 0) return null; // race with another worker
 
   await refreshGradeSelection(app, ctx);
+  if (parse.status === "ok") {
+    publish("grades", [`classroom:${ctx.classroomId}`], {
+      kind: "grade_captured",
+      message: `Grade ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
+    });
+  }
 
   // GR-06: aggregated ci_status, only for the repository's last known commit.
   if (!ctx.repo.lastCommitSha || ctx.repo.lastCommitSha === run.headSha) {

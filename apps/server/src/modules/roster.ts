@@ -63,7 +63,12 @@ export async function importRoster(
  */
 export async function claimEnrollments(db: Db, user: { id: string; email: string }) {
   const pending = await db
-    .select({ id: enrollments.id, classroomId: enrollments.classroomId })
+    .select({
+      id: enrollments.id,
+      classroomId: enrollments.classroomId,
+      nom: enrollments.nom,
+      prenom: enrollments.prenom,
+    })
     .from(enrollments)
     .where(
       and(
@@ -80,7 +85,10 @@ export async function claimEnrollments(db: Db, user: { id: string; email: string
         .set({ status: "claimed", userId: user.id, claimedAt: new Date() })
         .where(and(eq(enrollments.id, entry.id), eq(enrollments.status, "pending")));
       claimed += 1;
-      publish("roster", [`classroom:${entry.classroomId}`, `user:${user.id}`]);
+      publish("roster", [`classroom:${entry.classroomId}`, `user:${user.id}`], {
+        kind: "student_joined",
+        message: `${entry.prenom} ${entry.nom} joined the classroom`,
+      });
       await audit(db, {
         actorUserId: user.id,
         actorType: "system",

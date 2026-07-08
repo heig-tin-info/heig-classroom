@@ -61,6 +61,14 @@ export interface ClassroomSummary {
   createdAt: string;
   students: number;
   claimed: number;
+  assignments: {
+    id: string;
+    name: string;
+    state: "draft" | "published" | "locked";
+    startAt: string;
+    deadlineAt: string;
+  }[];
+  roster: { nom: string; prenom: string; claimed: boolean }[];
 }
 
 export interface RosterEntry {

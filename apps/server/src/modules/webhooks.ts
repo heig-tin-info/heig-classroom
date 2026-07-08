@@ -148,7 +148,14 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
       lastCommitAt: p.head_commit?.timestamp ? new Date(p.head_commit.timestamp) : new Date(),
     })
     .where(eq(studentRepos.id, ctx.repo.id));
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  const shortRepo = ctx.repo.fullName?.split("/")[1] ?? "repository";
+  publish(
+    "repos",
+    [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`],
+    isBot
+      ? undefined
+      : { kind: "commit_pushed", message: `New push on ${shortRepo} (${branch})` },
+  );
 
   // Protected files (GH-30..35): never on a push from the bot (anti-loop).
   if (isBot || ctx.assignment.protectedFiles.length === 0) return;
@@ -216,7 +223,10 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
     subjectId: ctx.repo.id,
     payload: { files: result.files, sha: result.sha },
   });
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
+    kind: "protected_reverted",
+    message: `Protected files restored on ${shortRepo} (${result.files.join(", ")})`,
+  });
 }
 
 interface PullRequestPayload {
@@ -245,7 +255,16 @@ async function handlePullRequest(app: FastifyInstance, p: PullRequestPayload) {
     .update(studentRepos)
     .set({ syncPrNumber: p.pull_request.number, syncPrState: state })
     .where(eq(studentRepos.id, ctx.repo.id));
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish(
+    "repos",
+    [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`],
+    state === "merged"
+      ? {
+          kind: "sync",
+          message: `Sync PR merged on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
+        }
+      : undefined,
+  );
 }
 
 /** GR-04/05: pending status on an eligible run, full ingestion on completed. */

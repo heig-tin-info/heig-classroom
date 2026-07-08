@@ -17,8 +17,8 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { HelpIcon } from "./help";
 import { api, ApiError } from "./api";
-import { AssignmentDetail } from "./AssignmentDetail";
 import {
   Badge,
   Button,
@@ -535,34 +535,24 @@ function AssignmentRow({
 export function AssignmentsCard({
   classroomId,
   appInstalled,
+  onOpenAssignment,
 }: {
   classroomId: string;
   appInstalled: boolean;
+  onOpenAssignment: (assignmentId: string) => void;
 }) {
   const [modal, setModal] = useState<"create" | Assignment | null>(null);
-  const [detailId, setDetailId] = useState<string | null>(null);
   const list = useQuery<Assignment[]>({
     queryKey: ["assignments", classroomId],
     queryFn: () => api(`/app/api/classrooms/${classroomId}/assignments`),
   });
-
-  if (detailId) {
-    return (
-      <Card className="p-4">
-        <AssignmentDetail
-          classroomId={classroomId}
-          assignmentId={detailId}
-          onBack={() => setDetailId(null)}
-        />
-      </Card>
-    );
-  }
 
   return (
     <Card className="p-4">
       <div className="mb-1 flex items-center gap-2">
         <ClipboardList className="size-4 text-zinc-400" />
         <h2 className="font-medium">Assignments</h2>
+        <HelpIcon topic="assignments" />
         <span className="flex-1" />
         {appInstalled ? (
           <Button onClick={() => setModal("create")}>
@@ -585,7 +575,7 @@ export function AssignmentsCard({
               classroomId={classroomId}
               assignment={a}
               onEdit={() => setModal(a)}
-              onOpen={() => setDetailId(a.id)}
+              onOpen={() => onOpenAssignment(a.id)}
             />
           ))}
         </ul>

@@ -251,7 +251,10 @@ export async function studentPlugin(
           subjectId: repoRow!.id,
           payload: { repo: result.fullName, invitation: result.invitationStatus },
         });
-        publish("repos", [`classroom:${row.assignment.classroomId}`, `user:${me.id}`]);
+        publish("repos", [`classroom:${row.assignment.classroomId}`, `user:${me.id}`], {
+          kind: "assignment_accepted",
+          message: `${me.givenName} ${me.familyName} accepted “${row.assignment.name}”`.trim(),
+        });
         return updated;
       } catch (err) {
         req.log.error({ err }, "provisioning failed");

@@ -3,6 +3,7 @@ import { Loader2, Pause, Play, TimerReset, Zap } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "./api";
+import { HelpIcon } from "./help";
 import { Badge, Card, isoDateTime } from "./ui";
 
 interface TaskRow {
@@ -101,6 +102,7 @@ export function ScheduledTasksCard() {
       <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
         <TimerReset className="size-4 text-zinc-400" />
         <h2 className="font-medium">Scheduled tasks</h2>
+        <HelpIcon topic="scheduled-tasks" />
         <span className="text-xs text-zinc-400">
           Safety-net reconciliation. Webhook events are processed immediately, without waiting
           for these schedules.

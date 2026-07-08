@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Mail,
   Pencil,
   Trash2,
   UserRoundX,
@@ -149,7 +150,16 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
         </span>
       </td>
       <td className={cell}>{entry.prenom}</td>
-      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>{entry.email}</td>
+      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
+        <a
+          href={`mailto:${entry.email}`}
+          title={`Write to ${entry.prenom} ${entry.nom}`}
+          className="inline-flex items-center gap-1.5 hover:text-accent hover:underline"
+        >
+          <Mail className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+          {entry.email}
+        </a>
+      </td>
       <td className={cell}>
         {entry.conflictFlag ? (
           <Badge tone="red" icon={AlertTriangle}>

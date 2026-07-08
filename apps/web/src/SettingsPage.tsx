@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, GraduationCap, School, ShieldCheck, Unlink } from "lucide-react";
+import { ArrowLeft, BellRing, GraduationCap, School, ShieldCheck, Unlink } from "lucide-react";
 
 import { AdminPanel } from "./AdminPanel";
+import { HelpIcon } from "./help";
+import { NOTICE_KINDS, notifyPrefs, setNotifyPref, type NoticeKind } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
 import { api, type Me } from "./api";
 import { Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
@@ -26,6 +28,39 @@ function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: str
     >
       {initials}
     </span>
+  );
+}
+
+/** Per-kind toggles for the real-time toasts; stored in this browser. */
+function NotificationSettings() {
+  const [prefs, setPrefs] = useState(notifyPrefs);
+  const toggle = (kind: NoticeKind) => {
+    const next = !prefs[kind];
+    setNotifyPref(kind, next);
+    setPrefs({ ...prefs, [kind]: next });
+  };
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <BellRing className="size-4 text-zinc-400" />
+        <h2 className="font-medium">Notifications</h2>
+        <HelpIcon topic="notifications" />
+        <span className="text-xs text-zinc-400">Real-time toasts, bottom left.</span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {NOTICE_KINDS.map(({ kind, label }) => (
+          <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={prefs[kind]}
+              onChange={() => toggle(kind)}
+              className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+    </Card>
   );
 }
 
@@ -125,6 +160,8 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
           onClose={() => setEditingAvatar(false)}
         />
       ) : null}
+
+      <NotificationSettings />
 
       {me.role === "admin" ? (
         <div className="border-t border-zinc-200/60 pt-6 dark:border-zinc-800/60">

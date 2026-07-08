@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { enrollments, classrooms, organizations } from "../db/schema.js";
+import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
 import { listInstalledOrgs, orgExistsOnGithub, resolveOrgInstallation } from "../github/app.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
 
@@ -90,7 +90,7 @@ export async function classroomsPlugin(
   });
 
   app.get("/app/api/classrooms", { preHandler: requireTeacher }, async (req) => {
-    return app.db
+    const rows = await app.db
       .select({
         id: classrooms.id,
         name: classrooms.name,
@@ -105,6 +105,45 @@ export async function classroomsPlugin(
       .where(and(eq(classrooms.teacherId, req.user!.id), isNull(classrooms.archivedAt)))
       .groupBy(classrooms.id, organizations.login)
       .orderBy(classrooms.createdAt);
+
+    // Cards, sortable list, timeline and hover popovers all feed from this
+    // single payload: assignments (dates, state) and a roster preview.
+    const ids = rows.map((r) => r.id);
+    const assigns = ids.length
+      ? await app.db
+          .select({
+            id: assignments.id,
+            classroomId: assignments.classroomId,
+            name: assignments.name,
+            state: assignments.state,
+            startAt: assignments.startAt,
+            deadlineAt: assignments.deadlineAt,
+          })
+          .from(assignments)
+          .where(and(inArray(assignments.classroomId, ids), isNull(assignments.archivedAt)))
+          .orderBy(assignments.startAt)
+      : [];
+    const roster = ids.length
+      ? await app.db
+          .select({
+            classroomId: enrollments.classroomId,
+            nom: enrollments.nom,
+            prenom: enrollments.prenom,
+            status: enrollments.status,
+          })
+          .from(enrollments)
+          .where(inArray(enrollments.classroomId, ids))
+          .orderBy(enrollments.nom, enrollments.prenom)
+      : [];
+    return rows.map((r) => ({
+      ...r,
+      assignments: assigns
+        .filter((a) => a.classroomId === r.id)
+        .map(({ classroomId: _c, ...a }) => a),
+      roster: roster
+        .filter((e) => e.classroomId === r.id)
+        .map((e) => ({ nom: e.nom, prenom: e.prenom, claimed: e.status === "claimed" })),
+    }));
   });
 
   app.post("/app/api/classrooms", { preHandler: requireTeacher }, async (req, reply) => {
@@ -114,7 +153,7 @@ export async function classroomsPlugin(
     }
     // The organization must exist on GitHub (free-form input validated);
     // inconclusive lookup (rate limit) = let it through.
-    const exists = await orgExistsOnGithub(body.data.orgLogin.trim());
+    const exists = await orgExistsOnGithub(body.data.orgLogin.trim(), config);
     if (exists === false) {
       return reply.code(400).send({
         error: "org_not_found",

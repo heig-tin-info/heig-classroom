@@ -183,7 +183,10 @@ export function makeSyncHandler(app: FastifyInstance, config: AppConfig) {
         failures,
       },
     });
-    publish("assignments", [`classroom:${row.classroomId}`]);
+    publish("assignments", [`classroom:${row.classroomId}`], {
+      kind: "sync",
+      message: `Sync finished for “${a.name}”: ${prs} pull request${prs === 1 ? "" : "s"} opened, ${skipped} already up to date`,
+    });
     publish(
       "repos",
       repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),

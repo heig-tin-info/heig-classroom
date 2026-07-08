@@ -2,23 +2,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
+  ArrowDown,
+  ArrowUp,
   BookOpen,
-  ChevronDown,
-  Settings as SettingsIcon,
-  Trash2,
-  ArrowLeft,
   Building2,
+  CalendarRange,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   ClipboardList,
   Clock,
+  ExternalLink,
   FolderGit2,
   GraduationCap,
+  LayoutGrid,
+  List,
   Loader2,
   LogOut,
   Moon,
   Plus,
   School,
+  Search,
+  Settings as SettingsIcon,
   Sun,
+  Trash2,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -32,6 +39,11 @@ import {
   type RosterEntry,
 } from "./api";
 import type { GradeView } from "./AssignmentDetail";
+import { AssignmentDetail } from "./AssignmentDetail";
+import { fuzzyFilter } from "./fuzzy";
+import { HelpIcon } from "./help";
+import { useRoute, type Route } from "./router";
+import { TimelineView } from "./Timeline";
 import { AssignmentsCard } from "./AssignmentsCard";
 import { useLiveUpdates } from "./live";
 import { RosterImport } from "./RosterImport";
@@ -198,6 +210,16 @@ function Header({
         </button>
         <span className="flex-1" />
         <a
+          href="https://github.com/heig-tin-info/heig-classroom"
+          target="_blank"
+          rel="noreferrer"
+          aria-label="Project sources on GitHub"
+          title="Project sources on GitHub"
+          className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+        >
+          <GithubIcon className="size-4" />
+        </a>
+        <a
           href="https://heig-tin-info.github.io/heig-classroom/"
           target="_blank"
           rel="noreferrer"
@@ -311,7 +333,63 @@ function ClassroomSettings({
   );
 }
 
-function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
+/** Page-level breadcrumb: every in-app page shows where it sits. */
+function Breadcrumb({ items }: { items: { label: string; onClick?: () => void }[] }) {
+  return (
+    <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-sm">
+      {items.map((item, i) => (
+        <span key={i} className="inline-flex items-center gap-1">
+          {i > 0 ? <ChevronRight className="size-3.5 text-zinc-300 dark:text-zinc-600" /> : null}
+          {item.onClick ? (
+            <button
+              onClick={item.onClick}
+              className="text-zinc-500 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+            >
+              {item.label}
+            </button>
+          ) : (
+            <span className="font-medium text-zinc-900 dark:text-zinc-100">{item.label}</span>
+          )}
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+/** Assignment page: own view, out of the roster, under the page breadcrumb. */
+function AssignmentPage({
+  classroomId,
+  assignmentId,
+  navigate,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  navigate: (r: Route) => void;
+}) {
+  const room = useQuery<ClassroomDetail>({
+    queryKey: ["classroom", classroomId],
+    queryFn: () => api(`/app/api/classrooms/${classroomId}`),
+  });
+  return (
+    <div className="space-y-4">
+      <Breadcrumb
+        items={[
+          { label: "Classrooms", onClick: () => navigate({ view: "home" }) },
+          {
+            label: room.data?.name ?? "…",
+            onClick: () => navigate({ view: "classroom", id: classroomId }),
+          },
+          { label: "Assignment" },
+        ]}
+      />
+      <Card className="p-4">
+        <AssignmentDetail classroomId={classroomId} assignmentId={assignmentId} />
+      </Card>
+    </div>
+  );
+}
+
+function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const [showSettings, setShowSettings] = useState(false);
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
@@ -324,12 +402,12 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
 
   return (
     <div className="space-y-4">
-      <button
-        onClick={onBack}
-        className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-      >
-        <ArrowLeft className="size-4" /> Classrooms
-      </button>
+      <Breadcrumb
+        items={[
+          { label: "Classrooms", onClick: () => navigate({ view: "home" }) },
+          { label: room.name },
+        ]}
+      />
 
       <div className="flex flex-wrap items-center gap-3">
         {room.org ? <OrgAvatar login={room.org.login} className="size-8" /> : null}
@@ -365,15 +443,22 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
       </div>
 
       {showSettings ? (
-        <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={onBack} />
+        <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={() => navigate({ view: "home" })} />
       ) : null}
 
-      <AssignmentsCard classroomId={room.id} appInstalled={room.org?.installationId != null} />
+      <AssignmentsCard
+        classroomId={room.id}
+        appInstalled={room.org?.installationId != null}
+        onOpenAssignment={(aid) =>
+          navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
+        }
+      />
 
       <Card>
         <div className="flex items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
           <Users className="size-4 text-zinc-400" />
           <h2 className="font-medium">Roster</h2>
+          <HelpIcon topic="roster" />
         </div>
         <RosterTable classroomId={room.id} roster={room.roster} />
       </Card>
@@ -383,12 +468,174 @@ function ClassroomView({ id, onBack }: { id: string; onBack: () => void }) {
   );
 }
 
-function TeacherHome() {
+type ClassroomsViewMode = "cards" | "list" | "timeline";
+
+/** Hover popover on the student badges: the roster at a glance. */
+function RosterPopover({ room, children }: { room: ClassroomSummary; children: React.ReactNode }) {
+  return (
+    <span className="group/pop relative inline-flex">
+      {children}
+      {room.roster.length > 0 ? (
+        <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-64 rounded-xl bg-white p-3 text-left shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
+            Roster
+          </span>
+          <span className="grid max-h-56 gap-0.5 overflow-hidden text-xs">
+            {room.roster.slice(0, 16).map((s, i) => (
+              <span key={i} className="flex items-center gap-1.5 whitespace-nowrap">
+                {s.claimed ? (
+                  <CheckCircle2 className="size-3 text-emerald-500" />
+                ) : (
+                  <Clock className="size-3 text-zinc-300 dark:text-zinc-600" />
+                )}
+                {s.nom} {s.prenom}
+              </span>
+            ))}
+            {room.roster.length > 16 ? (
+              <span className="text-zinc-400">… and {room.roster.length - 16} more</span>
+            ) : null}
+          </span>
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function OrgLink({ login }: { login: string }) {
+  return (
+    <a
+      href={`https://github.com/${login}`}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      title={`Open ${login} on GitHub`}
+      className="inline-flex items-center gap-1 hover:text-accent hover:underline"
+    >
+      <Building2 className="size-3.5" /> {login}
+      <ExternalLink className="size-3" />
+    </a>
+  );
+}
+
+function ClassroomsList({
+  rooms,
+  onOpen,
+}: {
+  rooms: ClassroomSummary[];
+  onOpen: (id: string) => void;
+}) {
+  type Key = "name" | "org" | "students" | "claimed" | "assignments" | "createdAt";
+  const [sortKey, setSortKey] = useState<Key>("name");
+  const [dir, setDir] = useState<1 | -1>(1);
+  const cell = "px-3 py-2";
+  const val = (r: ClassroomSummary) =>
+    sortKey === "name"
+      ? r.name
+      : sortKey === "org"
+        ? r.orgLogin
+        : sortKey === "students"
+          ? r.students
+          : sortKey === "claimed"
+            ? r.claimed
+            : sortKey === "assignments"
+              ? r.assignments.length
+              : r.createdAt;
+  const sorted = [...rooms].sort((a, b) => {
+    const x = val(a);
+    const y = val(b);
+    return (
+      (typeof x === "number" && typeof y === "number"
+        ? x - y
+        : String(x).localeCompare(String(y))) * dir
+    );
+  });
+  function Th({ k, children, right }: { k: Key; children: React.ReactNode; right?: boolean }) {
+    const active = sortKey === k;
+    return (
+      <th className={`${cell} font-medium ${right ? "text-right" : ""}`}>
+        <button
+          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
+          onClick={() => {
+            if (active) setDir((d) => (d === 1 ? -1 : 1));
+            else {
+              setSortKey(k);
+              setDir(1);
+            }
+          }}
+        >
+          {children}
+          {active ? (dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : null}
+        </button>
+      </th>
+    );
+  }
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
+              <Th k="name">Name</Th>
+              <Th k="org">Organization</Th>
+              <Th k="students" right>
+                Students
+              </Th>
+              <Th k="claimed" right>
+                Claimed
+              </Th>
+              <Th k="assignments" right>
+                Assignments
+              </Th>
+              <Th k="createdAt">Created</Th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {sorted.map((r) => (
+              <tr
+                key={r.id}
+                onClick={() => onOpen(r.id)}
+                className="cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+              >
+                <td className={`${cell} font-medium`}>
+                  <span className="inline-flex items-center gap-2">
+                    <OrgAvatar login={r.orgLogin} className="size-5" /> {r.name}
+                  </span>
+                </td>
+                <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
+                  <OrgLink login={r.orgLogin} />
+                </td>
+                <td className={`${cell} text-right`}>
+                  <RosterPopover room={r}>
+                    <span className="tabular-nums">{r.students}</span>
+                  </RosterPopover>
+                </td>
+                <td className={`${cell} text-right tabular-nums`}>{r.claimed}</td>
+                <td className={`${cell} text-right tabular-nums`}>{r.assignments.length}</td>
+                <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
+                  {r.createdAt.slice(0, 10)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
   const qc = useQueryClient();
-  const [selected, setSelected] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [org, setOrg] = useState("");
   const [customOrg, setCustomOrg] = useState(false);
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<ClassroomsViewMode>(
+    () => (localStorage.getItem("hgc-classrooms-view") as ClassroomsViewMode) || "cards",
+  );
+  const setViewMode = (m: ClassroomsViewMode) => {
+    setMode(m);
+    localStorage.setItem("hgc-classrooms-view", m);
+  };
   const rooms = useQuery<ClassroomSummary[]>({
     queryKey: ["classrooms"],
     queryFn: () => api("/app/api/classrooms"),
@@ -410,35 +657,99 @@ function TeacherHome() {
     },
   });
 
-  if (selected) return <ClassroomView id={selected} onBack={() => setSelected(null)} />;
+  const filtered = fuzzyFilter(query, rooms.data ?? [], (r) => `${r.name} ${r.orgLogin}`);
+  const open = (id: string) => navigate({ view: "classroom", id });
+
+  const toggle = (m: ClassroomsViewMode, Icon: typeof LayoutGrid, label: string) => (
+    <button
+      aria-label={label}
+      title={label}
+      onClick={() => setViewMode(m)}
+      className={`rounded-md p-1.5 transition-colors ${
+        mode === m
+          ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+          : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+      }`}
+    >
+      <Icon className="size-4" />
+    </button>
+  );
+
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
+      <div className="flex flex-wrap items-center gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">My classrooms</h1>
+        <HelpIcon topic="classrooms" />
+        <span className="flex-1" />
+        <label className="relative">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="search"
+            placeholder="Search…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+            aria-label="Search classrooms"
+          />
+        </label>
+        <span className="flex items-center gap-0.5 rounded-lg bg-zinc-100 p-0.5 dark:bg-zinc-800">
+          {toggle("cards", LayoutGrid, "Card view")}
+          {toggle("list", List, "List view")}
+          {toggle("timeline", CalendarRange, "Timeline view")}
+        </span>
+      </div>
 
       {rooms.data?.length ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {rooms.data.map((c) => (
-            <button key={c.id} onClick={() => setSelected(c.id)} className="text-left">
-              <Card className="p-4 hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgb(0_0_0/0.06),0_12px_28px_rgb(0_0_0/0.08)]">
-                <div className="flex items-center gap-2">
-                  <OrgAvatar login={c.orgLogin} className="size-6" />
-                  <span className="font-medium">{c.name}</span>
-                </div>
-                <p className="mt-1 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-                  <Building2 className="size-3.5" /> {c.orgLogin}
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <Badge tone="zinc" icon={Users}>
-                    {c.students} student{c.students > 1 ? "s" : ""}
-                  </Badge>
-                  <Badge tone="green" icon={CheckCircle2}>
-                    {c.claimed} claimed
-                  </Badge>
-                </div>
-              </Card>
-            </button>
-          ))}
-        </div>
+        mode === "timeline" ? (
+          <TimelineView
+            rooms={filtered}
+            onOpenAssignment={(classroomId, assignmentId) =>
+              navigate({ view: "assignment", classroomId, assignmentId })
+            }
+          />
+        ) : mode === "list" ? (
+          <ClassroomsList rooms={filtered} onOpen={open} />
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {filtered.map((c) => (
+              <div
+                key={c.id}
+                onClick={() => open(c.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") open(c.id);
+                }}
+                className="cursor-pointer text-left"
+              >
+                <Card className="p-4 hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgb(0_0_0/0.06),0_12px_28px_rgb(0_0_0/0.08)]">
+                  <div className="flex items-center gap-2">
+                    <OrgAvatar login={c.orgLogin} className="size-6" />
+                    <span className="font-medium">{c.name}</span>
+                  </div>
+                  <p className="mt-1 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+                    <OrgLink login={c.orgLogin} />
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <RosterPopover room={c}>
+                      <Badge tone="zinc" icon={Users}>
+                        {c.students} student{c.students === 1 ? "" : "s"}
+                      </Badge>
+                    </RosterPopover>
+                    <RosterPopover room={c}>
+                      <Badge tone="green" icon={CheckCircle2}>
+                        {c.claimed} claimed
+                      </Badge>
+                    </RosterPopover>
+                    <Badge tone="zinc" icon={ClipboardList}>
+                      {c.assignments.length} assignment{c.assignments.length === 1 ? "" : "s"}
+                    </Badge>
+                  </div>
+                </Card>
+              </div>
+            ))}
+          </div>
+        )
       ) : (
         <Card>
           <EmptyState icon={School} title="No classrooms">
@@ -451,6 +762,7 @@ function TeacherHome() {
         <div className="mb-3 flex items-center gap-2">
           <Plus className="size-4 text-zinc-400" />
           <h2 className="font-medium">New classroom</h2>
+          <HelpIcon topic="new-classroom" />
         </div>
         <form
           className="flex flex-wrap items-end gap-3"
@@ -519,6 +831,7 @@ function TeacherHome() {
     </div>
   );
 }
+
 
 interface StudentClassroom {
   id: string;
@@ -696,26 +1009,35 @@ function StudentHome({ me }: { me: Me }) {
 
 export default function App() {
   const me = useMe();
-  const [view, setView] = useState<"home" | "settings">("home");
+  const [route, navigate] = useRoute();
   useLiveUpdates(me.data != null);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
   const role = me.data.role;
+  const teacher = role === "teacher" || role === "admin";
   return (
     <div className="min-h-dvh">
       <Header
         me={me.data}
-        onOpenSettings={() => setView("settings")}
-        onHome={() => setView("home")}
+        onOpenSettings={() => navigate({ view: "settings" })}
+        onHome={() => navigate({ view: "home" })}
       />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
-        {view === "settings" ? (
-          <SettingsPage me={me.data} onBack={() => setView("home")} />
-        ) : role === "teacher" || role === "admin" ? (
-          <TeacherHome />
-        ) : (
+        {route.view === "settings" ? (
+          <SettingsPage me={me.data} onBack={() => navigate({ view: "home" })} />
+        ) : !teacher ? (
           <StudentHome me={me.data} />
+        ) : route.view === "classroom" ? (
+          <ClassroomView id={route.id} navigate={navigate} />
+        ) : route.view === "assignment" ? (
+          <AssignmentPage
+            classroomId={route.classroomId}
+            assignmentId={route.assignmentId}
+            navigate={navigate}
+          />
+        ) : (
+          <TeacherHome navigate={navigate} />
         )}
       </main>
     </div>

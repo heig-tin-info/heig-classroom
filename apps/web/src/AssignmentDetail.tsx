@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowLeft,
+  ArrowDown,
+  ArrowUp,
   CalendarClock,
   CheckCircle2,
   Clock,
@@ -13,12 +14,15 @@ import {
   LockOpen,
   Loader2,
   RefreshCw,
+  Search as SearchIcon,
   Snowflake,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "./api";
+import { fuzzyFilter } from "./fuzzy";
+import { HelpIcon } from "./help";
 import { Badge, Button, GithubIcon, isoDateTime, Modal } from "./ui";
 
 export interface GradeView {
@@ -450,15 +454,25 @@ function SyncBanner({
   );
 }
 
+type SortKey =
+  | "nom"
+  | "prenom"
+  | "github"
+  | "lastCommitAt"
+  | "commitCount"
+  | "grade"
+  | "status";
+
 export function AssignmentDetail({
   classroomId,
   assignmentId,
-  onBack,
 }: {
   classroomId: string;
   assignmentId: string;
-  onBack: () => void;
 }) {
+  const [query, setQuery] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("nom");
+  const [dir, setDir] = useState<1 | -1>(1);
   const detail = useQuery<Detail>({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
@@ -476,16 +490,68 @@ export function AssignmentDetail({
   const { assignment: a, students } = detail.data;
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
 
+  const sortVal = (s: DetailStudent): string | number => {
+    switch (sortKey) {
+      case "nom":
+        return s.nom;
+      case "prenom":
+        return s.prenom;
+      case "github":
+        return s.githubLogin ?? "";
+      case "lastCommitAt":
+        return s.repo?.lastCommitAt ?? "";
+      case "commitCount":
+        return s.repo?.commitCount ?? -1;
+      case "grade":
+        return s.repo?.grade?.points ?? -1;
+      case "status":
+        return s.repo?.provisionStatus === "ok" ? 2 : s.claimStatus === "claimed" ? 1 : 0;
+    }
+  };
+  const shown = fuzzyFilter(
+    query,
+    students,
+    (s) => `${s.nom} ${s.prenom} ${s.githubLogin ?? ""} ${s.email}`,
+  );
+  const rows =
+    query.trim() !== ""
+      ? shown // la recherche trie déjà par pertinence
+      : [...shown].sort((x, y) => {
+          const vx = sortVal(x);
+          const vy = sortVal(y);
+          return (
+            (typeof vx === "number" && typeof vy === "number"
+              ? vx - vy
+              : String(vx).localeCompare(String(vy))) * dir
+          );
+        });
+
+  function Th({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) {
+    const active = sortKey === k;
+    return (
+      <th className={`${cell} font-medium ${right ? "text-right" : ""}`}>
+        <button
+          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
+          onClick={() => {
+            if (active) setDir((d) => (d === 1 ? -1 : 1));
+            else {
+              setSortKey(k);
+              setDir(1);
+            }
+          }}
+        >
+          {children}
+          {active ? (dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : null}
+        </button>
+      </th>
+    );
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-        >
-          <ArrowLeft className="size-4" /> Assignments
-        </button>
         <span className="font-medium">{a.name}</span>
+        <HelpIcon topic="assignment-detail" />
         <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "red" : "zinc"}>
           {a.state}
         </Badge>
@@ -497,6 +563,17 @@ export function AssignmentDetail({
           {accepted}/{students.length} accepted
         </Badge>
         <span className="flex-1" />
+        <label className="relative">
+          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="search"
+            placeholder="Search students…"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+            aria-label="Search students"
+          />
+        </label>
         <Button variant="ghost" onClick={() => detail.refetch()} disabled={detail.isFetching}>
           <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> Refresh
         </Button>
@@ -507,21 +584,23 @@ export function AssignmentDetail({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              <th className={`${cell} font-medium`}>Last name</th>
-              <th className={`${cell} font-medium`}>First name</th>
-              <th className={`${cell} font-medium`}>GitHub</th>
-              <th className={`${cell} font-medium`}>Status</th>
-              <th className={`${cell} font-medium`}>Last commit</th>
-              <th className={`${cell} font-medium`}>Date</th>
-              <th className={`${cell} font-medium text-right`}>Commits</th>
-              <th className={`${cell} font-medium`}>Checks</th>
-              <th className={`${cell} font-medium`}>Grade</th>
+            <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
+              <Th k="nom">Last name</Th>
+              <Th k="prenom">First name</Th>
+              <Th k="github">GitHub</Th>
+              <Th k="status">Status</Th>
+              <th className={`${cell} font-medium uppercase tracking-wide`}>Last commit</th>
+              <Th k="lastCommitAt">Date</Th>
+              <Th k="commitCount" right>
+                Commits
+              </Th>
+              <th className={`${cell} font-medium uppercase tracking-wide`}>Checks</th>
+              <Th k="grade">Grade</Th>
               <th className={cell} aria-label="Actions" />
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {students.map((s) => (
+            {rows.map((s) => (
               <StudentRow
                 key={s.enrollmentId}
                 classroomId={classroomId}

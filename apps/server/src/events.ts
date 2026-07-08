@@ -6,17 +6,33 @@
  */
 import { EventEmitter } from "node:events";
 
+/** Real-time notification attached to an event (toast in the UI). */
+export interface AppNotice {
+  kind:
+    | "student_joined"
+    | "assignment_accepted"
+    | "commit_pushed"
+    | "grade_captured"
+    | "protected_reverted"
+    | "deadline_applied"
+    | "sync";
+  message: string;
+}
+
 export interface AppEvent {
   type: string;
   /** e.g. `classroom:<id>`, `teacher:<userId>`, `user:<userId>` */
   topics: string[];
+  notice?: AppNotice;
 }
 
 const bus = new EventEmitter();
 bus.setMaxListeners(0); // one SSE connection per tab
 
-export function publish(type: string, topics: string[]) {
-  if (topics.length > 0) bus.emit("event", { type, topics } satisfies AppEvent);
+export function publish(type: string, topics: string[], notice?: AppNotice) {
+  if (topics.length === 0) return;
+  const event: AppEvent = notice ? { type, topics, notice } : { type, topics };
+  bus.emit("event", event);
 }
 
 export function subscribe(listener: (e: AppEvent) => void): () => void {

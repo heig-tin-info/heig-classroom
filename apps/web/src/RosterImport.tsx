@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload, UserPlus } from "
 import { useRef, useState } from "react";
 import * as XLSX from "xlsx";
 
+import { HelpIcon } from "./help";
 import { api, ApiError } from "./api";
 import { Button, Card } from "./ui";
 
@@ -68,6 +69,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
       <div className="mb-3 flex items-center gap-2">
         <Upload className="size-4 text-zinc-400" />
         <h2 className="font-medium">Import roster</h2>
+        <HelpIcon topic="import-roster" />
       </div>
 
       {/* File drop: Excel, LibreOffice or CSV */}
