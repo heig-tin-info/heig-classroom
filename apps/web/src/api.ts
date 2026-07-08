@@ -1,4 +1,4 @@
-/** Client de l'API portail : cookies de session + en-tête CSRF double-submit. */
+/** Portal API client: session cookies + double-submit CSRF header. */
 
 function csrfToken(): string {
   return (

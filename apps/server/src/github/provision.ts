@@ -1,11 +1,11 @@
 /**
- * Provisionnement du dépôt étudiant à l'acceptation (GH-20..25), porté du
- * spike S2. Chaque étape vérifie l'état avant d'agir : le rejeu complet est
- * sûr (reprise après échec partiel, NFR-09).
+ * Student repository provisioning on acceptance (GH-20..25), ported from
+ * spike S2. Each step checks the state before acting: a full replay is
+ * safe (recovery after partial failure, NFR-09).
  *
- * Leçon du spike : ne JAMAIS lister les refs d'un dépôt fraîchement créé
- * (409 « Git Repository is empty » que le plugin retry d'Octokit étire en
- * ~40 s de backoff) — et `retries: 0` partout où un 4xx est porteur de sens.
+ * Lesson from the spike: NEVER list the refs of a freshly created repository
+ * (409 "Git Repository is empty" that Octokit's retry plugin stretches into
+ * ~40 s of backoff), and `retries: 0` everywhere a 4xx carries meaning.
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,7 +22,7 @@ function git(cwd: string, ...args: string[]) {
   );
 }
 
-/** Dépôt bare : `--git-dir` explicite (compatible `safe.bareRepository=explicit`). */
+/** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
 function gitBare(gitDir: string, ...args: string[]) {
   return (
     execFileSync("git", ["--git-dir", gitDir, ...args], { stdio: "pipe" })?.toString() ?? ""
@@ -34,7 +34,7 @@ export interface ProvisionResult {
   fullName: string;
   defaultBranch: string;
   rulesetId: number | null;
-  /** `pending` si une invitation a été créée, `accepted` si déjà collaborateur. */
+  /** `pending` if an invitation was created, `accepted` if already a collaborator. */
   invitationStatus: "pending" | "accepted";
 }
 
@@ -52,7 +52,7 @@ export async function provisionStudentRepo(opts: {
   const auth = (repo: string) =>
     `https://x-access-token:${token}@github.com/${org}/${repo}.git`;
 
-  // 1. Création (idempotente : 422 name already exists = étape déjà faite).
+  // 1. Creation (idempotent: 422 name already exists = step already done).
   let created = true;
   let repoId: number;
   let fullName: string;
@@ -80,7 +80,7 @@ export async function provisionStudentRepo(opts: {
     fullName = data.full_name;
   }
 
-  // 2. Push des refs du squashed (skippé si la branche par défaut existe déjà).
+  // 2. Push of the squashed repo's refs (skipped if the default branch already exists).
   let needPush = true;
   if (!created) {
     try {
@@ -90,7 +90,7 @@ export async function provisionStudentRepo(opts: {
       );
       needPush = data.length === 0;
     } catch (err) {
-      if ((err as { status?: number }).status !== 409) throw err; // vide → push
+      if ((err as { status?: number }).status !== 409) throw err; // empty, so push
     }
   }
   if (needPush) {
@@ -104,7 +104,7 @@ export async function provisionStudentRepo(opts: {
     }
   }
 
-  // 3. Ruleset anti force-push / anti suppression (GH-21..23).
+  // 3. Ruleset against force-push / deletion (GH-21..23).
   const { data: rulesets } = await octokit.request("GET /repos/{owner}/{repo}/rulesets", {
     owner: org,
     repo: targetRepo,
@@ -124,7 +124,7 @@ export async function provisionStudentRepo(opts: {
     rulesetId = data.id;
   }
 
-  // 4. Invitation de l'étudiant en push (idempotent : 204 = déjà collaborateur).
+  // 4. Invite the student with push permission (idempotent: 204 = already a collaborator).
   const invite = await octokit.request(
     "PUT /repos/{owner}/{repo}/collaborators/{username}",
     { owner: org, repo: targetRepo, username: studentLogin, permission: "push" },

@@ -1,16 +1,16 @@
 /**
- * Import du roster (AU-13..16) depuis des données tabulaires : CSV collé ou
- * feuille Excel déposée. L'identification des colonnes nom / prénom / e-mail
- * est PERMISSIVE : accents et casse ignorés, alias français/anglais, colonnes
- * parasites tolérées, en-tête pas forcément en première ligne, et repli sur la
- * détection de la colonne e-mail par son contenu si aucun en-tête n'est
- * reconnu. L'import reste atomique : la moindre erreur rejette tout.
+ * Roster import (AU-13..16) from tabular data: pasted CSV or a dropped Excel
+ * sheet. Identification of the last name / first name / e-mail columns is
+ * PERMISSIVE: accents and case ignored, French/English aliases, stray columns
+ * tolerated, header not necessarily on the first line, and a fallback that
+ * detects the e-mail column by its content when no header is recognized.
+ * The import stays atomic: any single error rejects everything.
  */
 
 export interface RosterRow {
   nom: string;
   prenom: string;
-  /** Normalisé : trim + minuscules. */
+  /** Normalized: trimmed + lowercase. */
   email: string;
 }
 
@@ -23,14 +23,14 @@ export type RosterParse =
   | { ok: true; rows: RosterRow[] }
   | { ok: false; errors: RosterError[] };
 
-/** Cellule telle qu'elle sort d'un parseur CSV ou d'une feuille Excel. */
+/** Cell as it comes out of a CSV parser or an Excel sheet. */
 export type Cell = string | number | null | undefined;
 
-// Volontairement simple : la vérification forte, c'est le claim sur e-mail
-// vérifié par l'IdP (AU-18) — ici on attrape les fautes de frappe évidentes.
+// Deliberately simple: the strong check is the claim against the e-mail
+// verified by the IdP (AU-18); here we only catch obvious typos.
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** minuscules, sans accents ni ponctuation : « E-Mail » → « email ». */
+/** Lowercase, no accents or punctuation: "E-Mail" becomes "email". */
 function normalizeHeader(cell: Cell): string {
   return String(cell ?? "")
     .normalize("NFD")
@@ -63,9 +63,9 @@ function matchHeader(row: readonly Cell[]): Partial<Columns> {
 const HEADER_SCAN_ROWS = 10;
 
 /**
- * Localise l'en-tête (les trois colonnes reconnues sur une même ligne, dans
- * les premières lignes) ; à défaut, détecte la colonne e-mail par contenu et
- * prend les deux premières autres colonnes comme nom puis prénom.
+ * Locates the header (the three recognized columns on the same line, within
+ * the first rows); failing that, detects the e-mail column by content and
+ * takes the first two remaining columns as last name then first name.
  */
 function locateColumns(rows: readonly (readonly Cell[])[]): {
   columns: Columns;
@@ -77,8 +77,8 @@ function locateColumns(rows: readonly (readonly Cell[])[]): {
       return { columns: found as Columns, dataStart: i + 1 };
     }
   }
-  // Repli sans en-tête : colonne dont le contenu ressemble le plus à des
-  // e-mails, puis les deux premières autres colonnes (ordre nom, prénom).
+  // Headerless fallback: the column whose content looks most like e-mails,
+  // then the first two remaining columns (order: last name, first name).
   const width = Math.max(0, ...rows.map((r) => r.length));
   let bestCol = -1;
   let bestHits = 0;
@@ -100,9 +100,9 @@ function cellText(cell: Cell): string {
   return String(cell ?? "").trim();
 }
 
-/** Cœur de l'import : des lignes tabulaires (CSV, Excel…) vers le roster. */
+/** Core of the import: tabular rows (CSV, Excel...) to the roster. */
 export function rosterFromRows(input: readonly (readonly Cell[])[]): RosterParse {
-  // Les numéros de ligne rapportés sont ceux du document d'origine (base 1).
+  // Reported line numbers are those of the original document (1-based).
   const numbered = input
     .map((cells, i) => ({ line: i + 1, cells }))
     .filter(({ cells }) => cells.some((c) => cellText(c) !== ""));
@@ -167,7 +167,7 @@ function detectSeparator(line: string): "," | ";" | "\t" {
   return counts[0]![1] > 0 ? counts[0]![0] : ",";
 }
 
-/** CSV texte (collé dans le portail) : découpe simple puis règles communes. */
+/** Text CSV (pasted into the portal): simple split, then the shared rules. */
 export function parseRosterCsv(text: string): RosterParse {
   const clean = text.replace(/^﻿/, ""); // BOM
   const firstLine = clean.split(/\r?\n/, 1)[0] ?? "";

@@ -1,7 +1,7 @@
 /**
- * Commit vide signé bot (GH-42, stratégie deadline commit) : même arbre que
- * le commit de tête, poussé en fast-forward non forcé — une course avec un
- * push étudiant échoue proprement et le job réessaie.
+ * Bot-signed empty commit (GH-42, deadline commit strategy): same tree as
+ * the head commit, pushed as a non-forced fast-forward; a race with a
+ * student push fails cleanly and the job retries.
  */
 import type { Octokit } from "octokit";
 
@@ -23,7 +23,7 @@ export async function pushEmptyCommit(opts: {
     });
     headSha = ref.object.sha;
   } catch (err) {
-    // Branche absente du dépôt étudiant : rien à marquer.
+    // Branch absent from the student repository: nothing to mark.
     if ((err as { status?: number }).status === 404) return null;
     throw err;
   }
@@ -48,7 +48,7 @@ export async function pushEmptyCommit(opts: {
   return commit.sha;
 }
 
-/** Instant ISO avec offset Europe/Zurich (GH-42, C-02) : `2026-07-03T23:59:00+02:00`. */
+/** ISO instant with Europe/Zurich offset (GH-42, C-02): `2026-07-03T23:59:00+02:00`. */
 export function zurichIso(date: Date): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Zurich",

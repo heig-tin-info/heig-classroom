@@ -1,9 +1,9 @@
 /**
- * Verrouillage/déverrouillage d'un dépôt étudiant par ruleset (GH-41),
- * mécanique validée par le spike S2 : pendant le lock tout push est refusé
- * (bypass App et org admin), le retrait rouvre le dépôt. Utilisé par le
- * bouton manuel du teacher (US-22 : « un push de plus ») et, en M4, par le
- * job de deadline.
+ * Locking/unlocking of a student repository via ruleset (GH-41), a
+ * mechanism validated by spike S2: while locked, every push is refused
+ * (App and org admin bypass), removal reopens the repository. Used by the
+ * teacher's manual button (US-22: "one more push") and, in M4, by the
+ * deadline job.
  */
 import type { Octokit } from "octokit";
 
@@ -42,7 +42,7 @@ export async function unlockStudentRepo(
     repo,
   });
   const existing = rulesets.find((r: { name: string; id: number }) => r.name === LOCK_RULESET);
-  if (!existing) return; // déjà déverrouillé — idempotent
+  if (!existing) return; // already unlocked, idempotent
   await octokit.request("DELETE /repos/{owner}/{repo}/rulesets/{ruleset_id}", {
     owner: org,
     repo,

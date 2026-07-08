@@ -33,10 +33,10 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   const app = Fastify({
     logger: {
       level: config.LOG_LEVEL,
-      // AU-41 : jamais de credentials dans les logs.
+      // AU-41: never put credentials in the logs.
       redact: ["req.headers.authorization", "req.headers.cookie"],
     },
-    trustProxy: true, // toujours derrière Caddy (ADR-009)
+    trustProxy: true, // always behind Caddy (ADR-009)
   });
 
   const { db, pool } = createDb(config.DATABASE_URL);
@@ -45,20 +45,20 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     await pool.end();
   });
 
-  // Import du roster : le CSV arrive tel quel dans req.body (AU-13).
+  // Roster import: the CSV arrives as-is in req.body (AU-13).
   app.addContentTypeParser(["text/csv", "text/plain"], { parseAs: "string" }, (_req, body, done) =>
     done(null, body),
   );
-  // Avatars : image binaire brute (≤ 1 Mo, limite Fastify par défaut).
+  // Avatars: raw binary image (≤ 1 MB, default Fastify limit).
   app.addContentTypeParser(
     ["image/jpeg", "image/png", "image/webp"],
     { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
 
-  // Toute mutation HTTP réussie émet un indice de rafraîchissement SSE
-  // (ADR-005). Les changements hors mutation directe (claim automatique,
-  // acceptation, liaison GitHub) publient explicitement dans leurs modules.
+  // Every successful HTTP mutation emits an SSE refresh hint (ADR-005).
+  // Changes outside a direct mutation (automatic claim, acceptance,
+  // GitHub linking) publish explicitly from their own modules.
   app.addHook("onResponse", async (req, reply) => {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
     if (reply.statusCode >= 400 || !req.user) return;
@@ -78,10 +78,10 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(assignmentsPlugin, { config });
   await app.register(studentPlugin, { config });
 
-  // File de jobs + webhooks (M3). Le plugin webhooks est encapsulé : son
-  // parser JSON brut (HMAC) ne fuit pas sur les autres routes. Une base
-  // injoignable au boot ne tue pas le serveur : healthz reste dégradé et
-  // l'endpoint webhook répond 503 jusqu'au redémarrage.
+  // Job queue + webhooks (M3). The webhooks plugin is encapsulated: its raw
+  // JSON parser (HMAC) does not leak onto other routes. A database that is
+  // unreachable at boot does not kill the server: healthz stays degraded and
+  // the webhook endpoint answers 503 until restart.
   const runWorkers = config.WORKER_MODE !== "web";
   try {
     await startJobs(app, {
@@ -92,30 +92,30 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
       taskRunner: (key) => runTask(app, config, key),
     });
     await seedTasks(app);
-    // Ticker deadlines + tâches planifiées (ADR-006) : côté worker seulement.
+    // Deadline ticker + scheduled tasks (ADR-006): worker side only.
     if (runWorkers) startTicker(app, config);
   } catch (err) {
     app.log.error({ err }, "pg-boss start failed — job queue disabled");
   }
   await app.register(webhooksPlugin, { config });
 
-  // SPA buildé servi par le monolithe (ADR-009 : image unique, front inclus).
+  // Built SPA served by the monolith (ADR-009: single image, frontend included).
   if (config.STATIC_DIR && existsSync(config.STATIC_DIR)) {
     await app.register(fastifyStatic, { root: resolve(config.STATIC_DIR) });
     app.setNotFoundHandler((req, reply) => {
-      // Fallback SPA pour la navigation ; les surfaces API restent en 404 JSON.
+      // SPA fallback for navigation; API surfaces keep their JSON 404.
       const isApi = ["/app/", "/api/", "/webhooks/"].some((p) => req.url.startsWith(p));
       if (req.method === "GET" && !isApi) return reply.sendFile("index.html");
       return reply.code(404).send({ error: "not_found" });
     });
   }
 
-  // --- Observabilité (NFR-08, docs/03 « Observabilité orientée exigences ») ---
+  // --- Observability (NFR-08, docs/03 « Observabilité orientée exigences ») ---
   const registry = new Registry();
   collectDefaultMetrics({ register: registry });
   const dbUp = new Gauge({
     name: "hgc_database_up",
-    help: "1 si PostgreSQL répond à SELECT 1",
+    help: "1 if PostgreSQL answers SELECT 1",
     registers: [registry],
   });
 

@@ -9,20 +9,20 @@ describe("parseGradeMessage (GR-02)", () => {
     ["0/6", 0, 6],
     ["  85 / 100  ", 85, 100],
     ["5.25/6.0", 5.25, 6],
-  ])("accepte %s", (msg, points, max) => {
+  ])("accepts %s", (msg, points, max) => {
     expect(parseGradeMessage(msg)).toEqual({ status: "ok", points, max });
   });
 
   it.each([
-    "6/0", // max nul
+    "6/0", // zero max
     "7/6", // points > max
-    "-1/6", // négatif (le signe n'est pas dans la grammaire)
-    "4,5/6", // virgule décimale
-    "4.5", // pas de dénominateur
-    "note: 4/6", // préfixe parasite
-    "4/6 points", // suffixe parasite
+    "-1/6", // negative (the sign is not in the grammar)
+    "4,5/6", // decimal comma
+    "4.5", // no denominator
+    "note: 4/6", // stray prefix
+    "4/6 points", // stray suffix
     "",
-  ])("rejette %s", (msg) => {
+  ])("rejects %s", (msg) => {
     expect(parseGradeMessage(msg).status).toBe("malformed");
   });
 });
@@ -30,7 +30,7 @@ describe("parseGradeMessage (GR-02)", () => {
 describe("extractGrade (GR-17)", () => {
   const grade = (message: string) => ({ title: "GRADE", message });
 
-  it("annotation unique valide", () => {
+  it("single valid annotation", () => {
     expect(extractGrade([grade("4/6"), { title: "info", message: "x" }])).toEqual({
       status: "ok",
       points: 4,
@@ -38,20 +38,20 @@ describe("extractGrade (GR-17)", () => {
     });
   });
 
-  it("aucune annotation GRADE", () => {
+  it("no GRADE annotation", () => {
     expect(extractGrade([{ title: "warning", message: "4/6" }])).toEqual({
       status: "no_annotation",
     });
   });
 
-  it("annotations multiples, même identiques, invalident (anti-falsification H5)", () => {
+  it("multiple annotations, even identical, invalidate (anti-tampering H5)", () => {
     expect(extractGrade([grade("4/6"), grade("4/6")])).toEqual({
       status: "multiple",
       count: 2,
     });
   });
 
-  it("message null traité comme malformé", () => {
+  it("null message treated as malformed", () => {
     expect(extractGrade([{ title: "GRADE", message: null }])).toMatchObject({
       status: "malformed",
     });

@@ -1,7 +1,7 @@
 /**
- * État live d'un dépôt étudiant (GR-15) : commit de tête + check-runs.
- * Partagé entre la vue détail (fetch à l'ouverture) et la réconciliation
- * périodique (ADR-011 : un seul code de mise à jour, deux déclencheurs).
+ * Live state of a student repository (GR-15): head commit + check-runs.
+ * Shared between the detail view (fetch on open) and the periodic
+ * reconciliation (ADR-011: a single update code path, two triggers).
  */
 import type { Octokit } from "octokit";
 
@@ -37,7 +37,7 @@ export async function fetchRepoLiveState(
       ref: head.sha,
       request: { retries: 0 },
     });
-    // skipped/neutral (ex. condition anti-bot GH-44) ≠ échec.
+    // skipped/neutral (e.g. anti-bot condition GH-44) is not a failure.
     const runs = checks.data.check_runs.filter(
       (c) => !["skipped", "neutral"].includes(c.conclusion ?? ""),
     );
@@ -55,7 +55,7 @@ export async function fetchRepoLiveState(
   } catch (err) {
     const status = (err as { status?: number }).status;
     if (status === 409) {
-      // Dépôt vide : provisionné mais aucun commit lisible.
+      // Empty repository: provisioned but no readable commit.
       return {
         lastCommitSha: null,
         lastCommitAt: null,

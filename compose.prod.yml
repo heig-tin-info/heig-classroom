@@ -1,6 +1,6 @@
-# Production — classroom.chevallier.io
-# Caddy tourne en NATIF sur l'hôte (voir deploy.md) : seuls des ports
-# loopback sont publiés ici. Lancement :
+# Production -- classroom.chevallier.io
+# Caddy runs NATIVELY on the host (see deploy.md): only loopback ports
+# are published here. Start with:
 #   docker compose -f compose.prod.yml --env-file .env.prod up -d --build
 services:
   app:
@@ -13,7 +13,7 @@ services:
       PUBLIC_URL: https://classroom.chevallier.io
       NODE_ENV: production
     ports:
-      - "127.0.0.1:3000:3000" # Caddy natif → reverse_proxy localhost:3000
+      - "127.0.0.1:3000:3000" # native Caddy -> reverse_proxy localhost:3000
     volumes:
       - ./secrets:/app/secrets:ro
     depends_on:
@@ -35,9 +35,9 @@ services:
       timeout: 3s
       retries: 10
 
-  # pg_dump quotidien vers ./backups (NFR-16 : RPO 24 h) ; rétention 30 jours.
-  # La copie HORS VM (rclone vers un stockage externe) reste à câbler — voir
-  # deploy.md, section Sauvegardes.
+  # Daily pg_dump to ./backups (NFR-16: RPO 24 h); 30-day retention.
+  # The OFF-VM copy (rclone to external storage) still needs wiring -- see
+  # deploy.md, Backups section.
   backup:
     image: postgres:17
     restart: always
@@ -59,8 +59,8 @@ services:
           sleep 86400
         done
 
-  # IdP de secours (edu-ID est approuvé : inactif par défaut).
-  # Activer si besoin : docker compose --profile keycloak ... up -d
+  # Fallback IdP (edu-ID is approved: disabled by default).
+  # Enable when needed: docker compose --profile keycloak ... up -d
   keycloak:
     profiles: ["keycloak"]
     image: quay.io/keycloak/keycloak:26.4

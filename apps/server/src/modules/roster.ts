@@ -14,9 +14,9 @@ export interface RosterImportSummary {
 }
 
 /**
- * Import atomique du roster (AU-14/16) : upsert par (classroom, email) — les
- * entrées existantes gardent leur statut de claim, seuls nom/prénom sont
- * rafraîchis. Aucune suppression implicite.
+ * Atomic roster import (AU-14/16): upsert by (classroom, email); existing
+ * entries keep their claim status, only last/first name are refreshed.
+ * No implicit deletion.
  */
 export async function importRoster(
   db: Db,
@@ -44,22 +44,22 @@ export async function importRoster(
           set: { nom: row.nom, prenom: row.prenom },
         })
         .returning({ claimedAt: enrollments.claimedAt, status: enrollments.status });
-      // xmax = 0 est le marqueur d'insert de Postgres, mais restons portables :
-      // on compte comme « inséré » ce qui n'était pas encore claimé ni connu.
+      // xmax = 0 is Postgres's insert marker, but let's stay portable:
+      // we count as "inserted" what was not yet claimed nor known.
       if (res && res.status === "pending" && res.claimedAt === null) inserted += 1;
       else updated += 1;
     }
   });
-  // Le comptage insert/update fin viendra avec un vrai besoin ; l'essentiel
-  // est l'atomicité et l'idempotence du rejeu.
+  // Fine-grained insert/update counting will come with a real need; what
+  // matters is atomicity and idempotent replay.
   return { parse, summary: { inserted, updated } };
 }
 
 /**
- * Claim automatique au login (AU-18, H3) : toute entrée `pending` dont
- * l'e-mail (vérifié par l'IdP) correspond est rattachée à l'utilisateur.
- * Si l'utilisateur a déjà claimé une autre entrée de la même classroom,
- * l'entrée est marquée en conflit (AU-21) au lieu d'être rattachée.
+ * Automatic claim at login (AU-18, H3): every `pending` entry whose
+ * email (verified by the IdP) matches is attached to the user.
+ * If the user has already claimed another entry in the same classroom,
+ * the entry is flagged as a conflict (AU-21) instead of being attached.
  */
 export async function claimEnrollments(db: Db, user: { id: string; email: string }) {
   const pending = await db
@@ -89,8 +89,8 @@ export async function claimEnrollments(db: Db, user: { id: string; email: string
         subjectId: entry.id,
       });
     } catch {
-      // UNIQUE(classroom_id, user_id) : l'utilisateur a déjà une entrée dans
-      // cette classroom — conflit à résoudre par le teacher (AU-21).
+      // UNIQUE(classroom_id, user_id): the user already has an entry in
+      // this classroom; a conflict for the teacher to resolve (AU-21).
       await db
         .update(enrollments)
         .set({ conflictFlag: true })
@@ -108,9 +108,9 @@ export async function claimEnrollments(db: Db, user: { id: string; email: string
 }
 
 /**
- * Claim inverse (après import ou édition d'e-mail) : rattache les entrées
- * `pending` d'une classroom aux comptes déjà existants dont l'e-mail vérifié
- * correspond — l'étudiant n'a pas besoin de se reconnecter.
+ * Reverse claim (after an import or an email edit): attaches a classroom's
+ * `pending` entries to already existing accounts whose verified email
+ * matches; the student does not need to log in again.
  */
 export async function claimForExistingUsers(db: Db, classroomId: string) {
   const matches = await db
@@ -149,7 +149,7 @@ export async function claimForExistingUsers(db: Db, classroomId: string) {
   return matches.length;
 }
 
-/** Tableau roster du teacher (US-01) : identité, statut, GitHub, dernière connexion. */
+/** Teacher's roster table (US-01): identity, status, GitHub, last login. */
 export async function rosterView(db: Db, classroomId: string) {
   const rows = await db
     .select({
@@ -171,7 +171,7 @@ export async function rosterView(db: Db, classroomId: string) {
     .leftJoin(avatars, eq(avatars.userId, users.id))
     .where(eq(enrollments.classroomId, classroomId))
     .orderBy(enrollments.nom, enrollments.prenom);
-  // Avatar : upload > claim IdP > avatar GitHub public > (initiales côté client)
+  // Avatar: upload > IdP claim > public GitHub avatar > (client-side initials)
   return rows.map(({ avatarAt, pictureUrl, ...r }) => ({
     ...r,
     avatarUrl:

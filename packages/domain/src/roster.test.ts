@@ -7,46 +7,46 @@ const ok = (r: ReturnType<typeof parseRosterCsv>) => {
   return r.rows;
 };
 const errs = (r: ReturnType<typeof parseRosterCsv>) => {
-  if (r.ok) throw new Error("attendu: erreurs");
+  if (r.ok) throw new Error("expected: errors");
   return r.errors;
 };
 
 describe("parseRosterCsv (AU-13..16)", () => {
-  it("parse un CSV virgule avec normalisation d'e-mail", () => {
+  it("parses a comma CSV with e-mail normalization", () => {
     expect(ok(parseRosterCsv("nom,prenom,email\nDupont,Marie, Marie.DUPONT@heig-vd.ch \n"))).toEqual([
       { nom: "Dupont", prenom: "Marie", email: "marie.dupont@heig-vd.ch" },
     ]);
   });
 
-  it("détecte le séparateur point-virgule et l'ordre libre des colonnes", () => {
+  it("detects the semicolon separator and free column order", () => {
     expect(ok(parseRosterCsv("email;nom;prenom\na@b.ch;Martin;Luc"))).toEqual([
       { nom: "Martin", prenom: "Luc", email: "a@b.ch" },
     ]);
   });
 
-  it("ignore BOM et lignes vides", () => {
+  it("ignores BOM and empty lines", () => {
     expect(ok(parseRosterCsv("﻿nom,prenom,email\n\nDupont,Marie,a@b.ch\n\n"))).toHaveLength(1);
   });
 
-  it("rejette un doublon intra-fichier avec les deux lignes citées", () => {
+  it("rejects an intra-file duplicate with both lines cited", () => {
     const e = errs(parseRosterCsv("nom,prenom,email\nA,B,a@b.ch\nC,D,A@B.CH"));
     expect(e[0]?.line).toBe(3);
     expect(e[0]?.message).toMatch(/line 2/);
   });
 
-  it("rejette e-mail invalide et champs manquants (import atomique)", () => {
+  it("rejects invalid e-mail and missing fields (atomic import)", () => {
     const e = errs(parseRosterCsv("nom,prenom,email\nA,,a@b.ch\nB,C,pas-un-email"));
     expect(e).toHaveLength(2);
   });
 
-  it("rejette un fichier sans données", () => {
+  it("rejects a file without data", () => {
     expect(errs(parseRosterCsv("nom,prenom,email\n"))[0]?.message).toMatch(/No data/);
     expect(errs(parseRosterCsv(""))[0]?.message).toMatch(/Empty/);
   });
 });
 
-describe("rosterFromRows — identification permissive (Excel)", () => {
-  it("structure réelle HEIG : accents, E-mail, colonnes parasites", () => {
+describe("rosterFromRows, permissive identification (Excel)", () => {
+  it("real HEIG layout: accents, E-mail, stray columns", () => {
     const rows = [
       ["Nom", "Prénom", "Formation", "Mode de formation", "E-mail"],
       ["Baschiera", "Michele", "EEM", "PT", "michele.baschiera@heig-vd.ch"],
@@ -58,7 +58,7 @@ describe("rosterFromRows — identification permissive (Excel)", () => {
     ]);
   });
 
-  it("alias anglais et en-tête pas en première ligne (titre au-dessus)", () => {
+  it("English aliases and header not on the first line (title above)", () => {
     const rows = [
       ["Liste des étudiants — Info2", "", ""],
       [],
@@ -70,7 +70,7 @@ describe("rosterFromRows — identification permissive (Excel)", () => {
     ]);
   });
 
-  it("sans en-tête : colonne e-mail détectée par contenu, ordre nom puis prénom", () => {
+  it("headerless: e-mail column detected by content, order last name then first name", () => {
     const rows = [
       ["Dupont", "Marie", "marie@heig-vd.ch"],
       ["Martin", "Luc", "luc@heig-vd.ch"],
@@ -81,7 +81,7 @@ describe("rosterFromRows — identification permissive (Excel)", () => {
     ]);
   });
 
-  it("cellules numériques et vides tolérées, lignes vides ignorées", () => {
+  it("numeric and empty cells tolerated, empty rows ignored", () => {
     const rows = [
       ["nom", "prenom", "email", "note"],
       ["Dupont", "Marie", "marie@heig-vd.ch", 42],
@@ -90,12 +90,12 @@ describe("rosterFromRows — identification permissive (Excel)", () => {
     expect(ok(rosterFromRows(rows))).toHaveLength(1);
   });
 
-  it("échec explicite quand rien n'est identifiable", () => {
+  it("fails explicitly when nothing is identifiable", () => {
     const e = errs(rosterFromRows([["a", "b"], ["c", "d"]]));
     expect(e[0]?.message).toMatch(/Could not identify/);
   });
 
-  it("les numéros de ligne rapportés sont ceux du document d'origine", () => {
+  it("reported line numbers are those of the original document", () => {
     const rows = [
       ["Titre", "", ""],
       ["nom", "prenom", "email"],

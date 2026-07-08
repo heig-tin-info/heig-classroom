@@ -5,13 +5,13 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Button, Modal } from "./ui";
 
-const VIEW = 288; // aperçu à l'écran
-const OUT = 256; // image produite
+const VIEW = 288; // on-screen preview
+const OUT = 256; // produced image
 
 interface CropState {
-  cx: number; // centre du cadrage, en pixels source
+  cx: number; // crop center, in source pixels
   cy: number;
-  zoom: number; // 1 = le plus grand carré inscrit
+  zoom: number; // 1 = the largest inscribed square
 }
 
 function srcSide(img: HTMLImageElement, zoom: number) {
@@ -137,7 +137,7 @@ export function AvatarEditor({
                   );
                 }}
               />
-              {/* Masque circulaire : la zone hors cercle est assombrie */}
+              {/* Circular mask: the area outside the circle is dimmed */}
               <div
                 className="pointer-events-none absolute inset-0"
                 style={{

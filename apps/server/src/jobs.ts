@@ -1,7 +1,7 @@
 /**
- * File de jobs pg-boss (ADR-004) : Postgres est l'unique composant stateful.
- * L'endpoint webhook acquitte vite, les handlers font le travail réel ici,
- * avec retries à backoff exponentiel puis dead-letter (visible en base).
+ * pg-boss job queue (ADR-004): Postgres is the only stateful component.
+ * The webhook endpoint acknowledges fast, the handlers do the real work here,
+ * with exponential-backoff retries then dead-letter (visible in the database).
  */
 import { PgBoss } from "pg-boss";
 
@@ -33,7 +33,7 @@ export async function startJobs(
 ) {
   const boss = new PgBoss({
     connectionString: opts.connectionString,
-    // Le schéma pgboss.* vit dans la même base (NFR-16 : un seul backup).
+    // The pgboss.* schema lives in the same database (NFR-16: a single backup).
   });
   boss.on("error", (err: Error) => app.log.error({ err }, "pg-boss error"));
   await boss.start();
@@ -47,8 +47,8 @@ export async function startJobs(
     retryBackoff: true,
     retryDelay: 10,
   });
-  // L'échec d'une tâche planifiée n'est pas retenté par la file : le statut
-  // est journalisé et le passage suivant du ticker retentera.
+  // A failed scheduled task is not retried by the queue: the status is
+  // recorded and the next ticker pass will retry it.
   await boss.createQueue(TASK_QUEUE, { retryLimit: 0 });
 
   if (opts.runWorkers) {
@@ -72,7 +72,7 @@ export async function startJobs(
 
 declare module "fastify" {
   interface FastifyInstance {
-    /** Absent si le démarrage de la file a échoué (base injoignable au boot). */
+    /** Absent if the queue failed to start (database unreachable at boot). */
     boss?: PgBoss;
   }
 }

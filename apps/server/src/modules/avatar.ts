@@ -6,11 +6,11 @@ import { audit } from "../audit.js";
 import { avatars } from "../db/schema.js";
 
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp"]);
-const MAX_BYTES = 1_000_000; // recadré 256×256 côté client : ~30-80 Ko en pratique
+const MAX_BYTES = 1_000_000; // cropped to 256x256 client-side: ~30-80 KB in practice
 
 /**
- * Avatar téléversé (recadré côté client, aperçu circulaire). Prioritaire sur
- * le claim OIDC `picture` ; supprimable pour y revenir.
+ * Uploaded avatar (cropped client-side, circular preview). Takes precedence
+ * over the OIDC `picture` claim; deletable to fall back to it.
  */
 export async function avatarPlugin(app: FastifyInstance) {
   app.put(

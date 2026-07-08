@@ -22,7 +22,7 @@ import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
 
-const MAX_REVERTS_PER_HOUR = 5; // plafond anti-boucle (H10, GH-33)
+const MAX_REVERTS_PER_HOUR = 5; // anti-loop cap (H10, GH-33)
 
 interface PushPayload {
   ref: string;
@@ -50,7 +50,7 @@ interface WorkflowRunPayload {
   };
 }
 
-/** Vérification HMAC en temps constant (GH-60, NFR-04). */
+/** Constant-time HMAC verification (GH-60, NFR-04). */
 function verifySignature(secret: string, raw: Buffer, header: string | undefined): boolean {
   if (!header?.startsWith("sha256=")) return false;
   const expected = createHmac("sha256", secret).update(raw).digest("hex");
@@ -76,7 +76,7 @@ async function repoContext(db: Db, githubRepoId: number) {
   return row ?? null;
 }
 
-/** Traitement asynchrone d'une livraison (rejouable : chaque étape est idempotente). */
+/** Asynchronous processing of a delivery (replayable: every step is idempotent). */
 export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
   return async ({ deliveryId }: WebhookJob) => {
     const [delivery] = await app.db
@@ -101,7 +101,7 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
         .update(webhookDeliveries)
         .set({ error: String(err).slice(0, 500) })
         .where(eq(webhookDeliveries.deliveryId, deliveryId));
-      throw err; // pg-boss retry → dead-letter
+      throw err; // pg-boss retry, then dead-letter
     }
   };
 }
@@ -109,12 +109,12 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
 async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayload) {
   if (!p.repository?.id || !p.after) return;
   const ctx = await repoContext(app.db, p.repository.id);
-  if (!ctx) return; // dépôt inconnu de la plateforme
+  if (!ctx) return; // repository unknown to the platform
   const branch = p.ref?.replace("refs/heads/", "") ?? "";
   const botLogin = config.GITHUB_APP_SLUG ? `${config.GITHUB_APP_SLUG}[bot]` : "";
   const isBot = Boolean(botLogin && p.sender?.login === botLogin);
 
-  // Métriques (GR-15) + SSE — la table du teacher bouge sans refresh.
+  // Metrics (GR-15) + SSE: the teacher's table updates without a refresh.
   await app.db
     .update(studentRepos)
     .set({
@@ -124,7 +124,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
     .where(eq(studentRepos.id, ctx.repo.id));
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 
-  // Protected files (GH-30..35) — jamais sur un push du bot (anti-boucle).
+  // Protected files (GH-30..35): never on a push from the bot (anti-loop).
   if (isBot || ctx.assignment.protectedFiles.length === 0) return;
   const touched = new Set<string>();
   for (const c of p.commits ?? []) {
@@ -133,7 +133,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   const hit = ctx.assignment.protectedFiles.filter((f) => touched.has(f));
   if (hit.length === 0) return;
 
-  // Plafond anti-boucle : 5 reverts / heure / dépôt → conflit signalé.
+  // Anti-loop cap: 5 reverts / hour / repository, then the conflict is flagged.
   const capRows = await app.db
     .select({ count: sql<number>`count(*)::int` })
     .from(reverts)
@@ -193,7 +193,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 
-/** GR-04/05 : statut pending sur run éligible, ingestion complète au completed. */
+/** GR-04/05: pending status on an eligible run, full ingestion on completed. */
 async function handleWorkflowRun(
   app: FastifyInstance,
   config: AppConfig,
@@ -232,11 +232,11 @@ async function handleWorkflowRun(
   publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 
-/** Endpoint public : HMAC, dédup, reçu synchrone, enfilage, 200 < 5 s (GH-60). */
+/** Public endpoint: HMAC, dedup, synchronous receipt, enqueue, 200 < 5 s (GH-60). */
 export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppConfig }) {
   const { config } = opts;
 
-  // Corps BRUT requis pour l'HMAC — parser scoped à ce plugin encapsulé.
+  // RAW body required for the HMAC; parser scoped to this encapsulated plugin.
   app.addContentTypeParser("application/json", { parseAs: "buffer" }, (_req, body, done) =>
     done(null, body),
   );
@@ -250,7 +250,7 @@ export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppCo
       !Buffer.isBuffer(raw) ||
       !verifySignature(config.GITHUB_WEBHOOK_SECRET, raw, req.headers["x-hub-signature-256"] as string | undefined)
     ) {
-      req.log.warn("webhook signature rejected"); // compté (NFR-04)
+      req.log.warn("webhook signature rejected"); // counted (NFR-04)
       return reply.code(401).send({ error: "bad_signature" });
     }
     const deliveryId = req.headers["x-github-delivery"] as string | undefined;
@@ -264,7 +264,7 @@ export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppCo
       return reply.code(400).send({ error: "bad_json" });
     }
 
-    // Déduplication (GH-61) : la PK EST la déduplication.
+    // Deduplication (GH-61): the PK IS the deduplication.
     const inserted = await app.db
       .insert(webhookDeliveries)
       .values({
@@ -277,8 +277,8 @@ export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppCo
       .returning({ id: webhookDeliveries.deliveryId });
     if (inserted.length === 0) return reply.code(200).send({ ok: true, duplicate: true });
 
-    // Reçu de push SYNCHRONE (ADR-012) : l'heure légale du gel ne dépend
-    // jamais du retard de la file.
+    // SYNCHRONOUS push receipt (ADR-012): the legal freeze time never
+    // depends on queue lag.
     if (event === "push") {
       const p = payload as unknown as PushPayload;
       if (p.repository?.id && p.after && !/^0+$/.test(p.after)) {

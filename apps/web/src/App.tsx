@@ -104,7 +104,7 @@ function ThemeToggle() {
   );
 }
 
-/** Bannière de retour du flux de liaison (?github=linked|conflict|error). */
+/** Return banner for the linking flow (?github=linked|conflict|error). */
 function GithubBanner() {
   const [status] = useState(() => {
     const s = new URLSearchParams(window.location.search).get("github");

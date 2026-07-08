@@ -1,9 +1,9 @@
 /**
- * Tâches planifiées (ADR-011) : le polling de secours derrière les webhooks.
- * Le catalogue vit ici (description, handler, période par défaut) ; la table
- * `scheduled_tasks` porte la configuration admin (période, activation) et
- * l'état de la dernière exécution. Les événements webhook, eux, réveillent
- * la file immédiatement — ces tâches ne sont que le filet.
+ * Scheduled tasks (ADR-011): the fallback polling behind the webhooks.
+ * The catalog lives here (description, handler, default interval); the
+ * `scheduled_tasks` table carries the admin configuration (interval,
+ * activation) and the state of the last run. Webhook events wake the queue
+ * immediately; these tasks are only the safety net.
  */
 import type { FastifyInstance } from "fastify";
 import { and, eq, isNotNull, isNull, lt, ne, sql } from "drizzle-orm";
@@ -26,10 +26,10 @@ import { WEBHOOK_QUEUE } from "./jobs.js";
 
 export interface TaskDef {
   key: string;
-  /** Description affichée dans l'écran admin (anglais, comme toute l'UI). */
+  /** Description shown on the admin screen (English, like the whole UI). */
   description: string;
   defaultIntervalMinutes: number;
-  /** Le domaine est aussi couvert par les webhooks (traités immédiatement). */
+  /** The domain is also covered by webhooks (processed immediately). */
   webhookWoken: boolean;
   run: (app: FastifyInstance, config: AppConfig) => Promise<string>;
 }
@@ -73,7 +73,7 @@ export function taskDef(key: string): TaskDef | undefined {
   return TASK_DEFS.find((t) => t.key === key);
 }
 
-/** Lignes de configuration manquantes créées avec les périodes par défaut. */
+/** Missing configuration rows are created with the default intervals. */
 export async function seedTasks(app: FastifyInstance) {
   for (const def of TASK_DEFS) {
     await app.db
@@ -83,7 +83,7 @@ export async function seedTasks(app: FastifyInstance) {
   }
 }
 
-/** Exécution instrumentée : statut, durée et erreur visibles dans l'admin. */
+/** Instrumented execution: status, duration and error visible in the admin. */
 export async function runTask(app: FastifyInstance, config: AppConfig, key: string) {
   const def = taskDef(key);
   if (!def) return;
@@ -113,9 +113,9 @@ export async function runTask(app: FastifyInstance, config: AppConfig, key: stri
 }
 
 /**
- * GR-07 : re-interroge les runs des dépôts silencieux depuis plus de 30 min
- * (aucun webhook push ni GradeRun récent) — le pipeline GR-05 est réutilisé
- * à l'identique via `ingestCompletedRun` (idempotent par (repo, run, attempt)).
+ * GR-07: re-queries the runs of repositories quiet for more than 30 minutes
+ * (no push webhook nor recent GradeRun). The GR-05 pipeline is reused as-is
+ * via `ingestCompletedRun` (idempotent by (repo, run, attempt)).
  */
 async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise<string> {
   const QUIET_MINUTES = 30;
@@ -192,7 +192,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
   return `${rows.length} quiet repositories checked, ${ingested} runs captured`;
 }
 
-/** GR-15 en secours : mêmes métriques que la vue détail, source réconciliation. */
+/** GR-15 fallback: same metrics as the detail view, sourced from reconciliation. */
 async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<string> {
   const rows = await app.db
     .select({
@@ -244,9 +244,9 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
   return `${rows.length} repositories checked, ${updated} updated`;
 }
 
-/** GH-62 : re-enfile les livraisons locales bloquées, redemande les échecs GitHub. */
+/** GH-62: re-enqueues stuck local deliveries, requests redelivery of GitHub failures. */
 async function reconcileDeliveries(app: FastifyInstance, config: AppConfig): Promise<string> {
-  // 1. Livraisons reçues mais jamais traitées (job perdu, crash) : re-enfilées.
+  // 1. Deliveries received but never processed (lost job, crash): re-enqueued.
   let requeued = 0;
   if (app.boss) {
     const stuck = await app.db
@@ -265,8 +265,8 @@ async function reconcileDeliveries(app: FastifyInstance, config: AppConfig): Pro
     }
   }
 
-  // 2. Livraisons en échec côté GitHub (endpoint down) : redelivery API.
-  //    La dédup par X-GitHub-Delivery absorbe les doublons.
+  // 2. Deliveries failed on the GitHub side (endpoint down): redelivery API.
+  //    Deduplication by X-GitHub-Delivery absorbs the duplicates.
   let redelivered = 0;
   const gh = githubApp(config);
   if (gh) {
@@ -275,7 +275,7 @@ async function reconcileDeliveries(app: FastifyInstance, config: AppConfig): Pro
       const res = await gh.octokit.request("GET /app/hook/deliveries", { per_page: 100 });
       deliveries = res.data;
     } catch (err) {
-      // 404 : l'App n'a pas de webhook configuré (dev) — rien à réconcilier.
+      // 404: the App has no webhook configured (dev), nothing to reconcile.
       if ((err as { status?: number }).status !== 404) throw err;
     }
     const dayAgo = Date.now() - 24 * 3600 * 1000;
@@ -299,7 +299,7 @@ async function reconcileDeliveries(app: FastifyInstance, config: AppConfig): Pro
   return `${requeued} local deliveries re-enqueued, ${redelivered} GitHub redeliveries requested`;
 }
 
-/** NFR : volumétrie bornée — sessions expirées, payloads webhooks > 30 j. */
+/** NFR: bounded data volume; expired sessions, webhook payloads > 30 days. */
 async function purgeHousekeeping(app: FastifyInstance): Promise<string> {
   const deletedSessions = await app.db
     .delete(sessions)

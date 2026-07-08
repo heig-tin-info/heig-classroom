@@ -1,6 +1,6 @@
-# hgc-server — image unique : API + SPA buildé + git (provisionnement).
-# Build :   docker build -t hgc-server .
-# ADR-009 : un conteneur applicatif, PostgreSQL et Caddy à côté (compose).
+# hgc-server -- single image: API + built SPA + git (provisioning).
+# Build:   docker build -t hgc-server .
+# ADR-009: one application container, with PostgreSQL and Caddy alongside (compose).
 
 FROM node:22-slim AS build
 RUN corepack enable pnpm
@@ -15,13 +15,13 @@ COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN pnpm build
-# Arbre de production autonome du serveur (node_modules épuré + workspaces)
+# Self-contained production tree for the server (pruned node_modules + workspaces)
 RUN pnpm --filter @hgc/server deploy --prod --legacy /out \
   && cp -r apps/server/drizzle /out/drizzle \
   && cp -r apps/web/dist /out/web
 
 FROM node:22-slim
-# git : push des refs squashed et provisionnement (GH-03)
+# git: pushing squashed refs and provisioning (GH-03)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*

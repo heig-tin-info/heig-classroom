@@ -8,7 +8,7 @@ import { Button, Card } from "./ui";
 
 type Cell = string | number | null;
 
-/** Fichier déposé → lignes tabulaires. Excel/ODS via SheetJS, sinon CSV texte. */
+/** Dropped file to tabular rows. Excel/ODS via SheetJS, otherwise text CSV. */
 async function fileToPayload(
   file: File,
 ): Promise<{ csv: string } | { rows: Cell[][] }> {
@@ -19,7 +19,7 @@ async function fileToPayload(
     const rows = XLSX.utils.sheet_to_json<Cell[]>(sheet, {
       header: 1,
       defval: null,
-      raw: false, // les e-mails formatés restent du texte
+      raw: false, // formatted e-mails stay as text
     });
     return { rows };
   }
@@ -70,7 +70,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
         <h2 className="font-medium">Import roster</h2>
       </div>
 
-      {/* Dépôt de fichier : Excel, LibreOffice ou CSV */}
+      {/* File drop: Excel, LibreOffice or CSV */}
       <div
         role="button"
         tabIndex={0}
@@ -118,7 +118,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
         />
       </div>
 
-      {/* Ajout manuel d'un étudiant */}
+      {/* Manually add a student */}
       <form
         className="mt-3 flex flex-wrap items-end gap-2"
         onSubmit={(e) => {
@@ -165,7 +165,7 @@ export function RosterImport({ classroomId }: { classroomId: string }) {
         </Button>
       </form>
 
-      {/* Ou CSV collé */}
+      {/* Or pasted CSV */}
       <details className="mt-3">
         <summary className="cursor-pointer text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200">
           … or paste CSV (last name, first name, e-mail)

@@ -3,63 +3,64 @@ import { resolve } from "node:path";
 import { z } from "zod";
 
 /**
- * Configuration par variables d'environnement, validée au démarrage (fail-fast).
- * Les secrets ne transitent que par l'environnement (ADR-010).
+ * Configuration via environment variables, validated at startup (fail-fast).
+ * Secrets only travel through the environment (ADR-010).
  */
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  /** ADR-001 : `all` (défaut) | `web` | `worker` — scission sans changement de code. */
+  /** ADR-001: `all` (default) | `web` | `worker`; roles can split without code changes. */
   WORKER_MODE: z.enum(["all", "web", "worker"]).default("all"),
   DATABASE_URL: z
     .string()
     .default("postgres://hgc:hgc@localhost:5432/hgc"),
-  /** Applique les migrations Drizzle au démarrage (déploiement conteneur). */
+  /** Apply Drizzle migrations at startup (container deployment). */
   MIGRATE_ON_START: z
     .string()
     .default("")
     .transform((v) => v === "1" || v === "true"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 
-  /** URL publique du portail (base des redirect URIs OIDC/OAuth). */
+  /** Public URL of the portal (base for OIDC/OAuth redirect URIs). */
   PUBLIC_URL: z.string().default("http://localhost:3000"),
 
-  /** Dossier du SPA buildé (apps/web/dist) ; vide = API seule (dev Vite). */
+  /** Directory of the built SPA (apps/web/dist); empty = API only (Vite dev). */
   STATIC_DIR: z.string().default(""),
 
-  // --- OIDC (AU-01..03) : Keycloak local en dev, Switch edu-ID en prod. ---
+  // --- OIDC (AU-01..03): local Keycloak in dev, Switch edu-ID in prod. ---
   OIDC_ISSUER: z.string().default("http://localhost:8080/realms/hgc-dev"),
   OIDC_CLIENT_ID: z.string().default("hgc-portal"),
   OIDC_CLIENT_SECRET: z.string().default("dev-secret-not-for-production"),
   /**
-   * Authentification client `private_key_jwt` (recommandée par SWITCH) :
-   * chemin d'une clé privée PKCS8 dont le JWK public est enregistré au
-   * Resource Registry. Vide = client_secret (Keycloak de dev).
+   * `private_key_jwt` client authentication (recommended by SWITCH):
+   * path to a PKCS8 private key whose public JWK is registered in the
+   * Resource Registry. Empty = client_secret (dev Keycloak).
    */
   OIDC_PRIVATE_KEY_PATH: z.string().default(""),
   OIDC_PRIVATE_KEY_KID: z.string().default("hgc-eduid-2026"),
 
-  /** Signature des cookies d'état de login (pas des sessions, qui vivent en base). */
+  /** Signs the login state cookies (not the sessions, which live in the database). */
   COOKIE_SECRET: z.string().min(16).default("dev-cookie-secret-change-me"),
-  /** Durée de session (AU-06 : 12 h par défaut). */
+  /** Session lifetime (AU-06: 12 h by default). */
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(72).default(12),
   /**
-   * Super administrateur (révision de H2, 2026-07-07) : seul e-mail géré par
-   * l'environnement. Les teachers sont gérés en base, depuis l'écran admin.
+   * Super administrator (H2 revision, 2026-07-07): the only email managed
+   * through the environment. Teachers are managed in the database, from the
+   * admin screen.
    */
   SUPER_ADMIN_EMAIL: z.string().default(""),
 
-  // --- GitHub App (GH-01..03) : provisionnement, webhooks, identité bot. ---
-  // Vides tant que l'App n'est pas configurée ; les modules GitHub refusent
-  // de démarrer sans elles, le reste du portail fonctionne.
+  // --- GitHub App (GH-01..03): provisioning, webhooks, bot identity. ---
+  // Empty until the App is configured; the GitHub modules refuse to start
+  // without them, the rest of the portal keeps working.
   GITHUB_APP_ID: z.string().default(""),
-  /** Chemin du PEM (ADR-010 : secret en fichier, jamais dans le dépôt). */
+  /** Path to the PEM (ADR-010: secret in a file, never in the repository). */
   GITHUB_APP_PRIVATE_KEY_PATH: z.string().default(""),
   GITHUB_APP_SLUG: z.string().default(""),
   GITHUB_WEBHOOK_SECRET: z.string().default(""),
 
-  // --- OAuth App (AU-08..12) : liaison du compte GitHub, scope read:user. ---
+  // --- OAuth App (AU-08..12): GitHub account linking, read:user scope. ---
   GITHUB_OAUTH_CLIENT_ID: z.string().default(""),
   GITHUB_OAUTH_CLIENT_SECRET: z.string().default(""),
 });
@@ -72,7 +73,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     const issues = parsed.error.issues
       .map((i) => `${i.path.join(".")}: ${i.message}`)
       .join("; ");
-    throw new Error(`Configuration invalide — ${issues}`);
+    throw new Error(`Invalid configuration: ${issues}`);
   }
   if (parsed.data.NODE_ENV === "production") {
     for (const [key, marker] of [
@@ -80,15 +81,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ["COOKIE_SECRET", "change-me"],
     ] as const) {
       if (parsed.data[key].includes(marker)) {
-        throw new Error(`Configuration invalide — ${key} de dev interdit en production`);
+        throw new Error(`Invalid configuration: dev ${key} forbidden in production`);
       }
     }
   }
   return {
     ...parsed.data,
     SUPER_ADMIN_EMAIL: parsed.data.SUPER_ADMIN_EMAIL.trim().toLowerCase(),
-    // Chemin du PEM absolu dès le chargement : le processus ne dépend plus
-    // de son répertoire de lancement (ADR-010, secret en fichier).
+    // PEM path made absolute at load time: the process no longer depends on
+    // its launch directory (ADR-010, secret in a file).
     GITHUB_APP_PRIVATE_KEY_PATH: parsed.data.GITHUB_APP_PRIVATE_KEY_PATH
       ? resolve(parsed.data.GITHUB_APP_PRIVATE_KEY_PATH)
       : "",

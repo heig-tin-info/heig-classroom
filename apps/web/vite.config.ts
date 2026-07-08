@@ -5,7 +5,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    // Dev autonome : le back reste la seule origine des cookies.
+    // Standalone dev: the backend stays the sole origin for cookies.
     proxy: {
       "/app": "http://localhost:3000",
       "/healthz": "http://localhost:3000",

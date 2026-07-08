@@ -5,10 +5,10 @@ import { classrooms, enrollments } from "../db/schema.js";
 import { subscribe } from "../events.js";
 
 /**
- * Flux SSE (ADR-005) : unidirectionnel, cookies de session réutilisés,
- * heartbeat `:ping` 25 s, pas de replay — à la (re)connexion le client
- * refait ses requêtes. Le filtrage se fait par topics calculés à la
- * connexion selon le rôle ; les événements ne portent aucune donnée.
+ * SSE stream (ADR-005): unidirectional, session cookies reused,
+ * `:ping` heartbeat every 25 s, no replay; on (re)connection the client
+ * re-issues its requests. Filtering is done via topics computed at
+ * connection time based on the role; events carry no data.
  */
 export async function eventsPlugin(app: FastifyInstance) {
   app.get(
@@ -38,7 +38,7 @@ export async function eventsPlugin(app: FastifyInstance) {
         "content-type": "text/event-stream",
         "cache-control": "no-cache",
         connection: "keep-alive",
-        // Caddy/nginx : ne pas bufferiser ce flux (docs/03, flush_interval -1).
+        // Caddy/nginx: do not buffer this stream (docs/03, flush_interval -1).
         "x-accel-buffering": "no",
       });
       res.write(":connected\n\n");

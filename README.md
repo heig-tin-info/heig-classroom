@@ -1,30 +1,30 @@
 # HEIG GitHub Classroom
 
-Portail web teacher/student adossé à GitHub : classrooms, assignments, provisionnement de
-dépôts étudiants, grading par CI et deadlines automatiques.
+A teacher/student web portal built on top of GitHub: classrooms, assignments,
+student repository provisioning, CI-based grading and automatic deadlines.
 
-- Spécifications : [docs/](docs/) (analyse, cahier des charges, specs fonctionnelles,
-  architecture) — sources TeXSmith, PDF compilables.
-- Décisions d'architecture : [docs/adr/](docs/adr/).
+Specifications live in [docs/](docs/) (needs analysis, requirements, functional
+specs, architecture) as TeXSmith sources that compile to PDF. Architecture
+decision records are under [docs/adr/](docs/adr/).
 
-## Développement
+## Development
 
-Prérequis : Node.js ≥ 22 (pnpm via corepack), Docker (Postgres + Keycloak de dev).
+Prerequisites: Node.js >= 22 (pnpm via corepack), Docker (dev Postgres + Keycloak).
 
 ```bash
 corepack enable pnpm
 pnpm install
 
-# Base de données + IdP OIDC local (Keycloak, realm hgc-dev,
-# comptes de test teacher/teacher et student/student)
+# Database + local OIDC IdP (Keycloak, realm hgc-dev,
+# test accounts teacher/teacher and student/student)
 docker compose -f docker-compose.dev.yml up -d
 
 cp .env.example .env
-pnpm --filter @hgc/server db:migrate   # migrations Drizzle
-pnpm dev                               # serveur sur :3000
+pnpm --filter @hgc/server db:migrate   # Drizzle migrations
+pnpm dev                               # server on :3000
 ```
 
-Vérifications :
+Sanity checks:
 
 ```bash
 pnpm build && pnpm typecheck && pnpm test
@@ -32,16 +32,16 @@ curl http://localhost:3000/healthz
 curl http://localhost:3000/metrics
 ```
 
-## Structure
+## Layout
 
-| Chemin | Rôle |
+| Path | Role |
 | --- | --- |
-| `packages/domain` | Règles métier pures (parse de note GR-02, gel…), sans dépendance framework |
-| `packages/contracts` | Schémas Zod partagés front/back/CLI |
-| `apps/server` | Monolithe Fastify : API, webhooks, SSE, jobs (pg-boss), `WORKER_MODE` |
-| `docs/` | Spécifications (TeXSmith) et ADRs |
+| `packages/domain` | Pure business rules (GR-02 grade parsing, freezing...), framework-free |
+| `packages/contracts` | Zod schemas shared across front, back and CLI |
+| `apps/server` | Fastify monolith: API, webhooks, SSE, jobs (pg-boss), `WORKER_MODE` |
+| `docs/` | Specifications (TeXSmith) and ADRs |
 
-## Documentation PDF
+## PDF documentation
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install --group docs

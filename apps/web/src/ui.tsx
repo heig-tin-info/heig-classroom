@@ -2,7 +2,7 @@ import { Building2, X } from "lucide-react";
 import { useState } from "react";
 import type { ComponentType, ReactNode } from "react";
 
-/** Avatar public GitHub d'une organisation, avec repli sur une icône. */
+/** Public GitHub avatar of an organization, with an icon fallback. */
 export function OrgAvatar({ login, className = "size-5" }: { login: string; className?: string }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <Building2 className={`${className} text-zinc-400`} />;
@@ -82,7 +82,7 @@ export function Progress({ label }: { label: string }) {
   );
 }
 
-/** Marque GitHub (les icônes de marques ont quitté lucide). */
+/** GitHub brand mark (brand icons were removed from lucide). */
 export function GithubIcon({ className = "size-4" }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" fill="currentColor" className={className} aria-hidden>

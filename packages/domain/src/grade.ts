@@ -1,11 +1,11 @@
 /**
- * Extraction de la note depuis les annotations GitHub Actions (GR-02, GR-17).
+ * Grade extraction from GitHub Actions annotations (GR-02, GR-17).
  *
- * Convention : le workflow `grading.yml` émet `::notice title=GRADE::<points>/<max>`.
- * Le backend lit les annotations des check-runs et applique ces règles :
- * - exactement UNE annotation `GRADE` doit être présente (plusieurs, même
- *   identiques, invalident la note — mitigation anti-falsification H5) ;
- * - le message doit respecter `points/max`, décimales à point, `max > 0`,
+ * Convention: the `grading.yml` workflow emits `::notice title=GRADE::<points>/<max>`.
+ * The backend reads the check-run annotations and applies these rules:
+ * - exactly ONE `GRADE` annotation must be present (several, even identical,
+ *   invalidate the grade; anti-tampering mitigation H5);
+ * - the message must follow `points/max`, dot decimals, `max > 0`,
  *   `points <= max`.
  */
 
@@ -24,7 +24,7 @@ export interface AnnotationLike {
   message: string | null;
 }
 
-/** Parse le message d'une annotation GRADE (`"4.5/6"` → points/max). */
+/** Parses the message of a GRADE annotation (`"4.5/6"` to points/max). */
 export function parseGradeMessage(message: string): GradeParse {
   const m = GRADE_MESSAGE_RE.exec(message);
   if (!m) return { status: "malformed", message };
@@ -34,7 +34,7 @@ export function parseGradeMessage(message: string): GradeParse {
   return { status: "ok", points, max };
 }
 
-/** Applique GR-02 sur l'ensemble des annotations d'un run. */
+/** Applies GR-02 to the full set of annotations of a run. */
 export function extractGrade(annotations: readonly AnnotationLike[]): GradeParse {
   const grades = annotations.filter((a) => a.title === GRADE_ANNOTATION_TITLE);
   if (grades.length === 0) return { status: "no_annotation" };

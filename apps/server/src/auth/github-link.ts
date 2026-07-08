@@ -1,8 +1,8 @@
 /**
- * Liaison du compte GitHub (AU-08..12) : flux OAuth web application distinct
- * du login edu-ID, scope minimal `read:user`. Le token OAuth est JETÉ après
- * lecture de l'identité — seuls github_user_id (clé immuable), github_login
- * (affichage) et github_linked_at sont stockés (NFR-02, C-06).
+ * GitHub account linking (AU-08..12): a web application OAuth flow distinct
+ * from the edu-ID login, minimal `read:user` scope. The OAuth token is
+ * DISCARDED after reading the identity; only github_user_id (immutable key),
+ * github_login (display) and github_linked_at are stored (NFR-02, C-06).
  */
 import { randomBytes } from "node:crypto";
 
@@ -36,7 +36,7 @@ async function fetchGithubIdentity(
   });
   const tokenBody = (await tokenRes.json()) as { access_token?: string };
   if (!tokenRes.ok || !tokenBody.access_token) {
-    throw new Error("Échange du code OAuth GitHub refusé");
+    throw new Error("GitHub OAuth code exchange rejected");
   }
   try {
     const userRes = await fetch("https://api.github.com/user", {
@@ -50,8 +50,8 @@ async function fetchGithubIdentity(
     const u = (await userRes.json()) as GithubUser;
     return { id: u.id, login: u.login };
   } finally {
-    // AU-09 : le token n'est ni persisté ni réutilisé. Révocation du grant
-    // possible plus tard ; ici il sort simplement de portée.
+    // AU-09: the token is neither persisted nor reused. Revoking the grant
+    // is possible later; here it simply goes out of scope.
   }
 }
 
@@ -106,7 +106,7 @@ export async function githubLinkPlugin(
       try {
         gh = await fetchGithubIdentity(config, q.code);
       } catch (err) {
-        req.log.warn({ err }, "liaison GitHub refusée");
+        req.log.warn({ err }, "GitHub linking rejected");
         return reply.redirect("/?github=error", 303);
       }
 
@@ -120,7 +120,7 @@ export async function githubLinkPlugin(
           })
           .where(eq(users.id, req.user!.id));
       } catch {
-        // AU-10 : github_user_id UNIQUE — déjà lié à un autre compte local.
+        // AU-10: github_user_id is UNIQUE, already linked to another local account.
         return reply.redirect("/?github=conflict", 303);
       }
       const rooms = await app.db

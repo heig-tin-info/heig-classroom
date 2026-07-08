@@ -9,8 +9,8 @@ import { createDb } from "./db/client.js";
 
 const config = loadConfig();
 
-// Déploiement conteneur (ADR-009) : migrations appliquées au démarrage.
-// Drizzle sérialise par verrou en base — sûr même à plusieurs démarrages.
+// Container deployment (ADR-009): migrations applied at startup. Drizzle
+// serializes them with a database lock, safe even with concurrent startups.
 if (config.MIGRATE_ON_START) {
   const { db, pool } = createDb(config.DATABASE_URL);
   const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "../drizzle");
@@ -20,17 +20,17 @@ if (config.MIGRATE_ON_START) {
 
 const app = await buildApp({ config });
 
-// ADR-001 : en mode `worker`, le processus n'écoute pas — il ne fera tourner
-// que pg-boss et les tickers (branchés au jalon M3/M4).
+// ADR-001: in `worker` mode the process does not listen; it only runs
+// pg-boss and the tickers (wired in at milestone M3/M4).
 if (config.WORKER_MODE !== "worker") {
   await app.listen({ host: config.HOST, port: config.PORT });
 }
 
-app.log.info({ workerMode: config.WORKER_MODE }, "hgc-server démarré");
+app.log.info({ workerMode: config.WORKER_MODE }, "hgc-server started");
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    app.log.info({ signal }, "arrêt en cours");
+    app.log.info({ signal }, "shutting down");
     void app.close().then(() => process.exit(0));
   });
 }

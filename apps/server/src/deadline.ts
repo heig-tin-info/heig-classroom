@@ -1,8 +1,8 @@
 /**
- * Application de la deadline (M4, GH-40..44, ADR-006/012). Le ticker enfile
- * `deadline.apply` par assignment échu ; ce handler est idempotent : chaque
- * dépôt déjà traité est sauté, un échec individuel laisse le job en retry
- * sans bloquer les autres (GH-43).
+ * Deadline application (M4, GH-40..44, ADR-006/012). The ticker enqueues
+ * `deadline.apply` per due assignment; this handler is idempotent: every
+ * repository already handled is skipped, an individual failure leaves the
+ * job in retry without blocking the others (GH-43).
  */
 import type { FastifyInstance } from "fastify";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
@@ -36,13 +36,13 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
       .limit(1);
     if (!row || row.assignment.archivedAt) return;
     const a = row.assignment;
-    // Replanification (US-08) : la deadline a pu être repoussée entre le
-    // sweep du ticker et l'exécution — la condition est relue ici.
+    // Rescheduling (US-08): the deadline may have been pushed back between
+    // the ticker sweep and the execution, so the condition is re-read here.
     if (a.deadlineAt.getTime() > Date.now()) return;
     if (a.state === "draft") return;
 
-    // Claim atomique : `deadline_applied_at` n'est posé qu'une fois, mais le
-    // traitement continue même sans claim (reprise des dépôts en échec).
+    // Atomic claim: `deadline_applied_at` is set only once, but processing
+    // continues even without the claim (resuming repositories that failed).
     await app.db
       .update(assignments)
       .set({ deadlineAppliedAt: new Date(), state: "locked" })
@@ -59,10 +59,10 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
         ),
       );
 
-    // Gel provisoire (GR-12) : la note courante au moment de la deadline.
-    // Pendant la grâce, les runs sur commits reçus avant la deadline peuvent
-    // encore l'améliorer (GR-14.4, via refreshGradeSelection) ; `frozen_at`
-    // la fige définitivement.
+    // Provisional freeze (GR-12): the current grade at deadline time.
+    // During the grace period, runs on commits received before the deadline
+    // can still improve it (GR-14.4, via refreshGradeSelection); `frozen_at`
+    // makes it definitively immutable.
     if (!a.frozenAt) {
       for (const repo of repos) {
         const selected = await selectGradeRun(app, repo.id);
@@ -86,13 +86,13 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
       const [org, repoName] = repo.fullName!.split("/") as [string, string];
       try {
         if (a.deadlineStrategy === "lock") {
-          if (repo.lockedAt) continue; // déjà verrouillé — idempotent
+          if (repo.lockedAt) continue; // already locked, idempotent
           let rulesetId: number | null = null;
           try {
             rulesetId = await lockStudentRepo(client.octokit, org, repoName);
           } catch (err) {
-            // Fallback H8 : rulesets indisponibles → archivage (mode dégradé,
-            // retire aussi l'écriture au bot et au teacher — GH-41).
+            // Fallback H8: rulesets unavailable → archive (degraded mode,
+            // also removes write access from the bot and the teacher, GH-41).
             app.log.warn({ err, repo: repo.fullName }, "ruleset lock failed, archiving");
             await client.octokit.request("PATCH /repos/{owner}/{repo}", {
               owner: org,
@@ -112,7 +112,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
             .set({ lockedAt: new Date(), rulesetId })
             .where(eq(studentRepos.id, repo.id));
         } else {
-          // Stratégie commit : un commit vide bot par branche sélectionnée.
+          // Commit strategy: one empty bot commit per selected branch.
           const done = await app.db
             .select({ sha: botCommits.sha })
             .from(botCommits)
@@ -124,7 +124,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
               ),
             )
             .limit(1);
-          if (done.length > 0) continue; // déjà marqué — idempotent
+          if (done.length > 0) continue; // already marked, idempotent
           for (const branch of a.branches) {
             const sha = await pushEmptyCommit({
               octokit: client.octokit,
@@ -163,8 +163,8 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
       "repos",
       repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),
     );
-    // Les dépôts en échec restent à traiter : retry pg-boss, les dépôts déjà
-    // verrouillés/marqués sont sautés au passage suivant.
+    // Failed repositories still need handling: pg-boss retries, and repos
+    // already locked/marked are skipped on the next pass.
     if (failures.length > 0) {
       throw new Error(`deadline apply incomplete: ${failures.join(", ")}`);
     }
@@ -172,9 +172,9 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
 }
 
 /**
- * Gel définitif (GR-12/14.4, ADR-012) : à `deadline + grace_minutes`, la note
- * gelée devient immuable. En M4 le jalon pose `frozen_at` (l'assignment ne
- * bouge plus) ; la sélection du GradeRun gelé arrive avec M5.
+ * Definitive freeze (GR-12/14.4, ADR-012): at `deadline + grace_minutes` the
+ * frozen grade becomes immutable. In M4 the milestone sets `frozen_at` (the
+ * assignment no longer moves); selecting the frozen GradeRun comes with M5.
  */
 export async function freezeDueAssignments(app: FastifyInstance): Promise<number> {
   const frozen = await app.db

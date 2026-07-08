@@ -1,9 +1,9 @@
 /**
- * Création du dépôt source squashed (GH-10..13) au moment de la création de
- * l'assignment. Deux stratégies :
- * - `whole`  : tout l'historique des branches retenues est repoussé tel quel ;
- * - `squash` : chaque branche retenue est réduite à un unique commit initial.
- * Les opérations git utilisent le token d'installation (GH-03).
+ * Creation of the squashed source repository (GH-10..13) when the
+ * assignment is created. Two strategies:
+ * - `whole`  : the full history of the selected branches is pushed as is;
+ * - `squash` : each selected branch is reduced to a single initial commit.
+ * Git operations use the installation token (GH-03).
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,7 +12,7 @@ import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
-/** Dépôt bare : `--git-dir` explicite (compatible `safe.bareRepository=explicit`). */
+/** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
 function gitBare(gitDir: string, ...args: string[]) {
   return (
     execFileSync("git", ["--git-dir", gitDir, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args], {
@@ -32,7 +32,7 @@ function git(cwd: string, ...args: string[]) {
 export interface SquashedResult {
   repoId: number;
   fullName: string;
-  /** SHA de tête par branche du squashed (base des futurs primary_commits). */
+  /** Head SHA per branch of the squashed repo (base of future primary_commits). */
   heads: Record<string, string>;
 }
 
@@ -49,8 +49,8 @@ export async function createSquashedRepo(opts: {
   const auth = (repo: string) =>
     `https://x-access-token:${token}@github.com/${org}/${repo}.git`;
 
-  // Création du dépôt cible — refus si déjà pris (le nom dérive du slug,
-  // unique par classroom ; une collision est une vraie erreur).
+  // Creation of the target repository; refused if already taken (the name
+  // derives from the slug, unique per classroom; a collision is a real error).
   const { data: created } = await octokit.request("POST /orgs/{org}/repos", {
     org,
     name: targetRepo,
@@ -76,7 +76,7 @@ export async function createSquashedRepo(opts: {
       for (const branch of branches) {
         const dir = join(work, `b-${branch.replace(/[^a-zA-Z0-9]/g, "_")}`);
         git(work, "clone", "--quiet", "--depth", "1", "--branch", branch, auth(sourceRepo), dir);
-        // Un seul commit initial : on rejoue l'arbre de tête sans historique.
+        // A single initial commit: replay the head tree without history.
         rmSync(join(dir, ".git"), { recursive: true, force: true });
         git(dir, "init", "-q", "-b", branch);
         git(dir, "add", "-A");

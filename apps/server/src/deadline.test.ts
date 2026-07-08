@@ -5,7 +5,7 @@ import { TASK_DEFS, taskDef } from "./tasks.js";
 
 describe("zurichIso (GH-42)", () => {
   it("formats a summer instant with the +02:00 offset", () => {
-    // 2026-07-03T21:59:00Z = 23:59 heure d'été à Zurich.
+    // 2026-07-03T21:59:00Z = 23:59 summer time in Zurich.
     expect(zurichIso(new Date("2026-07-03T21:59:00Z"))).toBe("2026-07-03T23:59:00+02:00");
   });
 
@@ -14,7 +14,7 @@ describe("zurichIso (GH-42)", () => {
   });
 
   it("crosses the date boundary through the offset", () => {
-    // 23:30 UTC le 1er = 01:30 le 2 à Zurich (été).
+    // 23:30 UTC on the 1st = 01:30 on the 2nd in Zurich (summer).
     expect(zurichIso(new Date("2026-07-01T23:30:00Z"))).toBe("2026-07-02T01:30:00+02:00");
   });
 });
@@ -25,7 +25,7 @@ describe("task registry", () => {
     expect(new Set(keys).size).toBe(keys.length);
     for (const def of TASK_DEFS) {
       expect(def.defaultIntervalMinutes).toBeGreaterThanOrEqual(5);
-      expect(def.description).toMatch(/^[A-Z]/); // UI en anglais
+      expect(def.description).toMatch(/^[A-Z]/); // UI in English
     }
   });
 

@@ -1,7 +1,7 @@
 /**
- * Sessions opaques côté serveur (AU-06) : token aléatoire 256 bits remis au
- * navigateur, seul son SHA-256 est persisté — une fuite de la table ne permet
- * pas de rejouer une session. Invalidation = DELETE.
+ * Opaque server-side sessions (AU-06): a random 256-bit token is handed to
+ * the browser, only its SHA-256 is persisted; a leak of the table does not
+ * allow replaying a session. Invalidation = DELETE.
  */
 import { createHash, randomBytes } from "node:crypto";
 
@@ -50,7 +50,7 @@ export async function deleteSession(db: Db, token: string) {
   await db.delete(sessions).where(eq(sessions.sidHash, hashToken(token)));
 }
 
-/** Purge des sessions expirées (branchée sur `purge.housekeeping` en M3). */
+/** Purge of expired sessions (wired to `purge.housekeeping` in M3). */
 export async function purgeExpiredSessions(db: Db) {
   await db.delete(sessions).where(lt(sessions.expiresAt, new Date()));
 }

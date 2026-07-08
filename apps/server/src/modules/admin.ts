@@ -11,11 +11,11 @@ import { TASK_DEFS, taskDef } from "../tasks.js";
 import { TASK_QUEUE } from "../jobs.js";
 
 /**
- * Administration (révision de H2, 2026-07-07) : le super admin (e-mail en
- * environnement) gère les teachers en base. Le grant se fait par e-mail ;
- * identité et dernière connexion se remplissent au premier login edu-ID.
- * Grant et revoke ont un effet immédiat sur le compte existant (le rôle est
- * aussi recalculé à chaque login).
+ * Administration (revision of H2, 2026-07-07): the super admin (email in
+ * the environment) manages teachers in the database. Granting is done by
+ * email; identity and last login are filled in at the first edu-ID login.
+ * Grant and revoke take effect immediately on an existing account (the role
+ * is also recomputed at every login).
  */
 export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfig }) {
   const { config } = opts;
@@ -68,7 +68,7 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
         .code(409)
         .send({ error: "already_teacher", message: "This e-mail is already a teacher" });
     }
-    // Effet immédiat si le compte existe déjà (sinon : au premier login).
+    // Immediate effect if the account already exists (otherwise: at first login).
     await app.db
       .update(users)
       .set({ role: "teacher" })
@@ -99,7 +99,7 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
         .limit(1);
       if (!grant) return reply.code(404).send({ error: "not_found" });
       await app.db.delete(teacherGrants).where(eq(teacherGrants.id, grant.id));
-      // Rétrogradation immédiate ; ses classrooms restent en base, intactes.
+      // Immediate demotion; their classrooms stay in the database, untouched.
       await app.db
         .update(users)
         .set({ role: "student" })
@@ -116,7 +116,7 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
     },
   );
 
-  // --- Tâches planifiées (ADR-011) : périodes et activation configurables ---
+  // --- Scheduled tasks (ADR-011): configurable intervals and activation ---
 
   app.get("/app/api/admin/tasks", { preHandler: requireAdmin }, async () => {
     const rows = await app.db.select().from(scheduledTasks);

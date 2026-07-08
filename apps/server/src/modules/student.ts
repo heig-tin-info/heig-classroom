@@ -21,10 +21,10 @@ import { gradeViewsByIds } from "../grading.js";
 import { claimEnrollments } from "./roster.js";
 
 /**
- * Vue et actions étudiant : classrooms rattachées, assignments publiés,
- * acceptation avec provisionnement du dépôt (GH-20..25). Le chargement tente
- * d'abord un claim (AU-18) : une entrée ajoutée pendant une session active
- * est rattachée sans re-login.
+ * Student view and actions: attached classrooms, published assignments,
+ * acceptance with repository provisioning (GH-20..25). Loading first
+ * attempts a claim (AU-18): an entry added during an active session is
+ * attached without a re-login.
  */
 export async function studentPlugin(
   app: FastifyInstance,
@@ -99,8 +99,8 @@ export async function studentPlugin(
             )
         : [];
 
-      // GR-10 : note indicative (courante, ou gelée dès que la deadline est
-      // appliquée — GR-12/13).
+      // GR-10: indicative grade (current, or frozen as soon as the deadline
+      // is applied, GR-12/13).
       const grades = await gradeViewsByIds(
         app,
         repos.flatMap((sr) => [sr.currentGradeRunId, sr.frozenGradeRunId]),
@@ -158,7 +158,7 @@ export async function studentPlugin(
         .limit(1);
       if (!row) return reply.code(404).send({ error: "not_found" });
 
-      // L'étudiant doit être rattaché à la classroom (404 indiscernable).
+      // The student must be attached to the classroom (indistinguishable 404).
       const [enrolled] = await app.db
         .select({ id: enrollments.id })
         .from(enrollments)
@@ -188,7 +188,7 @@ export async function studentPlugin(
           .send({ error: "not_provisionable", message: "Assignment is not ready — contact your teacher" });
       }
 
-      // Idempotence (GH-20) : une ligne par (assignment, user).
+      // Idempotency (GH-20): one row per (assignment, user).
       let [repoRow] = await app.db
         .select()
         .from(studentRepos)

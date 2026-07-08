@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-/** Rôles applicatifs (AU-07) : pas de rôle admin en v1 (H2). */
+/** Application roles (AU-07): no admin role in v1 (H2). */
 export const Role = z.enum(["student", "teacher"]);
 export type Role = z.infer<typeof Role>;
 
@@ -18,7 +18,7 @@ export const ClassroomCreate = z.object({
 });
 export type ClassroomCreate = z.infer<typeof ClassroomCreate>;
 
-/** Statut d'une entrée de roster (AU-15, AU-18). */
+/** Status of a roster entry (AU-15, AU-18). */
 export const EnrollmentStatus = z.enum(["pending", "claimed"]);
 export type EnrollmentStatus = z.infer<typeof EnrollmentStatus>;
 

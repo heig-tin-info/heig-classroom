@@ -1,8 +1,8 @@
 /**
- * Schéma Drizzle — périmètre M1 (voir docs/03-architecture.md, section
- * « Schéma de base de données »). UTC partout (timestamptz), PK uuid v7
- * générées côté application. Les contraintes UNIQUE sont le mécanisme
- * d'idempotence (NFR-09).
+ * Drizzle schema, M1 scope (see docs/03-architecture.md, section
+ * « Schéma de base de données »). UTC everywhere (timestamptz), uuid v7
+ * primary keys generated application-side. UNIQUE constraints are the
+ * idempotency mechanism (NFR-09).
  */
 import { sql } from "drizzle-orm";
 import { customType } from "drizzle-orm/pg-core";
@@ -32,7 +32,7 @@ export const users = pgTable(
     givenName: text("given_name").notNull().default(""),
     familyName: text("family_name").notNull().default(""),
     swissEduId: text("swiss_edu_id"),
-    /** URL d'avatar fournie par l'IdP (claim OIDC `picture`), si présente. */
+    /** Avatar URL provided by the IdP (OIDC `picture` claim), if present. */
     pictureUrl: text("picture_url"),
     role: text("role", { enum: ["student", "teacher", "admin"] })
       .notNull()
@@ -51,7 +51,7 @@ export const users = pgTable(
 export const sessions = pgTable(
   "sessions",
   {
-    /** SHA-256 hex du token de session — jamais le token en clair (AU-06). */
+    /** Hex SHA-256 of the session token, never the plaintext token (AU-06). */
     sidHash: char("sid_hash", { length: 64 }).primaryKey(),
     userId: uuid("user_id")
       .notNull()
@@ -68,7 +68,7 @@ const bytea = customType<{ data: Buffer }>({
   },
 });
 
-/** Avatar téléversé (recadré 256×256 côté client) — prioritaire sur `picture_url`. */
+/** Uploaded avatar (cropped to 256×256 client-side), takes priority over `picture_url`. */
 export const avatars = pgTable("avatars", {
   userId: uuid("user_id")
     .primaryKey()
@@ -79,15 +79,15 @@ export const avatars = pgTable("avatars", {
 });
 
 /**
- * Teachers gérés en base par l'admin (révision de H2, 2026-07-07) : le grant
- * se fait par e-mail avant même que la personne ait un compte — identité et
- * dernière connexion se remplissent à son premier login edu-ID.
+ * Teachers managed in the database by the admin (H2 revision, 2026-07-07):
+ * the grant is made by email even before the person has an account; identity
+ * and last login fill in at their first edu-ID login.
  */
 export const teacherGrants = pgTable(
   "teacher_grants",
   {
     id: uuid("id").primaryKey(),
-    /** Normalisé en minuscules. */
+    /** Normalized to lowercase. */
     email: text("email").notNull().unique(),
     createdBy: uuid("created_by")
       .notNull()
@@ -98,7 +98,7 @@ export const teacherGrants = pgTable(
 
 export const organizations = pgTable("organizations", {
   id: uuid("id").primaryKey(),
-  /** Résolu à l'installation de la GitHub App (M2) ; null tant que non installée. */
+  /** Resolved when the GitHub App is installed (M2); null until installed. */
   githubOrgId: bigint("github_org_id", { mode: "number" }).unique(),
   login: text("login").notNull().unique(),
   installationId: bigint("installation_id", { mode: "number" }).unique(),
@@ -129,7 +129,7 @@ export const enrollments = pgTable(
       .references(() => classrooms.id, { onDelete: "cascade" }),
     nom: text("nom").notNull(),
     prenom: text("prenom").notNull(),
-    /** Normalisé (trim + lowercase) à l'import (AU-14). */
+    /** Normalized (trim + lowercase) at import time (AU-14). */
     email: text("email").notNull(),
     status: text("status", { enum: ["pending", "claimed"] })
       .notNull()
@@ -154,7 +154,7 @@ export const assignments = pgTable(
       .references(() => classrooms.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     slug: text("slug").notNull(),
-    /** Cycle de vie US-08 : brouillon → publié → verrouillé. */
+    /** US-08 lifecycle: draft → published → locked. */
     state: text("state", { enum: ["draft", "published", "locked"] })
       .notNull()
       .default("draft"),
@@ -181,11 +181,11 @@ export const assignments = pgTable(
   },
   (t) => [
     uniqueIndex("assignments_classroom_slug_uq").on(t.classroomId, t.slug),
-    // Scan du ticker deadline (ADR-006) : publiés, échus, non appliqués.
+    // Deadline ticker scan (ADR-006): published, past due, not yet applied.
     index("assignments_deadline_pending_idx")
       .on(t.deadlineAt)
       .where(sql`${t.state} = 'published' AND ${t.deadlineAppliedAt} IS NULL`),
-    // Gel définitif après le délai de grâce (ADR-012).
+    // Definitive freeze after the grace period (ADR-012).
     index("assignments_freeze_pending_idx")
       .on(t.deadlineAt)
       .where(sql`${t.deadlineAppliedAt} IS NOT NULL AND ${t.frozenAt} IS NULL`),
@@ -220,21 +220,21 @@ export const studentRepos = pgTable(
     ciStatus: text("ci_status", { enum: ["none", "pending", "pass", "fail"] })
       .notNull()
       .default("none"),
-    /** GradeRun retenu (GR-09) — pas de FK : référence croisée avec grade_runs. */
+    /** Selected GradeRun (GR-09); no FK: cross-reference with grade_runs. */
     currentGradeRunId: uuid("current_grade_run_id"),
-    /** Note gelée à la deadline (GR-12), immuable après deadline+grace (GR-14.4). */
+    /** Grade frozen at the deadline (GR-12), immutable after deadline+grace (GR-14.4). */
     frozenGradeRunId: uuid("frozen_grade_run_id"),
   },
   (t) => [
-    // Clé d'idempotence du provisionnement (GH-20, NFR-09).
+    // Provisioning idempotency key (GH-20, NFR-09).
     uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
   ],
 );
 
 /**
- * Passes CI capturées (GR-08) : un enregistrement immuable par run éligible
- * (branche sélectionnée, commit non-bot). L'unicité (repo, run, attempt) est
- * l'idempotence — webhook rejoué ou réconciliation ne dupliquent jamais.
+ * Captured CI runs (GR-08): one immutable record per eligible run (selected
+ * branch, non-bot commit). The (repo, run, attempt) uniqueness is the
+ * idempotency; a replayed webhook or a reconciliation never duplicates.
  */
 export const gradeRuns = pgTable(
   "grade_runs",
@@ -253,22 +253,22 @@ export const gradeRuns = pgTable(
     parseStatus: text("parse_status", {
       enum: ["ok", "no_annotation", "malformed", "multiple", "fallback"],
     }).notNull(),
-    /** Critère GR-14 : heure de réception serveur du commit, jamais git. */
+    /** GR-14 criterion: server receipt time of the commit, never git time. */
     afterDeadline: boolean("after_deadline").notNull().default(false),
     completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("grade_runs_repo_run_attempt_uq").on(t.studentRepoId, t.workflowRunId, t.runAttempt),
-    // Sélection GR-09 : le plus récent éligible par dépôt.
+    // GR-09 selection: the most recent eligible run per repository.
     index("grade_runs_selection_idx").on(t.studentRepoId, t.completedAt),
   ],
 );
 
 /**
- * Reçus de push (GR-14, ADR-012) : l'heure de réception serveur est écrite
- * SYNCHRONEMENT dans le handler webhook — c'est la référence du gel de note,
- * jamais dépendante du retard de la file.
+ * Push receipts (GR-14, ADR-012): the server receipt time is written
+ * SYNCHRONOUSLY in the webhook handler; it is the reference for the grade
+ * freeze and never depends on queue lag.
  */
 export const pushReceipts = pgTable(
   "push_receipts",
@@ -286,7 +286,7 @@ export const pushReceipts = pgTable(
   (t) => [uniqueIndex("push_receipts_repo_sha_uq").on(t.studentRepoId, t.headSha)],
 );
 
-/** Commits bot (revert, deadline, sync) : filtre déterministe GR-05/GH-44. */
+/** Bot commits (revert, deadline, sync): deterministic GR-05/GH-44 filter. */
 export const botCommits = pgTable(
   "bot_commits",
   {
@@ -300,7 +300,7 @@ export const botCommits = pgTable(
   (t) => [uniqueIndex("bot_commits_pk").on(t.studentRepoId, t.sha)],
 );
 
-/** Historique des reverts de fichiers protégés (plafond anti-boucle H10). */
+/** History of protected-file reverts (anti-loop cap H10). */
 export const reverts = pgTable(
   "reverts",
   {
@@ -316,10 +316,10 @@ export const reverts = pgTable(
 );
 
 /**
- * Tâches planifiées (ADR-011) : le catalogue (description, handler) vit dans
- * le code ; la base porte la configuration admin (période, activation) et
- * l'état de la dernière exécution. Le ticker balaie cette table — modifier
- * la période prend effet au tick suivant, sans redémarrage.
+ * Scheduled tasks (ADR-011): the catalog (description, handler) lives in the
+ * code; the database carries the admin configuration (interval, activation)
+ * and the state of the last run. The ticker sweeps this table, so changing
+ * the interval takes effect at the next tick, without a restart.
  */
 export const scheduledTasks = pgTable("scheduled_tasks", {
   key: text("key").primaryKey(),
@@ -345,7 +345,7 @@ export const auditLog = pgTable("audit_log", {
 export const webhookDeliveries = pgTable(
   "webhook_deliveries",
   {
-    /** X-GitHub-Delivery — la PK est la déduplication (GH-61). */
+    /** X-GitHub-Delivery; the PK is the deduplication (GH-61). */
     deliveryId: uuid("delivery_id").primaryKey(),
     event: text("event").notNull(),
     action: text("action"),

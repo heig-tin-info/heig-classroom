@@ -2,8 +2,8 @@ import type { Db } from "./db/client.js";
 import { auditLog } from "./db/schema.js";
 
 /**
- * Journal d'audit append-only (NFR-05, AU-42). En production le rôle SQL
- * applicatif n'a ni UPDATE ni DELETE sur cette table.
+ * Append-only audit log (NFR-05, AU-42). In production the application SQL
+ * role has neither UPDATE nor DELETE on this table.
  */
 export async function audit(
   db: Db,

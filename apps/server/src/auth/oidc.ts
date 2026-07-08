@@ -1,7 +1,7 @@
 /**
- * Login plateforme OIDC (AU-01..05) : Authorization Code + PKCE avec `state`
- * et `nonce`, via openid-client (certifié). L'IdP est Switch edu-ID en
- * production, Keycloak local en développement — le code est identique.
+ * Platform OIDC login (AU-01..05): Authorization Code + PKCE with `state`
+ * and `nonce`, via openid-client (certified). The IdP is Switch edu-ID in
+ * production, a local Keycloak in development; the code is identical.
  */
 import { createPrivateKey } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -17,7 +17,7 @@ export interface OidcClaims {
   givenName: string;
   familyName: string;
   swissEduId: string | null;
-  /** Claim OIDC `picture` (URL), si l'IdP la fournit. */
+  /** OIDC `picture` claim (URL), if the IdP provides it. */
   picture: string | null;
 }
 
@@ -26,14 +26,14 @@ export class OidcProvider {
 
   constructor(private readonly app: AppConfig) {}
 
-  /** Découverte paresseuse et mise en cache : un IdP injoignable au boot ne
-   *  doit pas empêcher le serveur (et /healthz) de démarrer. */
+  /** Lazy discovery with caching: an IdP unreachable at boot must not
+   *  prevent the server (and /healthz) from starting. */
   private async configuration(): Promise<oidc.Configuration> {
     if (this.config) return this.config;
     const execute =
       this.app.NODE_ENV === "production" ? [] : [oidc.allowInsecureRequests];
-    // `private_key_jwt` (SWITCH edu-ID) quand une clé est fournie, sinon
-    // client_secret (Keycloak de dev) — même flux dans les deux cas.
+    // `private_key_jwt` (SWITCH edu-ID) when a key is provided, otherwise
+    // client_secret (dev Keycloak); the flow is the same in both cases.
     let clientAuth: oidc.ClientAuth;
     if (this.app.OIDC_PRIVATE_KEY_PATH) {
       const der = createPrivateKey(readFileSync(this.app.OIDC_PRIVATE_KEY_PATH)).export({
@@ -92,13 +92,13 @@ export class OidcProvider {
       expectedState: stash.state,
       expectedNonce: stash.nonce,
     });
-    // AU-09/NFR-02 : les tokens ne sont ni persistés ni retournés — seules les
-    // claims d'identité sortent d'ici.
+    // AU-09/NFR-02: the tokens are neither persisted nor returned; only the
+    // identity claims leave this function.
     const idClaims = tokens.claims();
-    if (!idClaims) throw new Error("ID token sans claims");
-    // Selon la configuration de l'IdP (edu-ID notamment), les attributs
-    // peuvent n'être délivrés que par l'endpoint userinfo : repli si l'ID
-    // token ne porte pas l'e-mail.
+    if (!idClaims) throw new Error("ID token has no claims");
+    // Depending on the IdP configuration (edu-ID in particular), attributes
+    // may only be delivered by the userinfo endpoint: fall back when the ID
+    // token does not carry the email.
     let claims: Record<string, unknown> = idClaims;
     if (typeof claims.email !== "string") {
       const userinfo = await oidc.fetchUserInfo(config, tokens.access_token, idClaims.sub);

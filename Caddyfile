@@ -1,4 +1,4 @@
-# Caddy NATIF (apt) — à copier vers /etc/caddy/Caddyfile puis :
+# NATIVE Caddy (apt) -- copy to /etc/caddy/Caddyfile, then:
 #   sudo systemctl reload caddy
 classroom.chevallier.io {
 	encode gzip
@@ -9,7 +9,7 @@ classroom.chevallier.io {
 		Referrer-Policy "strict-origin-when-cross-origin"
 	}
 
-	# SSE : flux non bufferisé (docs/03, ADR-005)
+	# SSE: unbuffered stream (docs/03, ADR-005)
 	handle /app/events {
 		reverse_proxy localhost:3000 {
 			flush_interval -1

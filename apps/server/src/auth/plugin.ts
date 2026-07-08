@@ -29,8 +29,8 @@ declare module "fastify" {
 }
 
 /**
- * Upsert de l'utilisateur au login (clé : oidc_sub). Rôle recalculé à chaque
- * login : admin (SUPER_ADMIN_EMAIL), teacher (grant en base), sinon student.
+ * User upsert at login (key: oidc_sub). Role recomputed on every login:
+ * admin (SUPER_ADMIN_EMAIL), teacher (database grant), otherwise student.
  */
 async function upsertUser(
   app: FastifyInstance,
@@ -77,7 +77,7 @@ async function upsertUser(
       },
     })
     .returning();
-  if (!row) throw new Error("Upsert utilisateur sans retour");
+  if (!row) throw new Error("User upsert returned no row");
   return row;
 }
 
@@ -86,7 +86,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
   const provider = new OidcProvider(config);
   const secure = config.NODE_ENV === "production";
 
-  // --- Résolution de session sur chaque requête ---
+  // --- Session resolution on every request ---
   app.decorateRequest("user", null);
   app.addHook("preHandler", async (req) => {
     const token = req.cookies[SESSION_COOKIE];
@@ -94,12 +94,12 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     req.user = await findSessionUser(app.db, token);
   });
 
-  // --- Garde-fous réutilisables ---
+  // --- Reusable guards ---
   app.decorate(
     "requireSession",
     async (req: FastifyRequest, reply: FastifyReply) => {
       if (!req.user) return reply.code(401).send({ error: "unauthenticated" });
-      // Anti-CSRF double-submit (docs/03 « Contrat API ») sur toute mutation.
+      // Double-submit anti-CSRF (docs/03 « Contrat API ») on every mutation.
       if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
         const cookie = req.cookies[CSRF_COOKIE];
         const header = req.headers[CSRF_HEADER];
@@ -143,12 +143,12 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     try {
       claims = await provider.completeLogin(callbackUrl, stash);
     } catch (err) {
-      req.log.warn({ err }, "échec de l'échange OIDC");
+      req.log.warn({ err }, "OIDC exchange failed");
       return reply.code(401).send({ error: "oidc", message: "Authentication refused" });
     }
 
     const user = await upsertUser(app, config, claims);
-    // Claim automatique du roster sur e-mail vérifié (AU-18, H3).
+    // Automatic roster claim on verified email (AU-18, H3).
     if (claims.emailVerified) {
       await claimEnrollments(app.db, { id: user.id, email: user.email });
     }
@@ -167,7 +167,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
       httpOnly: true,
       expires: session.expiresAt,
     });
-    // Lisible par le front pour l'en-tête X-CSRF-Token (double-submit).
+    // Readable by the frontend for the X-CSRF-Token header (double-submit).
     reply.setCookie(CSRF_COOKIE, session.csrf, {
       ...cookieBase,
       httpOnly: false,
@@ -200,7 +200,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     { preHandler: (req, reply) => app.requireSession(req, reply) },
     async (req) => {
       const u = req.user!;
-      // Avatar téléversé prioritaire sur le claim IdP ; ?v= casse le cache.
+      // Uploaded avatar takes priority over the IdP claim; ?v= busts the cache.
       const [uploaded] = await app.db
         .select({ updatedAt: avatars.updatedAt })
         .from(avatars)
@@ -233,6 +233,6 @@ declare module "fastify" {
   }
 }
 
-/** fastify-plugin : les décorateurs (request.user, requireSession) doivent être
- *  visibles des autres plugins — sans fp, ils restent encapsulés ici. */
+/** fastify-plugin: the decorators (request.user, requireSession) must be
+ *  visible to the other plugins; without fp they would stay encapsulated here. */
 export const authPlugin = fp(authPluginImpl, { name: "auth" });

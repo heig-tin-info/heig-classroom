@@ -35,13 +35,13 @@ async function getOrCreateOrganization(app: FastifyInstance, login: string) {
     .onConflictDoNothing({ target: organizations.login })
     .returning();
   if (created) return created;
-  // Course perdue : l'autre écrivain vient de la créer.
+  // Lost race: the other writer just created it.
   const [row] = await app.db
     .select()
     .from(organizations)
     .where(eq(organizations.login, normalized))
     .limit(1);
-  if (!row) throw new Error("Organisation introuvable après upsert");
+  if (!row) throw new Error("Organization not found after upsert");
   return row;
 }
 
@@ -50,7 +50,7 @@ export async function classroomsPlugin(
   opts: { config: AppConfig },
 ) {
   const { config } = opts;
-  /** Teacher uniquement (AU-23/24) ; 404 pour tout ce qui n'est pas à lui. */
+  /** Teacher only (AU-23/24); 404 for anything that is not theirs. */
   const requireTeacher = async (req: FastifyRequest, reply: FastifyReply) => {
     const denied = await app.requireSession(req, reply);
     if (denied) return denied;
@@ -60,7 +60,7 @@ export async function classroomsPlugin(
     return undefined;
   };
 
-  /** Charge la classroom si et seulement si elle appartient au teacher courant. */
+  /** Loads the classroom if and only if it belongs to the current teacher. */
   async function ownedClassroom(req: FastifyRequest, reply: FastifyReply) {
     const params = IdParam.safeParse(req.params);
     if (!params.success) {
@@ -79,7 +79,7 @@ export async function classroomsPlugin(
     return room;
   }
 
-  // Organisations proposées à la création : celles où l'App est installée.
+  // Organizations offered at creation: those where the App is installed.
   app.get("/app/api/orgs", { preHandler: requireTeacher }, async (req) => {
     try {
       return await listInstalledOrgs(config);
@@ -112,8 +112,8 @@ export async function classroomsPlugin(
     if (!body.success) {
       return reply.code(400).send({ error: "validation", issues: body.error.issues });
     }
-    // L'organisation doit exister sur GitHub (saisie libre validée) ;
-    // lookup indéterminé (rate limit) = on laisse passer.
+    // The organization must exist on GitHub (free-form input validated);
+    // inconclusive lookup (rate limit) = let it through.
     const exists = await orgExistsOnGithub(body.data.orgLogin.trim());
     if (exists === false) {
       return reply.code(400).send({
@@ -150,8 +150,8 @@ export async function classroomsPlugin(
       .from(organizations)
       .where(eq(organizations.id, room.orgId))
       .limit(1);
-    // Résolution paresseuse de l'installation (GH-04) : tant que l'App n'est
-    // pas détectée sur l'org, on retente à chaque consultation du détail.
+    // Lazy resolution of the installation (GH-04): as long as the App is not
+    // detected on the org, we retry every time the detail view is opened.
     if (org && org.installationId === null) {
       try {
         const found = await resolveOrgInstallation(config, org.login);
@@ -174,7 +174,7 @@ export async function classroomsPlugin(
           });
         }
       } catch (err) {
-        req.log.warn({ err, org: org.login }, "résolution d'installation impossible");
+        req.log.warn({ err, org: org.login }, "installation resolution failed");
       }
     }
     const roster = await rosterView(app.db, room.id);
@@ -203,7 +203,7 @@ export async function classroomsPlugin(
     },
   );
 
-  // --- Édition du roster, entrée par entrée ---
+  // --- Roster editing, entry by entry ---
 
   const EnrollmentParam = z.object({ id: z.uuid(), eid: z.uuid() });
   const EnrollmentPatch = z
@@ -214,7 +214,7 @@ export async function classroomsPlugin(
     })
     .refine((b) => b.nom || b.prenom || b.email, { message: "Nothing to update" });
 
-  /** Charge l'entrée si la classroom appartient au teacher courant. */
+  /** Loads the entry if the classroom belongs to the current teacher. */
   async function ownedEnrollment(req: FastifyRequest, reply: FastifyReply) {
     const params = EnrollmentParam.safeParse(req.params);
     if (!params.success) {
@@ -255,8 +255,8 @@ export async function classroomsPlugin(
             ...(body.data.nom ? { nom: body.data.nom } : {}),
             ...(body.data.prenom ? { prenom: body.data.prenom } : {}),
             ...(email ? { email } : {}),
-            // Changer l'e-mail invalide le rattachement : l'entrée redevient
-            // à réclamer par le détenteur du nouvel e-mail (AU-18).
+            // Changing the email invalidates the attachment: the entry is
+            // again claimable by the holder of the new email (AU-18).
             ...(emailChanged
               ? { status: "pending" as const, userId: null, claimedAt: null, conflictFlag: false }
               : {}),
@@ -367,8 +367,8 @@ export async function classroomsPlugin(
     async (req, reply) => {
       const room = await ownedClassroom(req, reply);
       if (!room) return reply;
-      // Deux formes : CSV brut (text/csv) ou lignes tabulaires {rows} (JSON),
-      // typiquement extraites d'un fichier Excel côté client.
+      // Two forms: raw CSV (text/csv) or tabular {rows} lines (JSON),
+      // typically extracted from an Excel file client-side.
       let source: { csv: string } | { rows: Cell[][] };
       if (typeof req.body === "string" && req.body.length > 0) {
         source = { csv: req.body };
@@ -384,7 +384,7 @@ export async function classroomsPlugin(
       }
       const { parse, summary } = await importRoster(app.db, room.id, source);
       if (!parse.ok) {
-        // Import atomique (AU-14) : rien n'a été écrit.
+        // Atomic import (AU-14): nothing was written.
         return reply.code(400).send({ error: "roster_invalid", errors: parse.errors });
       }
       await audit(app.db, {
@@ -395,8 +395,8 @@ export async function classroomsPlugin(
         subjectId: room.id,
         payload: { rows: parse.rows.length },
       });
-      // Les étudiants déjà inscrits sur la plateforme sont rattachés
-      // immédiatement, sans attendre leur prochain login.
+      // Students already registered on the platform are attached
+      // immediately, without waiting for their next login.
       await claimForExistingUsers(app.db, room.id);
       return reply.code(200).send({ rows: parse.rows.length, ...summary });
     },

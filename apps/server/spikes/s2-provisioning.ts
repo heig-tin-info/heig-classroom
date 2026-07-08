@@ -1,17 +1,17 @@
 /**
- * Spike S2 — Provisionnement via GitHub App (docs/03, section Spikes).
+ * Spike S2: provisioning via GitHub App (docs/03, Spikes section).
  *
- * Prouve la chaîne complète sur l'organisation sandbox :
- *   token d'installation → création de dépôt privé → push git réel
- *   (x-access-token, y compris .github/workflows/ → permission Workflows)
- *   → ruleset anti force-push → ruleset lock/unlock (deadline GH-41)
- *   → invitation (si S2_STUDENT_LOGIN) → idempotence du rejeu → cleanup.
+ * Proves the full chain on the sandbox organization:
+ *   installation token -> private repository creation -> real git push
+ *   (x-access-token, including .github/workflows/ -> Workflows permission)
+ *   -> anti force-push ruleset -> lock/unlock ruleset (deadline GH-41)
+ *   -> invitation (if S2_STUDENT_LOGIN) -> replay idempotency -> cleanup.
  *
- * Usage :
+ * Usage:
  *   pnpm --filter @hgc/server exec tsx spikes/s2-provisioning.ts
- * Variables (lues dans le .env à la racine du repo) :
- *   S2_ORG (défaut heig-test-classroom), S2_COUNT (défaut 30),
- *   S2_KEEP=1 pour garder les dépôts, S2_STUDENT_LOGIN (optionnel).
+ * Variables (read from the .env at the repo root):
+ *   S2_ORG (default heig-test-classroom), S2_COUNT (default 30),
+ *   S2_KEEP=1 to keep the repositories, S2_STUDENT_LOGIN (optional).
  */
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
@@ -23,7 +23,7 @@ import { App, Octokit } from "octokit";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 
-// --- .env minimal (le spike ne dépend pas du serveur) ---
+// --- Minimal .env (the spike does not depend on the server) ---
 const env: Record<string, string> = {};
 for (const line of readFileSync(join(repoRoot, ".env"), "utf8").split("\n")) {
   const m = /^([A-Z0-9_]+)=(.*)$/.exec(line.trim());
@@ -57,7 +57,7 @@ interface Timing {
 async function main() {
   console.log(`# Spike S2 — org=${ORG} count=${COUNT} keep=${KEEP}`);
 
-  // 1. Résolution d'installation + token
+  // 1. Installation resolution + token
   let t = Date.now();
   const { data: inst } = await app.octokit.request("GET /orgs/{org}/installation", {
     org: ORG,
@@ -66,7 +66,7 @@ async function main() {
   const { token } = (await octo.auth({ type: "installation" })) as { token: string };
   console.log(`installation ${inst.id} résolue et token obtenu en ${Date.now() - t} ms`);
 
-  // 2. « Squashed source » local : contenu type d'un assignment
+  // 2. Local "squashed source": typical content of an assignment
   const work = mkdtempSync(join(tmpdir(), "s2-src-"));
   writeFileSync(join(work, "README.md"), "# Assignment spike S2\n\nContenu d'énoncé.\n");
   writeFileSync(join(work, "criteria.yml"), "points_max: 6\n");
@@ -92,12 +92,12 @@ async function main() {
     "commit", "-q", "-m", "Initial squashed commit",
   );
 
-  // 3. Provisionnement idempotent d'un dépôt étudiant
+  // 3. Idempotent provisioning of a student repository
   async function provision(name: string): Promise<Timing> {
     const steps: Record<string, number> = {};
     const t0 = Date.now();
 
-    // create (idempotent : 422 name already exists → étape déjà faite)
+    // create (idempotent: 422 name already exists = step already done)
     let t = Date.now();
     let created = true;
     try {
@@ -113,17 +113,18 @@ async function main() {
       if ((err as { status?: number }).status !== 422) throw err;
       created = false;
     }
-    // Un push immédiat sur un dépôt tout juste créé attend l'initialisation
-    // du backend git de GitHub (observé : 15-40 s). Une courte pause évite
-    // de payer ce délai dans la connexion git.
+    // An immediate push on a freshly created repository waits for GitHub's
+    // git backend initialization (observed: 15-40 s). A short pause avoids
+    // paying that delay inside the git connection.
     if (created && process.env.S2_NO_GRACE !== "1") {
       await new Promise((r) => setTimeout(r, Number(process.env.S2_GRACE_MS ?? 3000)));
     }
     steps.create = Date.now() - t;
 
-    // push réel (skippé si la ref existe déjà — idempotence). On ne liste les
-    // refs que d'un dépôt préexistant : sur un dépôt vide l'appel répond 409
-    // et le plugin retry d'Octokit transformerait ce 409 en ~40 s de backoff.
+    // real push (skipped if the ref already exists: idempotency). We only
+    // list the refs of a preexisting repository: on an empty one the call
+    // returns 409 and Octokit's retry plugin would turn that 409 into ~40 s
+    // of backoff.
     t = Date.now();
     let needPush = true;
     if (!created) {
@@ -140,13 +141,13 @@ async function main() {
       }
     }
     if (needPush) {
-      // --ipv4 : sous WSL2, la résolution IPv6 de github.com peut coûter
-      // ~40 s de timeout par push ; sans incidence ailleurs.
+      // --ipv4: under WSL2, IPv6 resolution of github.com can cost
+      // ~40 s of timeout per push; harmless elsewhere.
       git(work, "push", "-q", "--ipv4", `https://x-access-token:${token}@github.com/${ORG}/${name}.git`, "main:main");
     }
     steps.push = Date.now() - t;
 
-    // ruleset anti force-push + anti suppression (GH-21)
+    // ruleset against force-push + deletion (GH-21)
     t = Date.now();
     const { data: rulesets } = await octo.request("GET /repos/{owner}/{repo}/rulesets", {
       owner: ORG,
@@ -165,7 +166,7 @@ async function main() {
     }
     steps.ruleset = Date.now() - t;
 
-    // invitation (optionnelle sans second compte)
+    // invitation (optional without a second account)
     if (STUDENT) {
       t = Date.now();
       await octo.request("PUT /repos/{owner}/{repo}/collaborators/{username}", {
@@ -180,7 +181,7 @@ async function main() {
     return { repo: name, ms: Date.now() - t0, steps: { ...steps, created: created ? 1 : 0 } };
   }
 
-  // 4. Lock/unlock (mécanique deadline GH-41)
+  // 4. Lock/unlock (deadline mechanics GH-41)
   async function lockUnlock(name: string) {
     const { data: rs } = await octo.request("POST /repos/{owner}/{repo}/rulesets", {
       owner: ORG,
@@ -191,7 +192,7 @@ async function main() {
       conditions: { ref_name: { include: ["~ALL"], exclude: [] } },
       rules: [{ type: "update" }, { type: "creation" }, { type: "deletion" }],
     });
-    // le push doit être refusé maintenant
+    // the push must now be refused
     let pushRefused = false;
     try {
       writeFileSync(join(work, "after-deadline.txt"), "trop tard\n");
@@ -210,7 +211,7 @@ async function main() {
     return pushRefused;
   }
 
-  // --- Exécution ---
+  // --- Execution ---
   const timings: Timing[] = [];
   for (let i = 1; i <= COUNT; i++) {
     const name = `${PREFIX}-${String(i).padStart(2, "0")}`;
@@ -221,19 +222,19 @@ async function main() {
     );
   }
 
-  // idempotence : rejouer le premier
+  // idempotency: replay the first one
   const replay = await provision(`${PREFIX}-01`);
   console.log(`rejeu ${PREFIX}-01: ${replay.ms} ms, created=${replay.steps.created} (attendu 0)`);
 
-  // lock deadline : sur le premier
+  // deadline lock: on the first one
   const pushRefused = await lockUnlock(`${PREFIX}-01`);
   console.log(`lock deadline: push refusé pendant le lock = ${pushRefused} ; ruleset retiré`);
 
-  // quota API restant
+  // remaining API quota
   const { data: rate } = await octo.request("GET /rate_limit");
   console.log(`quota API restant: ${rate.resources.core!.remaining}/${rate.resources.core!.limit}`);
 
-  // --- Bilan ---
+  // --- Summary ---
   const times = timings.map((x) => x.ms).sort((a, b) => a - b);
   const total = times.reduce((a, b) => a + b, 0);
   const summary = {
@@ -249,7 +250,7 @@ async function main() {
   };
   console.log("SUMMARY " + JSON.stringify(summary));
 
-  // --- Nettoyage ---
+  // --- Cleanup ---
   if (!KEEP) {
     for (const { repo } of timings) {
       try {

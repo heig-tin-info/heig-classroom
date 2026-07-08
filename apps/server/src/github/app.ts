@@ -1,7 +1,7 @@
 /**
- * Client GitHub App (GH-01..03) : authentification par JWT signé avec la clé
- * privée PEM, résolution des installations par organisation. Initialisation
- * paresseuse — l'App non configurée ne bloque ni le boot ni /healthz.
+ * GitHub App client (GH-01..03): authentication via a JWT signed with the
+ * PEM private key, resolution of installations per organization. Lazy
+ * initialization; an unconfigured App blocks neither boot nor /healthz.
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -34,7 +34,7 @@ export interface InstallationClient {
   token: string;
 }
 
-/** Octokit authentifié sur une installation + token pour les opérations git. */
+/** Octokit authenticated on an installation + token for git operations. */
 export async function installationClient(
   config: AppConfig,
   installationId: number,
@@ -46,7 +46,7 @@ export async function installationClient(
   return { octokit, token };
 }
 
-/** Organisations où l'App est installée (dropdown de création de classroom). */
+/** Organizations where the App is installed (classroom creation dropdown). */
 export async function listInstalledOrgs(config: AppConfig): Promise<string[]> {
   const app = githubApp(config);
   if (!app) return [];
@@ -58,8 +58,8 @@ export async function listInstalledOrgs(config: AppConfig): Promise<string[]> {
   return logins.sort();
 }
 
-/** L'organisation existe-t-elle sur GitHub ? (lookup public, non authentifié).
- *  `null` = indéterminé (rate limit, réseau) : on laisse passer. */
+/** Does the organization exist on GitHub? (public, unauthenticated lookup).
+ *  `null` = inconclusive (rate limit, network): let it through. */
 export async function orgExistsOnGithub(login: string): Promise<boolean | null> {
   try {
     const res = await fetch(`https://api.github.com/orgs/${encodeURIComponent(login)}`, {
@@ -73,7 +73,7 @@ export async function orgExistsOnGithub(login: string): Promise<boolean | null> 
   }
 }
 
-/** GET /orgs/{org}/installation — null si l'App n'y est pas installée. */
+/** GET /orgs/{org}/installation; null if the App is not installed there. */
 export async function resolveOrgInstallation(
   config: AppConfig,
   orgLogin: string,

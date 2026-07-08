@@ -90,7 +90,7 @@ function CiBadge({ s }: { s: DetailStudent["repo"] }) {
   );
 }
 
-/** Note x/y (GR-11) : gelée (flocon) dès que la deadline est appliquée. */
+/** Grade x/y (GR-11): frozen (snowflake) once the deadline is enforced. */
 export function GradeBadge({
   grade,
   frozen,
@@ -120,7 +120,7 @@ interface HistoryRun extends GradeView {
   runAttempt: number;
 }
 
-/** Historique des passes CI d'un étudiant (GR-11/13). */
+/** History of a student's CI runs (GR-11/13). */
 function GradeHistoryModal({
   classroomId,
   assignmentId,
@@ -234,7 +234,7 @@ function StudentRow({
 }: {
   classroomId: string;
   assignmentId: string;
-  /** Deadline appliquée (state locked) : la note affichée est la note gelée. */
+  /** Deadline enforced (state locked): the displayed grade is the frozen one. */
   frozen: boolean;
   s: DetailStudent;
 }) {

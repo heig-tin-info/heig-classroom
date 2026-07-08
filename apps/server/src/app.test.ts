@@ -3,9 +3,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
 
-// Socle M1 : le serveur doit démarrer et répondre même sans base joignable
-// (healthz « degraded », jamais de crash) — condition du diagnostic à 23 h.
-describe("app (sans base de données)", () => {
+// M1 foundation: the server must start and respond even without a reachable
+// database (healthz "degraded", never a crash), a precondition for the 11 pm
+// diagnosis.
+describe("app (without a database)", () => {
   const config = loadConfig({
     NODE_ENV: "test",
     DATABASE_URL: "postgres://nobody:nope@127.0.0.1:59999/absent",
@@ -19,7 +20,7 @@ describe("app (sans base de données)", () => {
     await app.close();
   });
 
-  it("healthz répond 503 degraded quand la base est injoignable", async () => {
+  it("healthz answers 503 degraded when the database is unreachable", async () => {
     const res = await app.inject({ method: "GET", url: "/healthz" });
     expect(res.statusCode).toBe(503);
     expect(res.json()).toMatchObject({
@@ -28,7 +29,7 @@ describe("app (sans base de données)", () => {
     });
   });
 
-  it("metrics expose hgc_database_up", async () => {
+  it("metrics exposes hgc_database_up", async () => {
     const res = await app.inject({ method: "GET", url: "/metrics" });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain("hgc_database_up 0");
@@ -36,10 +37,10 @@ describe("app (sans base de données)", () => {
 });
 
 describe("config", () => {
-  it("rejette un PORT invalide", () => {
-    expect(() => loadConfig({ PORT: "99999" })).toThrow(/Configuration invalide/);
+  it("rejects an invalid PORT", () => {
+    expect(() => loadConfig({ PORT: "99999" })).toThrow(/Invalid configuration/);
   });
-  it("WORKER_MODE par défaut = all", () => {
+  it("WORKER_MODE defaults to all", () => {
     expect(loadConfig({}).WORKER_MODE).toBe("all");
   });
 });

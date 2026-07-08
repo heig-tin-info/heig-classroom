@@ -1,10 +1,10 @@
 /**
- * Ticker unique (ADR-006) : pas de job one-shot planifié — toutes les 20 s,
- * il relit la base et enfile ce qui est dû. Replanification gratuite (la
- * condition est relue), rattrapage après panne gratuit (la condition reste
- * vraie). La sûreté multi-processus ne repose pas sur le ticker : chaque
- * action fait un claim atomique (UPDATE conditionnel) ou passe par un
- * singleton pg-boss.
+ * Single ticker (ADR-006): no one-shot scheduled jobs. Every 20 s it re-reads
+ * the database and enqueues whatever is due. Rescheduling is free (the
+ * condition is re-read), catch-up after an outage is free (the condition
+ * stays true). Multi-process safety does not rest on the ticker: every
+ * action performs an atomic claim (conditional UPDATE) or goes through a
+ * pg-boss singleton.
  */
 import type { FastifyInstance } from "fastify";
 import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
@@ -21,10 +21,10 @@ export function startTicker(app: FastifyInstance, _config: AppConfig) {
   let running = false;
 
   const tick = async () => {
-    if (running || !app.boss) return; // pas de chevauchement, pas de file
+    if (running || !app.boss) return; // no overlap, no queue
     running = true;
     try {
-      // 1. Deadlines échues (GH-43) : publiés, échus, non appliqués.
+      // 1. Elapsed deadlines (GH-43): published, past due, not yet applied.
       const due = await app.db
         .select({ id: assignments.id })
         .from(assignments)
@@ -44,11 +44,11 @@ export function startTicker(app: FastifyInstance, _config: AppConfig) {
         );
       }
 
-      // 2. Gel définitif à deadline + grace (ADR-012).
+      // 2. Definitive freeze at deadline + grace (ADR-012).
       await freezeDueAssignments(app);
 
-      // 3. Tâches planifiées : claim atomique (last_run_at posé par l'UPDATE
-      //    conditionnel), l'exécution part dans la file avec un singleton.
+      // 3. Scheduled tasks: atomic claim (last_run_at set by the conditional
+      //    UPDATE), execution goes to the queue with a singleton.
       const claimed = await app.db
         .update(scheduledTasks)
         .set({ lastRunAt: sql`now()`, lastStatus: "running" })
@@ -76,5 +76,5 @@ export function startTicker(app: FastifyInstance, _config: AppConfig) {
   const timer = setInterval(() => void tick(), TICK_MS);
   timer.unref();
   app.addHook("onClose", async () => clearInterval(timer));
-  void tick(); // premier passage immédiat (rattrapage post-redémarrage)
+  void tick(); // immediate first pass (catch-up after a restart)
 }

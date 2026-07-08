@@ -1,8 +1,8 @@
 /**
- * Pipeline de grading (GR-04..09, GR-14) : capture des passes CI éligibles,
- * extraction de l'annotation GRADE, sélection de la note courante et gel.
- * UN SEUL code d'ingestion — le webhook `workflow_run` et la réconciliation
- * GR-07 passent tous deux par `ingestCompletedRun` (ADR-011).
+ * Grading pipeline (GR-04..09, GR-14): capture of eligible CI runs,
+ * extraction of the GRADE annotation, selection of the current grade, and
+ * freezing. ONE single ingestion path: the `workflow_run` webhook and the
+ * GR-07 reconciliation both go through `ingestCompletedRun` (ADR-011).
  */
 import { randomUUID } from "node:crypto";
 
@@ -27,13 +27,13 @@ export interface CompletedRun {
   headBranch: string;
   headSha: string;
   conclusion: string;
-  /** Chemin du workflow (`path` du payload / de l'API). */
+  /** Workflow path (`path` from the payload / the API). */
   path: string;
   checkSuiteId: number | null;
   completedAt: Date;
 }
 
-/** GR-05.1 : branche sélectionnée et commit de tête non poussé par le bot. */
+/** GR-05.1: selected branch and head commit not pushed by the bot. */
 export async function isEligible(
   app: FastifyInstance,
   ctx: RepoCtx,
@@ -50,7 +50,7 @@ export async function isEligible(
   return bot.length === 0;
 }
 
-/** GR-14 : `after_deadline` d'après l'heure de réception serveur du commit. */
+/** GR-14: `after_deadline` based on the server receipt time of the commit. */
 async function isAfterDeadline(
   app: FastifyInstance,
   ctx: RepoCtx,
@@ -63,12 +63,12 @@ async function isAfterDeadline(
     .where(and(eq(pushReceipts.studentRepoId, ctx.repo.id), eq(pushReceipts.headSha, headSha)))
     .limit(1);
   if (receipt) return receipt.receivedAt.getTime() > deadline.getTime();
-  // Réception inconnue (webhook perdu, réconcilié après coup) : conservateur
-  // dès que la deadline est passée (GR-14.3).
+  // Unknown receipt time (lost webhook, reconciled after the fact): be
+  // conservative as soon as the deadline has passed (GR-14.3).
   return Date.now() > deadline.getTime();
 }
 
-/** GR-09 : le plus récent (completed_at) non post-deadline, parse ok|fallback. */
+/** GR-09: the most recent (completed_at) non post-deadline run, parse ok|fallback. */
 export async function selectGradeRun(
   app: FastifyInstance,
   studentRepoId: string,
@@ -88,7 +88,7 @@ export async function selectGradeRun(
   return row?.id ?? null;
 }
 
-/** Vue API d'un GradeRun (GR-10/11) — même forme côté student et teacher. */
+/** API view of a GradeRun (GR-10/11), same shape on the student and teacher sides. */
 export interface GradeView {
   points: number | null;
   max: number | null;
@@ -113,7 +113,7 @@ export function gradeView(run: typeof gradeRuns.$inferSelect): GradeView {
   };
 }
 
-/** Charge en une requête les GradeRuns référencés (note courante + gelée). */
+/** Loads the referenced GradeRuns in one query (current + frozen grade). */
 export async function gradeViewsByIds(
   app: FastifyInstance,
   ids: (string | null)[],
@@ -124,7 +124,7 @@ export async function gradeViewsByIds(
   return new Map(rows.map((r) => [r.id, gradeView(r)]));
 }
 
-/** Lit les annotations des check-runs du run et extrait la note (GR-05.2/3). */
+/** Reads the run's check-run annotations and extracts the grade (GR-05.2/3). */
 async function extractGradeFromChecks(
   octokit: Octokit,
   fullName: string,
@@ -155,7 +155,7 @@ async function extractGradeFromChecks(
   return extractGrade(annotations);
 }
 
-/** GR-06 : agrégation pass/fail de tous les runs d'un commit (référence ci_status). */
+/** GR-06: pass/fail aggregation of all runs of a commit (ci_status reference). */
 async function aggregateCiStatus(
   octokit: Octokit,
   fullName: string,
@@ -179,9 +179,10 @@ async function aggregateCiStatus(
 }
 
 /**
- * Ingestion idempotente d'un run completed (GR-05). Retourne l'id du GradeRun
- * créé, ou null si le run n'est pas éligible ou déjà capturé — le test
- * d'existence évite aussi de relire les annotations à chaque réconciliation.
+ * Idempotent ingestion of a completed run (GR-05). Returns the id of the
+ * created GradeRun, or null if the run is not eligible or already captured.
+ * The existence check also avoids re-reading annotations on every
+ * reconciliation.
  */
 export async function ingestCompletedRun(
   app: FastifyInstance,
@@ -202,7 +203,7 @@ export async function ingestCompletedRun(
       ),
     )
     .limit(1);
-  if (existing.length > 0) return null; // déjà capturé — rien à refaire
+  if (existing.length > 0) return null; // already captured, nothing to redo
 
   let parse: ReturnType<typeof extractGrade>;
   if (run.path === GRADING_WORKFLOW_PATH) {
@@ -213,7 +214,7 @@ export async function ingestCompletedRun(
       run.checkSuiteId,
     );
   } else {
-    // Dépôt/workflow hors convention grading.yml : GradeRun sans note (GR-06).
+    // Repo/workflow outside the grading.yml convention: GradeRun without a grade (GR-06).
     parse = { status: "no_annotation" };
   }
   const afterDeadline = await isAfterDeadline(app, ctx, run.headSha);
@@ -240,11 +241,11 @@ export async function ingestCompletedRun(
     })
     .onConflictDoNothing()
     .returning({ id: gradeRuns.id });
-  if (inserted.length === 0) return null; // course avec un autre worker
+  if (inserted.length === 0) return null; // race with another worker
 
   await refreshGradeSelection(app, ctx);
 
-  // GR-06 : ci_status agrégé — seulement pour le dernier commit connu du dépôt.
+  // GR-06: aggregated ci_status, only for the repository's last known commit.
   if (!ctx.repo.lastCommitSha || ctx.repo.lastCommitSha === run.headSha) {
     try {
       const ciStatus = await aggregateCiStatus(octokit, ctx.repo.fullName!, run.headSha);
@@ -260,9 +261,9 @@ export async function ingestCompletedRun(
 }
 
 /**
- * Recalcule la note courante (GR-09) et, pendant le délai de grâce, améliore
- * la note gelée provisoire (GR-14.4) : les runs sur des commits reçus avant
- * la deadline comptent tant que `frozen_at` n'est pas posé.
+ * Recomputes the current grade (GR-09) and, during the grace period,
+ * improves the provisional frozen grade (GR-14.4): runs on commits received
+ * before the deadline count as long as `frozen_at` is not set.
  */
 export async function refreshGradeSelection(app: FastifyInstance, ctx: RepoCtx): Promise<void> {
   const selected = await selectGradeRun(app, ctx.repo.id);

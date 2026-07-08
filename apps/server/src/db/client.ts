@@ -9,8 +9,8 @@ export function createDb(databaseUrl: string) {
   const pool = new pg.Pool({
     connectionString: databaseUrl,
     max: 10,
-    // La base est locale (même VM) : un connect qui traîne est une panne, pas
-    // une latence — on échoue vite et /healthz passe en degraded.
+    // The database is local (same VM): a slow connect is an outage, not
+    // latency, so we fail fast and /healthz turns degraded.
     connectionTimeoutMillis: 2000,
   });
   const db = drizzle(pool, { schema });

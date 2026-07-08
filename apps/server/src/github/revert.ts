@@ -1,8 +1,8 @@
 /**
- * Revert des fichiers protégés (GH-30..35) : quand un push étudiant touche un
- * fichier protégé, le bot restaure la version du dépôt squashed par UN commit
- * (Git Data API), poussé en fast-forward non forcé — une course avec un push
- * étudiant échoue proprement et le webhook suivant redéclenche.
+ * Revert of protected files (GH-30..35): when a student push touches a
+ * protected file, the bot restores the squashed repository's version in ONE
+ * commit (Git Data API), pushed as a non-forced fast-forward; a race with a
+ * student push fails cleanly and the next webhook retriggers.
  */
 import type { Octokit } from "octokit";
 
@@ -17,13 +17,13 @@ export async function revertProtectedFiles(opts: {
   studentRepo: string;
   squashedRepo: string;
   branch: string;
-  /** Fichiers protégés touchés par le push (intersection déjà calculée). */
+  /** Protected files touched by the push (intersection already computed). */
   paths: string[];
 }): Promise<RevertResult | null> {
   const { octokit, org, studentRepo, squashedRepo, branch, paths } = opts;
   if (paths.length === 0) return null;
 
-  // Contenu de référence : la version distribuée (squashed), branche homonyme.
+  // Reference content: the distributed version (squashed), same-named branch.
   const tree: { path: string; mode: "100644"; type: "blob"; sha: string }[] = [];
   for (const path of paths) {
     try {
@@ -43,7 +43,7 @@ export async function revertProtectedFiles(opts: {
       });
       tree.push({ path, mode: "100644", type: "blob", sha: blob.sha });
     } catch (err) {
-      // Absent du squashed : le fichier protégé n'a pas de référence, on passe.
+      // Absent from the squashed repo: the protected file has no reference, skip it.
       if ((err as { status?: number }).status !== 404) throw err;
     }
   }
@@ -72,8 +72,8 @@ export async function revertProtectedFiles(opts: {
     tree: newTree.sha,
     parents: [headSha],
   });
-  // Fast-forward strict : force=false — en cas de course, GitHub refuse et le
-  // prochain webhook rattrapera.
+  // Strict fast-forward: force=false; in case of a race, GitHub refuses and
+  // the next webhook will catch up.
   await octokit.request("PATCH /repos/{owner}/{repo}/git/refs/{ref}", {
     owner: org,
     repo: studentRepo,

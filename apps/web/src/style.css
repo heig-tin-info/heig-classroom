@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
-/* Bascule de thème par classe sur <html>, en plus du défaut système. */
+/* Class-based theme toggle on <html>, on top of the system default. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  --color-accent: #b41f24; /* rouge HEIG, en accent seulement */
+  --color-accent: #b41f24; /* HEIG red, used as accent only */
   --color-accent-hover: #9a1b1f;
 }
 

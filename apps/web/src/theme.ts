@@ -1,4 +1,4 @@
-/** Thème clair/sombre : suit le système par défaut, bascule persistée. */
+/** Light/dark theme: follows the system by default, toggle is persisted. */
 
 export type Theme = "light" | "dark";
 
