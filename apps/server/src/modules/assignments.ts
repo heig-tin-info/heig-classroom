@@ -370,7 +370,7 @@ export async function assignmentsPlugin(
       // Current and frozen grades (GR-11) in a single query.
       const grades = await gradeViewsByIds(
         app,
-        repos.flatMap((r) => [r.currentGradeRunId, r.frozenGradeRunId]),
+        repos.flatMap((r) => [r.currentGradeRunId, r.frozenGradeRunId, r.llmGradeRunId]),
       );
 
       const live = new Map<string, RepoLiveState>();
@@ -429,6 +429,9 @@ export async function assignmentsPlugin(
                     : null,
                   frozenGrade: repo.frozenGradeRunId
                     ? (grades.get(repo.frozenGradeRunId) ?? null)
+                    : null,
+                  llmGrade: repo.llmGradeRunId
+                    ? (grades.get(repo.llmGradeRunId) ?? null)
                     : null,
                   ...(live.get(repo.id) ?? {
                     lastCommitSha: repo.lastCommitSha,
@@ -510,6 +513,7 @@ export async function assignmentsPlugin(
       return {
         currentGradeRunId: repo.currentGradeRunId,
         frozenGradeRunId: repo.frozenGradeRunId,
+        llmGradeRunId: repo.llmGradeRunId,
         runs: runs.map((r) => ({
           id: r.id,
           workflowRunId: r.workflowRunId,

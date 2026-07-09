@@ -104,7 +104,7 @@ export async function studentPlugin(
       // is applied, GR-12/13).
       const grades = await gradeViewsByIds(
         app,
-        repos.flatMap((sr) => [sr.currentGradeRunId, sr.frozenGradeRunId]),
+        repos.flatMap((sr) => [sr.currentGradeRunId, sr.frozenGradeRunId, sr.llmGradeRunId]),
       );
 
       // Live commit count and check-run breakdown (for the dashboard charts).
@@ -171,6 +171,11 @@ export async function studentPlugin(
                     checksPassed: state?.checksPassed ?? null,
                     checksTotal: state?.checksTotal ?? null,
                     grade: gradeRunId ? (grades.get(gradeRunId) ?? null) : null,
+                    // GR-16: authoritative review of the frozen commit, when it
+                    // has come back from the dispatched llm-review run.
+                    llmGrade: repo.llmGradeRunId
+                      ? (grades.get(repo.llmGradeRunId) ?? null)
+                      : null,
                     gradeFrozen: frozen,
                   }
                 : null,

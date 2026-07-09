@@ -15,6 +15,7 @@ export interface AppNotice {
     | "grade_captured"
     | "protected_reverted"
     | "deadline_applied"
+    | "llm_review_dispatched"
     | "sync";
   message: string;
 }

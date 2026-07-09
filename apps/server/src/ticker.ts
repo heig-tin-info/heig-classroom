@@ -7,12 +7,12 @@
  * pg-boss singleton.
  */
 import type { FastifyInstance } from "fastify";
-import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { AppConfig } from "./config.js";
 import { assignments, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
-import { DEADLINE_QUEUE, TASK_QUEUE } from "./jobs.js";
+import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
 import { TASK_DEFS } from "./tasks.js";
 
 const TICK_MS = 20_000;
@@ -46,6 +46,27 @@ export function startTicker(app: FastifyInstance, _config: AppConfig) {
 
       // 2. Definitive freeze at deadline + grace (ADR-012).
       await freezeDueAssignments(app);
+
+      // 2b. Authoritative LLM review (GR-16): frozen, not yet dispatched.
+      //     The handler re-reads the condition and claims per-repo rows, so
+      //     enqueueing the same assignment twice is harmless.
+      const reviewDue = await app.db
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(
+          and(
+            isNotNull(assignments.frozenAt),
+            isNull(assignments.llmDispatchedAt),
+            isNull(assignments.archivedAt),
+          ),
+        );
+      for (const { id } of reviewDue) {
+        await app.boss.send(
+          GRADE_DISPATCH_QUEUE,
+          { assignmentId: id },
+          { singletonKey: id, retryLimit: 5, retryBackoff: true, retryDelay: 30 },
+        );
+      }
 
       // 3. Scheduled tasks: atomic claim (last_run_at set by the conditional
       //    UPDATE), execution goes to the queue with a singleton.

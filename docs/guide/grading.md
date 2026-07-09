@@ -90,3 +90,65 @@ at creation). The grade remains indicative rather than contractual: the student
 code runs in the same job as the annotation, so a determined student can game
 it, and the mitigations above make that visible rather than impossible. Treat
 it as continuous feedback; the authoritative assessment stays with you.
+
+## LLM review at the deadline
+
+The push-triggered grade above is the *indicative* tier. Once an assignment's
+grade is definitively frozen (deadline + grace period), the platform fires a
+`repository_dispatch` event on every student repository:
+
+```json
+POST /repos/{owner}/{repo}/dispatches
+{
+  "event_type": "grade-final",
+  "client_payload": {
+    "sha": "<frozen commit>",
+    "assignment_id": "…",
+    "deadline": "2026-07-03T21:59:00.000Z",
+    "trigger": "deadline"
+  }
+}
+```
+
+`client_payload.sha` is the head commit of the **frozen** grade run — the last
+run on a commit received before the deadline — never the current HEAD, so late
+pushes are ignored by the review exactly as they are by the freeze.
+Repositories where the student never produced an eligible run are skipped.
+Each dispatch is recorded in a ledger (one per repository and trigger), so
+worker restarts and pg-boss retries never fire the review twice.
+
+The student repository reacts in `grading.yml`: a `llm-review` job guarded by
+`if: github.event_name == 'repository_dispatch'` checks out
+`client_payload.sha`, grades every criterion with
+[`score grade --llm`](https://github.com/heig-tin-info/score), commits the
+detailed `GRADING.yml` review back to the repository and publishes the mark as
+the run's single `GRADE` annotation. On a dispatch, only the review job may
+emit the annotation (the objective job must be guarded by
+`github.event_name == 'push'`), preserving the exactly-one rule. The reusable
+workflow `heig-tin-info/score/.github/workflows/grading.yml` implements both
+tiers; student repositories only carry a thin shim calling it.
+
+The completed review run comes back through the regular `workflow_run`
+ingestion, but is recorded apart: the platform classifies runs triggered by
+`repository_dispatch` on `grading.yml` as `llm` and stores them in their own
+slot next to the frozen CI grade — the review never displaces the frozen
+grade, and both are visible in the teacher and student views.
+
+Operational requirements:
+
+- **Contents: write** on the App installation — required by the dispatches
+  endpoint and already part of the platform's permission set.
+- **`ANTHROPIC_API_KEY`** as an organization secret scoped to the classroom
+  repositories: the review job needs it to call the model. Set a spending
+  limit on the key and rotate it every semester. The key is exposed only to
+  the `score grade` step, never to the build/test steps that execute student
+  code; the remaining exfiltration path is a tampered `grading.yml`, which is
+  why that file must stay in the protected files.
+- The review commit is pushed with the workflow's default `GITHUB_TOKEN` — on
+  purpose, and **never a PAT**: GitHub does not trigger workflows for
+  `GITHUB_TOKEN` pushes, which is what makes a grading loop impossible. The
+  platform registers those pushes (sender `github-actions[bot]`) as bot
+  commits, so they never produce a grade run nor count as student activity.
+- A `grade-milestone` dispatch type is reserved for intermediate milestones
+  (same mechanics, one ledger row per milestone); milestones are not
+  implemented yet.

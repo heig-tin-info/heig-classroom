@@ -11,6 +11,7 @@ export const WEBHOOK_QUEUE = "webhook.process";
 export const DEADLINE_QUEUE = "deadline.apply";
 export const TASK_QUEUE = "task.run";
 export const SYNC_QUEUE = "sync.apply";
+export const GRADE_DISPATCH_QUEUE = "grade.dispatch";
 
 export interface WebhookJob {
   deliveryId: string;
@@ -30,6 +31,7 @@ export async function startJobs(
     webhookHandler: (job: WebhookJob) => Promise<void>;
     deadlineHandler: (job: { assignmentId: string }) => Promise<void>;
     syncHandler: (job: { assignmentId: string }) => Promise<void>;
+    gradeDispatchHandler: (job: { assignmentId: string }) => Promise<void>;
     taskRunner: (key: string) => Promise<void>;
   },
 ) {
@@ -57,6 +59,11 @@ export async function startJobs(
     retryBackoff: true,
     retryDelay: 15,
   });
+  await boss.createQueue(GRADE_DISPATCH_QUEUE, {
+    retryLimit: 5,
+    retryBackoff: true,
+    retryDelay: 30,
+  });
 
   if (opts.runWorkers) {
     await boss.work<WebhookJob>(WEBHOOK_QUEUE, async (jobs) => {
@@ -67,6 +74,9 @@ export async function startJobs(
     });
     await boss.work<{ assignmentId: string }>(SYNC_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.syncHandler(job.data);
+    });
+    await boss.work<{ assignmentId: string }>(GRADE_DISPATCH_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.gradeDispatchHandler(job.data);
     });
     await boss.work<TaskJob>(TASK_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.taskRunner(job.data.key);

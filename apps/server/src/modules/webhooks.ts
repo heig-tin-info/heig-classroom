@@ -19,7 +19,7 @@ import {
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { revertProtectedFiles } from "../github/revert.js";
-import { ingestCompletedRun, isEligible } from "../grading.js";
+import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
 
 const MAX_REVERTS_PER_HOUR = 5; // anti-loop cap (H10, GH-33)
@@ -45,10 +45,20 @@ interface WorkflowRunPayload {
     status?: string;
     conclusion?: string | null;
     path?: string;
+    /** Triggering event: `push`, `repository_dispatch` (GR-16), ... */
+    event?: string;
     check_suite_id?: number;
     updated_at?: string;
   };
 }
+
+/**
+ * GR-16: pushes made with the workflow's default GITHUB_TOKEN (the llm-review
+ * job committing GRADING.yml) arrive with this sender. They are bot commits:
+ * never graded, never counted as student activity. GitHub also never triggers
+ * workflows for them, so no grading loop is possible.
+ */
+const GITHUB_ACTIONS_BOT = "github-actions[bot]";
 
 /** Constant-time HMAC verification (GH-60, NFR-04). */
 function verifySignature(secret: string, raw: Buffer, header: string | undefined): boolean {
@@ -140,7 +150,20 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   if (!ctx) return; // repository unknown to the platform
   const branch = p.ref?.replace("refs/heads/", "") ?? "";
   const botLogin = config.GITHUB_APP_SLUG ? `${config.GITHUB_APP_SLUG}[bot]` : "";
-  const isBot = Boolean(botLogin && p.sender?.login === botLogin);
+  const isGraderPush = p.sender?.login === GITHUB_ACTIONS_BOT;
+  const isBot = Boolean(botLogin && p.sender?.login === botLogin) || isGraderPush;
+
+  // GR-16: register the review commit (GRADING.yml) as a bot commit so it
+  // never becomes an eligible grade run head, then stop: it must not
+  // displace the student's last-commit metrics either.
+  if (isGraderPush) {
+    await app.db
+      .insert(botCommits)
+      .values({ studentRepoId: ctx.repo.id, sha: p.after, kind: "grader" })
+      .onConflictDoNothing();
+    publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+    return;
+  }
 
   // Metrics (GR-15) + SSE: the teacher's table updates without a refresh.
   await app.db
@@ -304,7 +327,11 @@ async function handleWorkflowRun(
   if (!ctx) return;
   const run = p.workflow_run;
 
-  if (!(await isEligible(app, ctx, run.head_branch, run.head_sha))) return;
+  // GR-16: the dispatched review run may sit on a bot head commit.
+  const isLlmRun = runKind({ event: run.event ?? "", path: run.path ?? "" }) === "llm";
+  if (!(await isEligible(app, ctx, run.head_branch, run.head_sha, { skipBotCheck: isLlmRun }))) {
+    return;
+  }
 
   if (p.action !== "completed") {
     await app.db
@@ -324,6 +351,7 @@ async function handleWorkflowRun(
     headSha: run.head_sha,
     conclusion: run.conclusion ?? "unknown",
     path: run.path ?? "",
+    event: run.event ?? "",
     checkSuiteId: run.check_suite_id ?? null,
     completedAt: run.updated_at ? new Date(run.updated_at) : new Date(),
   });
@@ -391,7 +419,9 @@ export async function webhooksPlugin(app: FastifyInstance, opts: { config: AppCo
               studentRepoId: ctx.repo.id,
               branch: p.ref?.replace("refs/heads/", "") ?? "",
               headSha: p.after,
-              isBot: Boolean(botLogin && p.sender?.login === botLogin),
+              isBot:
+                Boolean(botLogin && p.sender?.login === botLogin) ||
+                p.sender?.login === GITHUB_ACTIONS_BOT,
               forced: Boolean(p.forced),
             })
             .onConflictDoNothing();

@@ -182,6 +182,8 @@ export const assignments = pgTable(
     syncedAt: timestamp("synced_at", { withTimezone: true }),
     deadlineAppliedAt: timestamp("deadline_applied_at", { withTimezone: true }),
     frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    /** GR-16: authoritative LLM review dispatched to every repo (grade-final). */
+    llmDispatchedAt: timestamp("llm_dispatched_at", { withTimezone: true }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -195,6 +197,10 @@ export const assignments = pgTable(
     index("assignments_freeze_pending_idx")
       .on(t.deadlineAt)
       .where(sql`${t.deadlineAppliedAt} IS NOT NULL AND ${t.frozenAt} IS NULL`),
+    // GR-16 ticker scan: frozen assignments whose LLM review is still due.
+    index("assignments_llm_dispatch_pending_idx")
+      .on(t.frozenAt)
+      .where(sql`${t.frozenAt} IS NOT NULL AND ${t.llmDispatchedAt} IS NULL`),
   ],
 );
 
@@ -233,6 +239,8 @@ export const studentRepos = pgTable(
     currentGradeRunId: uuid("current_grade_run_id"),
     /** Grade frozen at the deadline (GR-12), immutable after deadline+grace (GR-14.4). */
     frozenGradeRunId: uuid("frozen_grade_run_id"),
+    /** Authoritative LLM review run (GR-16), separate from the frozen CI grade. */
+    llmGradeRunId: uuid("llm_grade_run_id"),
   },
   (t) => [
     // Provisioning idempotency key (GH-20, NFR-09).
@@ -262,6 +270,12 @@ export const gradeRuns = pgTable(
     parseStatus: text("parse_status", {
       enum: ["ok", "no_annotation", "malformed", "multiple", "fallback"],
     }).notNull(),
+    /**
+     * GR-16: `ci` for push-triggered runs (indicative grade), `llm` for the
+     * repository_dispatch review (authoritative). LLM runs never enter the
+     * GR-09 selection: they land in `student_repos.llm_grade_run_id`.
+     */
+    kind: text("kind", { enum: ["ci", "llm"] }).notNull().default("ci"),
     /** GR-14 criterion: server receipt time of the commit, never git time. */
     afterDeadline: boolean("after_deadline").notNull().default(false),
     completedAt: timestamp("completed_at", { withTimezone: true }).notNull(),
@@ -295,7 +309,12 @@ export const pushReceipts = pgTable(
   (t) => [uniqueIndex("push_receipts_repo_sha_uq").on(t.studentRepoId, t.headSha)],
 );
 
-/** Bot commits (revert, deadline, sync): deterministic GR-05/GH-44 filter. */
+/**
+ * Bot commits (revert, deadline, sync, grader): deterministic GR-05/GH-44
+ * filter. `grader` marks the GRADING.yml commits pushed by the llm-review
+ * workflow (GITHUB_TOKEN → sender github-actions[bot]), so they never
+ * produce a grade run nor displace the student's last commit.
+ */
 export const botCommits = pgTable(
   "bot_commits",
   {
@@ -303,10 +322,41 @@ export const botCommits = pgTable(
       .notNull()
       .references(() => studentRepos.id, { onDelete: "cascade" }),
     sha: char("sha", { length: 40 }).notNull(),
-    kind: text("kind", { enum: ["revert", "deadline", "sync"] }).notNull(),
+    kind: text("kind", { enum: ["revert", "deadline", "sync", "grader"] }).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("bot_commits_pk").on(t.studentRepoId, t.sha)],
+);
+
+/**
+ * repository_dispatch ledger (GR-16): one row per (repo, trigger) claimed
+ * with ON CONFLICT DO NOTHING BEFORE calling GitHub, so a worker restart
+ * never re-fires the LLM review. `dispatched_at` is set after the API call;
+ * rows stuck with a null `dispatched_at` are retried by the pg-boss job.
+ * `milestone_id` is reserved for per-milestone reviews (not implemented yet);
+ * the unique index coalesces it so (repo, trigger, NULL) stays unique.
+ */
+export const gradeDispatches = pgTable(
+  "grade_dispatches",
+  {
+    id: uuid("id").primaryKey(),
+    studentRepoId: uuid("student_repo_id")
+      .notNull()
+      .references(() => studentRepos.id, { onDelete: "cascade" }),
+    trigger: text("trigger", { enum: ["deadline", "milestone"] }).notNull(),
+    milestoneId: uuid("milestone_id"),
+    /** Frozen commit sent in the client_payload (GR-14 selection). */
+    sha: char("sha", { length: 40 }).notNull(),
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("grade_dispatches_repo_trigger_uq").on(
+      t.studentRepoId,
+      t.trigger,
+      sql`coalesce(${t.milestoneId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+  ],
 );
 
 /** History of protected-file reverts (anti-loop cap H10). */

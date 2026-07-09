@@ -30,19 +30,38 @@ export interface CompletedRun {
   conclusion: string;
   /** Workflow path (`path` from the payload / the API). */
   path: string;
+  /** Triggering event (`event` from the payload / the API), e.g. `push`. */
+  event: string;
   checkSuiteId: number | null;
   completedAt: Date;
 }
 
-/** GR-05.1: selected branch and head commit not pushed by the bot. */
+/**
+ * GR-16: the grading workflow fired by the platform's repository_dispatch is
+ * the authoritative LLM review; every other run is the indicative CI tier.
+ */
+export function runKind(run: Pick<CompletedRun, "event" | "path">): "ci" | "llm" {
+  return run.event === "repository_dispatch" && run.path === GRADING_WORKFLOW_PATH
+    ? "llm"
+    : "ci";
+}
+
+/**
+ * GR-05.1: selected branch and head commit not pushed by the bot. LLM review
+ * runs (GR-16) skip the bot-commit filter: they execute on the default-branch
+ * head, which may legitimately be a bot commit (deadline marker, GRADING.yml
+ * of a previous review) while the reviewed commit is `client_payload.sha`.
+ */
 export async function isEligible(
   app: FastifyInstance,
   ctx: RepoCtx,
   headBranch: string | null | undefined,
   headSha: string | null | undefined,
+  opts: { skipBotCheck?: boolean } = {},
 ): Promise<boolean> {
   if (!headBranch || !headSha) return false;
   if (!ctx.assignment.branches.includes(headBranch)) return false;
+  if (opts.skipBotCheck) return true;
   const bot = await app.db
     .select({ sha: botCommits.sha })
     .from(botCommits)
@@ -69,7 +88,11 @@ async function isAfterDeadline(
   return Date.now() > deadline.getTime();
 }
 
-/** GR-09: the most recent (completed_at) non post-deadline run, parse ok|fallback. */
+/**
+ * GR-09: the most recent (completed_at) non post-deadline run, parse
+ * ok|fallback. CI runs only: the LLM review (GR-16) has its own slot
+ * (`llm_grade_run_id`) and must never displace the frozen CI grade.
+ */
 export async function selectGradeRun(
   app: FastifyInstance,
   studentRepoId: string,
@@ -80,6 +103,7 @@ export async function selectGradeRun(
     .where(
       and(
         eq(gradeRuns.studentRepoId, studentRepoId),
+        eq(gradeRuns.kind, "ci"),
         eq(gradeRuns.afterDeadline, false),
         inArray(gradeRuns.parseStatus, ["ok", "fallback"]),
       ),
@@ -97,6 +121,7 @@ export interface GradeView {
   conclusion: string;
   sha: string;
   branch: string;
+  kind: "ci" | "llm";
   afterDeadline: boolean;
   completedAt: Date;
 }
@@ -109,6 +134,7 @@ export function gradeView(run: typeof gradeRuns.$inferSelect): GradeView {
     conclusion: run.conclusion,
     sha: run.headSha,
     branch: run.headBranch,
+    kind: run.kind,
     afterDeadline: run.afterDeadline,
     completedAt: run.completedAt,
   };
@@ -191,7 +217,10 @@ export async function ingestCompletedRun(
   ctx: RepoCtx,
   run: CompletedRun,
 ): Promise<string | null> {
-  if (!(await isEligible(app, ctx, run.headBranch, run.headSha))) return null;
+  const kind = runKind(run);
+  if (!(await isEligible(app, ctx, run.headBranch, run.headSha, { skipBotCheck: kind === "llm" }))) {
+    return null;
+  }
 
   const existing = await app.db
     .select({ id: gradeRuns.id })
@@ -237,12 +266,29 @@ export async function ingestCompletedRun(
         run.path === GRADING_WORKFLOW_PATH
           ? parse.status
           : ("fallback" as const),
+      kind,
       afterDeadline,
       completedAt: run.completedAt,
     })
     .onConflictDoNothing()
     .returning({ id: gradeRuns.id });
   if (inserted.length === 0) return null; // race with another worker
+
+  if (kind === "llm") {
+    // GR-16: the review lands in its own slot; the frozen CI grade is
+    // untouched (GR-09 selection only ever sees `ci` runs).
+    if (parse.status === "ok") {
+      await app.db
+        .update(studentRepos)
+        .set({ llmGradeRunId: id })
+        .where(eq(studentRepos.id, ctx.repo.id));
+      publish("grades", [`classroom:${ctx.classroomId}`], {
+        kind: "grade_captured",
+        message: `LLM review ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
+      });
+    }
+    return id;
+  }
 
   await refreshGradeSelection(app, ctx);
   if (parse.status === "ok") {

@@ -173,6 +173,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
           headSha: run.head_sha,
           conclusion: run.conclusion ?? "unknown",
           path: run.path,
+          event: run.event,
           checkSuiteId: run.check_suite_id ?? null,
           completedAt: new Date(run.updated_at),
         });
