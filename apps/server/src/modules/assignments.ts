@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../audit.js";
@@ -10,6 +10,7 @@ import {
   assignments,
   classrooms,
   enrollments,
+  gradeDispatches,
   gradeRuns,
   organizations,
   studentRepos,
@@ -253,7 +254,12 @@ export async function assignmentsPlugin(
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
       }
       // The two strategies are exclusive and fixed at publication (GH-42).
-      if (owned.assignment.state !== "draft" && body.data.deadlineStrategy) {
+      // Re-sending the current value is fine: the edit form always posts it.
+      if (
+        owned.assignment.state !== "draft" &&
+        body.data.deadlineStrategy &&
+        body.data.deadlineStrategy !== owned.assignment.deadlineStrategy
+      ) {
         return reply.code(409).send({
           error: "strategy_frozen",
           message: "The deadline strategy cannot be changed after publication",
@@ -314,13 +320,28 @@ export async function assignmentsPlugin(
         }
         await app.db
           .update(assignments)
-          .set({ state: "published", deadlineAppliedAt: null, frozenAt: null })
+          .set({ state: "published", deadlineAppliedAt: null, frozenAt: null, llmDispatchedAt: null })
           .where(eq(assignments.id, updated.id));
-        // The provisional freeze no longer makes sense: it will be set again at the new deadline.
+        // The provisional freeze no longer makes sense: it will be set again at
+        // the new deadline. Same for the LLM review (GR-16): it graded the old
+        // frozen commit, and the dispatch ledger must forget the old round or
+        // the new freeze would be claimed as already dispatched.
         await app.db
           .update(studentRepos)
-          .set({ frozenGradeRunId: null })
+          .set({ frozenGradeRunId: null, llmGradeRunId: null })
           .where(eq(studentRepos.assignmentId, updated.id));
+        await app.db.delete(gradeDispatches).where(
+          and(
+            eq(gradeDispatches.trigger, "deadline"),
+            inArray(
+              gradeDispatches.studentRepoId,
+              app.db
+                .select({ id: studentRepos.id })
+                .from(studentRepos)
+                .where(eq(studentRepos.assignmentId, updated.id)),
+            ),
+          ),
+        );
         await audit(app.db, {
           actorUserId: req.user!.id,
           actorType: "user",

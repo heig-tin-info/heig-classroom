@@ -388,12 +388,26 @@ function AssignmentForm({
             className={select}
             value={deadlineStrategy}
             onChange={(e) => setDeadlineStrategy(e.target.value as "lock" | "commit")}
+            disabled={existing !== undefined && existing.state !== "draft"}
+            title={
+              existing !== undefined && existing.state !== "draft"
+                ? "The deadline strategy is fixed at publication"
+                : undefined
+            }
           >
             <option value="lock">Lock the repository</option>
             <option value="commit">Deadline commit</option>
           </select>
         </label>
       </div>
+
+      {existing?.state === "locked" ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          This assignment has expired. Saving a deadline in the future <b>reopens</b> it:
+          repositories are unlocked, students can push again, and the grade freezes anew at
+          the new deadline (the previous frozen grade and LLM review are discarded).
+        </p>
+      ) : null}
 
       {sourceRepo === "" ? (
         <p className="text-sm text-zinc-400">
@@ -517,27 +531,28 @@ function AssignmentRow({
       </span>
       <span className="flex items-center">
         {a.state === "draft" ? (
-          <>
-            <IconButton
-              label="Publish"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    `Publish “${a.name}”? Students will see it and can accept it.`,
-                  )
-                ) {
-                  publish.mutate();
-                }
-              }}
-              disabled={publish.isPending}
-            >
-              <Send className="size-4" />
-            </IconButton>
-            <IconButton label="Edit" onClick={onEdit}>
-              <Pencil className="size-4" />
-            </IconButton>
-          </>
+          <IconButton
+            label="Publish"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Publish “${a.name}”? Students will see it and can accept it.`,
+                )
+              ) {
+                publish.mutate();
+              }
+            }}
+            disabled={publish.isPending}
+          >
+            <Send className="size-4" />
+          </IconButton>
         ) : null}
+        {/* Editable at every stage: moving the deadline of an expired
+            assignment into the future reopens it (repos unlocked, grading
+            resumes until the new deadline). */}
+        <IconButton label="Edit" onClick={onEdit}>
+          <Pencil className="size-4" />
+        </IconButton>
         <IconButton
           label="Archive"
           onClick={() => {
