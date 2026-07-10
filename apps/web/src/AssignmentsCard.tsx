@@ -15,7 +15,7 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { HelpIcon } from "./help";
 import { api, ApiError } from "./api";
@@ -187,6 +187,40 @@ function TreeView({
 const toIso = (local: string) => new Date(local).toISOString();
 const toLocalInput = (iso: string) => localDateTimeInputValue(new Date(iso));
 
+// The backend provisions the squashed repository synchronously (create →
+// clone → squash → push), which takes several seconds. We can't stream real
+// progress, so the overlay walks through the steps on a timer to make the
+// wait feel intentional rather than stuck.
+const CREATE_STEPS = [
+  "Creating the squashed repository…",
+  "Cloning the source repository…",
+  "Squashing the history…",
+  "Pushing to GitHub…",
+];
+
+function CreatingOverlay() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const id = setInterval(
+      () => setStep((s) => Math.min(s + 1, CREATE_STEPS.length - 1)),
+      1800,
+    );
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div
+      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl bg-white/75 backdrop-blur-sm dark:bg-zinc-900/75"
+      role="status"
+      aria-live="polite"
+    >
+      <Loader2 className="size-8 animate-spin text-accent" />
+      <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
+        {CREATE_STEPS[step]}
+      </p>
+    </div>
+  );
+}
+
 function AssignmentForm({
   classroomId,
   existing,
@@ -277,12 +311,13 @@ function AssignmentForm({
 
   return (
     <form
-      className="space-y-4"
+      className="relative space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
         save.mutate();
       }}
     >
+      {save.isPending && !existing ? <CreatingOverlay /> : null}
       <div className="flex flex-wrap items-end gap-3">
         <Field
           label="Name"
