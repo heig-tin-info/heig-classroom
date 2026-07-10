@@ -510,26 +510,31 @@ function AssignmentRow({
   });
 
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-1 py-3">
-      <button
-        onClick={onOpen}
-        className="font-medium hover:text-accent hover:underline"
-        title="Open assignment detail"
-      >
-        {a.name}
-      </button>
-      <StateBadge state={a.state} />
-      <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-        <CalendarClock className="size-3.5" />
-        {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
-      </span>
-      <span className="flex-1" />
-      {/* Long repo names wrap onto their own line instead of overflowing. */}
-      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-        <GhLink fullName={a.sourceFullName} />
-        {a.squashedFullName ? <GhLink fullName={a.squashedFullName} /> : null}
-      </span>
-      <span className="flex items-center">
+    // Two-line layout: title/state/dates with the actions pinned top-right,
+    // repo links on their own secondary line so long names wrap freely
+    // without ever pushing the buttons around.
+    <li className="flex items-start gap-2 py-3">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <button
+            onClick={onOpen}
+            className="font-medium hover:text-accent hover:underline"
+            title="Open assignment detail"
+          >
+            {a.name}
+          </button>
+          <StateBadge state={a.state} />
+          <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+            <CalendarClock className="size-3.5" />
+            {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <GhLink fullName={a.sourceFullName} />
+          {a.squashedFullName ? <GhLink fullName={a.squashedFullName} /> : null}
+        </div>
+      </div>
+      <span className="flex shrink-0 items-center">
         {a.state === "draft" ? (
           <IconButton
             label="Publish"
@@ -582,6 +587,7 @@ function AssignmentRow({
     </li>
   );
 }
+
 
 export function AssignmentsCard({
   classroomId,
