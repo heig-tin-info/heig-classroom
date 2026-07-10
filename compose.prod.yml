@@ -27,6 +27,35 @@ services:
       POSTGRES_USER: hgc
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: hgc
+    # Tuned for a 453 MiB / 1-CPU VM: correctness over throughput. These are
+    # runtime GUCs (no re-init, data untouched). shared_buffers 128->32 MiB is
+    # the big saving; parallel query is disabled (pointless on 1 CPU and each
+    # worker is a process); max_connections 100->40 fits app(10)+pg-boss(10)+
+    # backup with headroom. effective_cache_size is only a planner hint.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=32MB
+      - -c
+      - effective_cache_size=96MB
+      - -c
+      - maintenance_work_mem=16MB
+      - -c
+      - work_mem=2MB
+      - -c
+      - max_connections=40
+      - -c
+      - max_worker_processes=2
+      - -c
+      - max_parallel_workers=0
+      - -c
+      - max_parallel_workers_per_gather=0
+      - -c
+      - max_parallel_maintenance_workers=0
+      - -c
+      - autovacuum_max_workers=1
+      - -c
+      - wal_buffers=2MB
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
