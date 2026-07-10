@@ -5,14 +5,16 @@ import {
   ArrowUp,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
-  ExternalLink,
   GitCommitHorizontal,
   GitPullRequest,
   History,
   Lock,
   LockOpen,
   Loader2,
+  Play,
   RefreshCw,
   Search as SearchIcon,
   Snowflake,
@@ -20,7 +22,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import { api } from "./api";
+import { api, ApiError } from "./api";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
@@ -237,6 +239,188 @@ function GradeHistoryModal({
 
 const cell = "px-3 py-1.5 whitespace-nowrap align-middle";
 
+/** Plain mark (e.g. "4.5"): the number is the information, no badge chrome. */
+function GradeText({ grade, frozen }: { grade: GradeView | null; frozen: boolean }) {
+  if (!grade) return <span className="text-zinc-400">—</span>;
+  if (grade.parseStatus === "ok" && grade.points !== null) {
+    return (
+      <span className="inline-flex items-center gap-1 font-medium tabular-nums">
+        {grade.points.toFixed(1)}
+        {frozen ? <Snowflake className="size-3 text-zinc-400" /> : null}
+      </span>
+    );
+  }
+  if (grade.parseStatus === "fallback") return <span className="text-zinc-400">—</span>;
+  return (
+    <Badge tone="amber" icon={AlertTriangle}>
+      {grade.parseStatus === "multiple" ? "multiple GRADE" : grade.parseStatus.replace("_", " ")}
+    </Badge>
+  );
+}
+
+/** GitHub-repo link; the student's login shows in a hover popover. */
+function RepoLink({ fullName, login }: { fullName: string; login: string | null }) {
+  return (
+    <span className="group/pop relative inline-flex">
+      <a
+        href={`https://github.com/${fullName}`}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        aria-label={`Open ${fullName} on GitHub`}
+        className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      >
+        <GithubIcon className="size-4" />
+      </a>
+      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800">
+        {login ? (
+          <span className="font-medium">{login}</span>
+        ) : null}
+        <span className="text-zinc-500 dark:text-zinc-400">{login ? " · " : ""}{fullName}</span>
+      </span>
+    </span>
+  );
+}
+
+interface Commit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string | null;
+}
+
+/**
+ * Commits over time, one thin accent column per bucket (day, or week when the
+ * span exceeds ~10 weeks). Real timeline: empty buckets stay visible. Single
+ * series — the caption names it, no legend; the commit list beside the chart
+ * is the table view of the same data.
+ */
+function ActivityChart({ commits }: { commits: Commit[] }) {
+  const t = useT();
+  const dates = commits
+    .filter((c) => c.date)
+    .map((c) => new Date(c.date!).getTime())
+    .sort((a, b) => a - b);
+  if (dates.length === 0) return null;
+  const DAY = 86_400_000;
+  const first = Math.floor(dates[0]! / DAY);
+  const last = Math.floor(dates[dates.length - 1]! / DAY);
+  const spanDays = last - first + 1;
+  const weekly = spanDays > 70;
+  const bucketOf = (ts: number) =>
+    weekly ? Math.floor((Math.floor(ts / DAY) - first) / 7) : Math.floor(ts / DAY) - first;
+  const buckets = new Array<number>(bucketOf(dates[dates.length - 1]!) + 1).fill(0);
+  for (const ts of dates) buckets[bucketOf(ts)]! += 1;
+  const max = Math.max(...buckets);
+
+  const STEP = 8; // 6px bar + 2px gap
+  const H = 64;
+  const width = buckets.length * STEP;
+  const label = (i: number) =>
+    new Date((first + i * (weekly ? 7 : 1)) * DAY).toISOString().slice(0, 10);
+  return (
+    <figure className="min-w-0">
+      <svg
+        viewBox={`0 0 ${width} ${H + 14}`}
+        className="h-24 w-full"
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${commits.length} commits, ${weekly ? t("assignment.activity.perWeek") : t("assignment.activity.perDay")}`}
+      >
+        {buckets.map((n, i) => {
+          const h = n === 0 ? 0 : Math.max(3, (n / max) * H);
+          return (
+            <rect
+              key={i}
+              x={i * STEP + 1}
+              y={H - h}
+              width={STEP - 2}
+              height={h}
+              rx={1.5}
+              fill="var(--color-accent)"
+            >
+              <title>{`${label(i)} — ${n} commit${n > 1 ? "s" : ""}`}</title>
+            </rect>
+          );
+        })}
+        <line x1={0} y1={H + 0.5} x2={width} y2={H + 0.5} className="stroke-zinc-200 dark:stroke-zinc-700" strokeWidth={1} />
+      </svg>
+      <figcaption className="mt-1 flex justify-between text-[10px] text-zinc-400">
+        <span>{label(0)}</span>
+        <span>
+          max {max} · {weekly ? t("assignment.activity.perWeek") : t("assignment.activity.perDay")}
+        </span>
+        <span>{label(buckets.length - 1)}</span>
+      </figcaption>
+    </figure>
+  );
+}
+
+/** Expanded row: commit history + activity timeline, fetched on demand. */
+function ActivityPanel({
+  classroomId,
+  assignmentId,
+  repoId,
+  fullName,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  repoId: string;
+  fullName: string | null;
+}) {
+  const t = useT();
+  const activity = useQuery<{ commits: Commit[] }>({
+    queryKey: ["repo-activity", repoId],
+    queryFn: () =>
+      api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/repos/${repoId}/activity`),
+    staleTime: 60_000,
+  });
+  if (activity.isLoading) {
+    return (
+      <p className="flex items-center gap-2 px-4 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+        <Loader2 className="size-4 animate-spin" /> Loading activity…
+      </p>
+    );
+  }
+  const commits = activity.data?.commits ?? [];
+  if (commits.length === 0) {
+    return (
+      <p className="px-4 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+        {t("assignment.activity.empty")}
+      </p>
+    );
+  }
+  return (
+    <div className="grid gap-4 px-4 py-3 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <ol className="max-h-64 space-y-1 overflow-y-auto pr-2 text-sm">
+        {commits.map((c) => (
+          <li key={c.sha} className="flex items-baseline gap-2">
+            {fullName ? (
+              <a
+                href={`https://github.com/${fullName}/commit/${c.sha}`}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 font-mono text-xs text-zinc-400 hover:text-accent hover:underline"
+              >
+                {c.sha.slice(0, 7)}
+              </a>
+            ) : (
+              <span className="shrink-0 font-mono text-xs text-zinc-400">{c.sha.slice(0, 7)}</span>
+            )}
+            <span className="min-w-0 flex-1 truncate" title={c.message}>
+              {c.message}
+            </span>
+            <span className="shrink-0 text-xs text-zinc-400">
+              {c.date ? isoDateTime(c.date) : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+      <ActivityChart commits={commits} />
+    </div>
+  );
+}
+
 function StudentRow({
   classroomId,
   assignmentId,
@@ -251,6 +435,7 @@ function StudentRow({
 }) {
   const t = useT();
   const [showHistory, setShowHistory] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const qc = useQueryClient();
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ["assignment-detail", assignmentId] });
@@ -262,16 +447,44 @@ function StudentRow({
       ),
     onSuccess: invalidate,
   });
+  const gradeNow = useMutation({
+    mutationFn: () =>
+      api(
+        `/app/api/classrooms/${classroomId}/assignments/${assignmentId}/repos/${s.repo!.id}/grade-now`,
+        { method: "POST" },
+      ),
+  });
+  const gradeNowError =
+    gradeNow.isError && gradeNow.error instanceof ApiError && gradeNow.error.status === 409;
 
   const r = s.repo;
   const locked = r?.lockedAt != null;
+  const canExpand = r?.provisionStatus === "ok";
   return (
-    <tr className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${locked ? "opacity-55" : ""}`}>
-      <td className={`${cell} font-medium`}>{s.nom}</td>
-      <td className={cell}>{s.prenom}</td>
+    <>
+    <tr
+      onClick={() => canExpand && setExpanded((e) => !e)}
+      className={`${canExpand ? "cursor-pointer" : ""} hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${locked ? "opacity-55" : ""}`}
+    >
+      <td className={`${cell} font-medium`}>
+        <span className="inline-flex items-center gap-1.5">
+          {canExpand ? (
+            expanded ? (
+              <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
+            ) : (
+              <ChevronRight className="size-3.5 shrink-0 text-zinc-400" />
+            )
+          ) : (
+            <span className="w-3.5" />
+          )}
+          {`${s.prenom} ${s.nom}`.trim()}
+        </span>
+      </td>
       <td className={cell}>
-        {s.githubLogin ? (
-          <span className="inline-flex items-center gap-1">
+        {r?.provisionStatus === "ok" && r.fullName ? (
+          <RepoLink fullName={r.fullName} login={s.githubLogin} />
+        ) : s.githubLogin ? (
+          <span className="inline-flex items-center gap-1 text-zinc-400">
             <GithubIcon className="size-3.5" /> {s.githubLogin}
           </span>
         ) : (
@@ -284,13 +497,6 @@ function StudentRow({
             <Badge tone="green" icon={CheckCircle2}>
               {t("status.accepted")}
             </Badge>
-            {r.lockedAt ? (
-              <span title="Repository locked">
-                <Badge tone="red" icon={Lock}>
-                  {t("status.locked")}
-                </Badge>
-              </span>
-            ) : null}
             {r.syncPr && r.fullName ? (
               <a
                 href={`https://github.com/${r.fullName}/pull/${r.syncPr.number}`}
@@ -350,12 +556,15 @@ function StudentRow({
       </td>
       <td className={`${cell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1">
-          <GradeBadge grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
+          <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
           {r?.provisionStatus === "ok" ? (
             <button
               aria-label="Grade history"
               title="Grade history"
-              onClick={() => setShowHistory(true)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowHistory(true);
+              }}
               className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
             >
               <History className="size-3.5" />
@@ -375,41 +584,73 @@ function StudentRow({
       </td>
       <td className={`${cell} text-right whitespace-nowrap`}>
         {r?.provisionStatus === "ok" && r.fullName ? (
-          <span className="inline-flex items-center gap-1">
-            <a
-              href={`https://github.com/${r.fullName}`}
-              target="_blank"
-              rel="noreferrer"
-              title="Open repository on GitHub"
-              className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <button
+              aria-label={t("assignment.gradeNow")}
+              title={
+                gradeNowError
+                  ? t("assignment.gradeNowUnsupported")
+                  : gradeNow.isSuccess
+                    ? t("assignment.gradeNowStarted")
+                    : t("assignment.gradeNow")
+              }
+              onClick={() => gradeNow.mutate()}
+              disabled={gradeNow.isPending || locked}
+              className={`rounded-md p-1.5 transition-colors disabled:opacity-40 ${
+                gradeNowError
+                  ? "text-amber-500"
+                  : gradeNow.isSuccess
+                    ? "text-emerald-500"
+                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              }`}
             >
-              <ExternalLink className="size-4" />
-            </a>
-            {r.lockedAt ? (
-              <button
-                aria-label="Unlock repository"
-                title="Unlock repository (allow pushes again)"
-                onClick={() => toggleLock.mutate("unlock")}
-                disabled={toggleLock.isPending}
-                className="rounded-md p-1.5 text-red-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-500/10 dark:hover:text-emerald-400"
-              >
-                <LockOpen className="size-4" />
-              </button>
-            ) : (
-              <button
-                aria-label="Lock repository"
-                title="Lock repository (block pushes)"
-                onClick={() => toggleLock.mutate("lock")}
-                disabled={toggleLock.isPending}
-                className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-              >
+              {gradeNow.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : gradeNowError ? (
+                <AlertTriangle className="size-4" />
+              ) : gradeNow.isSuccess ? (
+                <CheckCircle2 className="size-4" />
+              ) : (
+                <Play className="size-4" />
+              )}
+            </button>
+            {/* Padlock shows the STATE: closed red when locked, open otherwise. */}
+            <button
+              aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
+              title={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
+              onClick={() => toggleLock.mutate(locked ? "unlock" : "lock")}
+              disabled={toggleLock.isPending}
+              className={`rounded-md p-1.5 transition-colors ${
+                locked
+                  ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              }`}
+            >
+              {toggleLock.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : locked ? (
                 <Lock className="size-4" />
-              </button>
-            )}
+              ) : (
+                <LockOpen className="size-4" />
+              )}
+            </button>
           </span>
         ) : null}
       </td>
     </tr>
+    {expanded && r ? (
+      <tr className="bg-zinc-50/60 dark:bg-zinc-800/30">
+        <td colSpan={9} className="p-0">
+          <ActivityPanel
+            classroomId={classroomId}
+            assignmentId={assignmentId}
+            repoId={r.id}
+            fullName={r.fullName}
+          />
+        </td>
+      </tr>
+    ) : null}
+    </>
   );
 }
 
@@ -459,14 +700,7 @@ function SyncBanner({
   );
 }
 
-type SortKey =
-  | "nom"
-  | "prenom"
-  | "github"
-  | "lastCommitAt"
-  | "commitCount"
-  | "grade"
-  | "status";
+type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
 
 export function AssignmentDetail({
   classroomId,
@@ -477,7 +711,7 @@ export function AssignmentDetail({
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("nom");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
   const [dir, setDir] = useState<1 | -1>(1);
   const detail = useQuery<Detail>({
     queryKey: ["assignment-detail", assignmentId],
@@ -498,12 +732,8 @@ export function AssignmentDetail({
 
   const sortVal = (s: DetailStudent): string | number => {
     switch (sortKey) {
-      case "nom":
-        return s.nom;
-      case "prenom":
-        return s.prenom;
-      case "github":
-        return s.githubLogin ?? "";
+      case "name":
+        return `${s.nom} ${s.prenom}`;
       case "lastCommitAt":
         return s.repo?.lastCommitAt ?? "";
       case "commitCount":
@@ -591,9 +821,8 @@ export function AssignmentDetail({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-              <Th k="nom">{t("assignment.col.lastName")}</Th>
-              <Th k="prenom">{t("assignment.col.firstName")}</Th>
-              <Th k="github">{t("assignment.col.github")}</Th>
+              <Th k="name">{t("assignment.col.student")}</Th>
+              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.repo")}</th>
               <Th k="status">{t("assignment.col.status")}</Th>
               <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.lastCommit")}</th>
               <Th k="lastCommitAt">{t("assignment.col.date")}</Th>

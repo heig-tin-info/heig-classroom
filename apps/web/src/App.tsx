@@ -729,10 +729,14 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                 }}
                 className="cursor-pointer text-left"
               >
-                <Card className="p-4 hover:-translate-y-0.5 hover:shadow-[0_2px_4px_rgb(0_0_0/0.06),0_12px_28px_rgb(0_0_0/0.08)]">
+                {/* Quiet hover: an accent hairline fades in and the title picks
+                    up the accent — no movement, nothing jumps. */}
+                <Card className="group/card p-4 ring-1 ring-transparent transition-shadow hover:shadow-[0_1px_2px_rgb(0_0_0/0.05),0_8px_24px_rgb(0_0_0/0.06)] hover:ring-accent/30 dark:hover:ring-accent/40">
                   <div className="flex items-center gap-2">
                     <OrgAvatar login={c.orgLogin} className="size-6" />
-                    <span className="font-medium">{c.name}</span>
+                    <span className="font-medium transition-colors group-hover/card:text-accent">
+                      {c.name}
+                    </span>
                   </div>
                   <p className="mt-1 flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
                     <OrgLink login={c.orgLogin} />

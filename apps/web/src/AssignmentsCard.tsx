@@ -76,11 +76,11 @@ function GhLink({ fullName }: { fullName: string }) {
       href={`https://github.com/${fullName}`}
       target="_blank"
       rel="noreferrer"
-      className="inline-flex items-center gap-1 text-zinc-500 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
+      className="inline-flex max-w-full items-center gap-1 text-zinc-500 hover:text-zinc-900 hover:underline dark:text-zinc-400 dark:hover:text-zinc-100"
     >
-      <GithubIcon className="size-3.5" />
-      {fullName.split("/")[1]}
-      <ExternalLink className="size-3" />
+      <GithubIcon className="size-3.5 shrink-0" />
+      <span className="min-w-0 break-all">{fullName.split("/")[1]}</span>
+      <ExternalLink className="size-3 shrink-0" />
     </a>
   );
 }
@@ -510,7 +510,8 @@ function AssignmentRow({
         {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
       </span>
       <span className="flex-1" />
-      <span className="flex items-center gap-3 text-sm">
+      {/* Long repo names wrap onto their own line instead of overflowing. */}
+      <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-sm">
         <GhLink fullName={a.sourceFullName} />
         {a.squashedFullName ? <GhLink fullName={a.squashedFullName} /> : null}
       </span>

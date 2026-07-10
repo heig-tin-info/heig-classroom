@@ -584,6 +584,83 @@ export async function assignmentsPlugin(
     );
   }
 
+  // --- Manual "grade now" (US-23): run the grading CI on the student's head ---
+  // A platform-pushed commit is never graded by design (bot-actor guard in the
+  // workflow, bot-commit filter in GR-05), so the manual trigger is a
+  // workflow_dispatch: the objective tier runs on the student's own last
+  // commit and the grade comes back through the regular ingestion.
+  app.post(
+    "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-now",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedStudentRepo(req, reply);
+      if (!owned) return reply;
+      if (owned.org.installationId === null) {
+        return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
+      }
+      const client = await installationClient(config, owned.org.installationId);
+      const repoName = owned.repo.fullName!.split("/")[1]!;
+      const ref = owned.repo.defaultBranch ?? owned.assignment.branches[0] ?? "main";
+      try {
+        await client.octokit.request(
+          "POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches",
+          { owner: owned.org.login, repo: repoName, workflow_id: "grading.yml", ref },
+        );
+      } catch (err) {
+        const status = (err as { status?: number }).status;
+        // 404: no grading.yml; 422: the workflow has no workflow_dispatch trigger.
+        if (status === 404 || status === 422) {
+          return reply.code(409).send({
+            error: "no_manual_grading",
+            message: "The grading workflow of this repository does not support manual runs",
+          });
+        }
+        throw err;
+      }
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "repo.grade_now",
+        subjectType: "student_repo",
+        subjectId: owned.repo.id,
+        payload: { repo: owned.repo.fullName, ref },
+      });
+      return reply.code(202).send({ ok: true });
+    },
+  );
+
+  // --- Repository activity for the expandable row (commits + timeline) ---
+  app.get(
+    "/app/api/classrooms/:id/assignments/:aid/repos/:rid/activity",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedStudentRepo(req, reply);
+      if (!owned) return reply;
+      if (owned.org.installationId === null) return { commits: [] };
+      const client = await installationClient(config, owned.org.installationId);
+      const repoName = owned.repo.fullName!.split("/")[1]!;
+      try {
+        const { data } = await client.octokit.request("GET /repos/{owner}/{repo}/commits", {
+          owner: owned.org.login,
+          repo: repoName,
+          per_page: 100,
+        });
+        return {
+          commits: data.map((c) => ({
+            sha: c.sha,
+            message: (c.commit.message ?? "").split("\n")[0],
+            author: c.commit.author?.name ?? c.author?.login ?? "",
+            date: c.commit.author?.date ?? null,
+          })),
+        };
+      } catch (err) {
+        // 409: empty git repository — legitimate for a fresh assignment.
+        if ((err as { status?: number }).status === 409) return { commits: [] };
+        throw err;
+      }
+    },
+  );
+
   app.post(
     "/app/api/classrooms/:id/assignments/:aid/publish",
     { preHandler: requireTeacher },
