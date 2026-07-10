@@ -152,3 +152,49 @@ Operational requirements:
 - A `grade-milestone` dispatch type is reserved for intermediate milestones
   (same mechanics, one ledger row per milestone); milestones are not
   implemented yet.
+
+### Configuring the Anthropic API key
+
+The review job reads the key from `secrets.ANTHROPIC_API_KEY`. Provide it once,
+as an **organization secret scoped to the classroom repositories**, so every
+student repository inherits it without ever storing the plaintext key.
+
+1. **Create the key** in the [Anthropic Console](https://console.anthropic.com)
+   under *Settings → API keys*. Use a dedicated key for the classroom (so it
+   can be revoked without affecting anything else), put it in its own workspace,
+   and set a monthly **spending limit** on that workspace — the key runs
+   untrusted student code's grading and you want a hard ceiling. Copy the
+   `sk-ant-…` value; the console shows it only once.
+
+2. **Store it as an organization secret**, restricted to the class repositories.
+
+   From the GitHub UI: *Organization → Settings → Secrets and variables →
+   Actions → New organization secret*. Name it `ANTHROPIC_API_KEY`, paste the
+   value, and under *Repository access* choose **Selected repositories**, then
+   add the assignment repositories (source, squashed and the per-student ones).
+   Never choose *All repositories*: that would expose the key to any repo in the
+   org, including ones outside the course.
+
+   Or with the CLI (needs `admin:org`):
+
+   ```bash
+   gh secret set ANTHROPIC_API_KEY \
+     --org <your-org> \
+     --app actions \
+     --visibility selected \
+     --repos "labo-02-quadratic,labo-02-quadratic-squashed" \
+     --body "sk-ant-..."
+   ```
+
+   As new student repositories are provisioned, add them to the secret's
+   selected list (or grant the secret to the whole set once the naming pattern
+   is known). A repository that cannot read the secret still runs the review
+   job, but `score grade --llm` fails for lack of a key and the run records no
+   grade — visible in the teacher view rather than silent.
+
+3. **Rotate it every semester** (or whenever a key may have leaked): create a
+   new key in the console, update the org secret with the command above, then
+   revoke the old key. No workflow change is needed — the secret name is stable.
+
+The shim workflow forwards the secret to the reusable pipeline with
+`secrets: inherit`, so nothing else needs configuring on the student side.
