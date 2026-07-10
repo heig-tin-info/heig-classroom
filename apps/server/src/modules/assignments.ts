@@ -16,7 +16,7 @@ import {
   studentRepos,
   users,
 } from "../db/schema.js";
-import { gradeView, gradeViewsByIds } from "../grading.js";
+import { gradeView, gradeViewsByIds, selectGradeRun } from "../grading.js";
 import { SYNC_QUEUE } from "../jobs.js";
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
@@ -342,6 +342,34 @@ export async function assignmentsPlugin(
             ),
           ),
         );
+        // Requalify captured runs (GR-14): every run already in the database
+        // was necessarily received before the NEW (future) deadline, so the
+        // after-deadline flag no longer holds — including runs that got the
+        // conservative GR-14.3 treatment when their receipt was unknown.
+        // Then recompute each repository's current grade selection.
+        await app.db
+          .update(gradeRuns)
+          .set({ afterDeadline: false })
+          .where(
+            inArray(
+              gradeRuns.studentRepoId,
+              app.db
+                .select({ id: studentRepos.id })
+                .from(studentRepos)
+                .where(eq(studentRepos.assignmentId, updated.id)),
+            ),
+          );
+        const reposToRefresh = await app.db
+          .select({ id: studentRepos.id })
+          .from(studentRepos)
+          .where(eq(studentRepos.assignmentId, updated.id));
+        for (const repo of reposToRefresh) {
+          const selected = await selectGradeRun(app, repo.id);
+          await app.db
+            .update(studentRepos)
+            .set({ currentGradeRunId: selected })
+            .where(eq(studentRepos.id, repo.id));
+        }
         await audit(app.db, {
           actorUserId: req.user!.id,
           actorType: "user",
