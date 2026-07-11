@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  GraduationCap,
   Mail,
   Pencil,
   Trash2,
@@ -161,19 +162,26 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
         </a>
       </td>
       <td className={cell}>
-        {entry.conflictFlag ? (
-          <Badge tone="red" icon={AlertTriangle}>
-            conflict
-          </Badge>
-        ) : entry.status === "claimed" ? (
-          <Badge tone="green" icon={CheckCircle2}>
-            claimed
-          </Badge>
-        ) : (
-          <Badge tone="amber" icon={Clock}>
-            pending
-          </Badge>
-        )}
+        <span className="inline-flex items-center gap-1">
+          {entry.conflictFlag ? (
+            <Badge tone="red" icon={AlertTriangle}>
+              conflict
+            </Badge>
+          ) : entry.status === "claimed" ? (
+            <Badge tone="green" icon={CheckCircle2}>
+              claimed
+            </Badge>
+          ) : (
+            <Badge tone="amber" icon={Clock}>
+              pending
+            </Badge>
+          )}
+          {entry.staff ? (
+            <Badge tone="zinc" icon={GraduationCap}>
+              staff
+            </Badge>
+          ) : null}
+        </span>
       </td>
       <td className={cell}>
         {entry.githubLogin ? (

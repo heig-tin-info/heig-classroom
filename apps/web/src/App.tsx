@@ -193,10 +193,14 @@ function Header({
   me,
   onOpenSettings,
   onHome,
+  studentView,
+  onToggleStudentView,
 }: {
   me: Me;
   onOpenSettings: () => void;
   onHome: () => void;
+  studentView?: boolean;
+  onToggleStudentView?: () => void;
 }) {
   const t = useT();
   return (
@@ -231,6 +235,23 @@ function Header({
         >
           <BookOpen className="size-4" />
         </a>
+        {onToggleStudentView ? (
+          // Teacher/admin only: flip between the teacher UI and the student
+          // UI (the seat is taken via "Join as student" on the classroom).
+          <button
+            onClick={onToggleStudentView}
+            aria-label={studentView ? t("menu.teacherView") : t("menu.studentView")}
+            title={studentView ? t("menu.teacherView") : t("menu.studentView")}
+            aria-pressed={studentView}
+            className={`rounded-lg p-2 transition-colors ${
+              studentView
+                ? "bg-accent/10 text-accent hover:bg-accent/20"
+                : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+            }`}
+          >
+            <GraduationCap className="size-4" />
+          </button>
+        ) : null}
         <ThemeToggle />
         <UserMenu me={me} onOpenSettings={onOpenSettings} />
       </div>
@@ -394,15 +415,27 @@ function AssignmentPage({
 
 function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
+  const qc = useQueryClient();
+  const me = useMe();
   const [showSettings, setShowSettings] = useState(false);
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
   });
+  const join = useMutation({
+    mutationFn: () => api(`/app/api/classrooms/${id}/self-enroll`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classroom", id] });
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+    },
+  });
 
   if (detail.isLoading) return null;
   if (!detail.data) return <p>Classroom not found.</p>;
   const room = detail.data;
+  // The teacher can take a (staff) seat to walk the student flow themselves.
+  const myEmail = me.data?.email.toLowerCase();
+  const joined = myEmail != null && room.roster.some((e) => e.email.toLowerCase() === myEmail);
 
   return (
     <div className="space-y-4">
@@ -463,6 +496,19 @@ function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => v
           <Users className="size-4 text-zinc-400" />
           <h2 className="font-medium">Roster</h2>
           <HelpIcon topic="roster" />
+          <span className="flex-1" />
+          {joined ? (
+            <span
+              className="inline-flex items-center gap-1.5 text-xs text-zinc-400"
+              title={t("roster.joined")}
+            >
+              <GraduationCap className="size-3.5" /> {t("roster.staff")}
+            </span>
+          ) : (
+            <Button variant="subtle" onClick={() => join.mutate()} disabled={join.isPending}>
+              <GraduationCap className="size-4" /> {t("roster.join")}
+            </Button>
+          )}
         </div>
         <RosterTable classroomId={room.id} roster={room.roster} />
       </Card>
@@ -1183,9 +1229,16 @@ function StudentHome({ me }: { me: Me }) {
   );
 }
 
+// Persisted teacher choice: "student" keeps the student view across reloads.
+// (Distinct from "hgc-student-view", a layout toggle inside StudentHome.)
+const VIEW_AS_KEY = "hgc-view-as";
+
 export default function App() {
   const me = useMe();
   const [route, navigate] = useRoute();
+  const [studentView, setStudentView] = useState(
+    () => localStorage.getItem(VIEW_AS_KEY) === "student",
+  );
   const { setLocale } = useI18n();
   useLiveUpdates(me.data != null);
   // The account's saved language wins on load, so the choice follows the user
@@ -1198,18 +1251,31 @@ export default function App() {
   if (!me.data) return <Landing />;
   const role = me.data.role;
   const teacher = role === "teacher" || role === "admin";
+  const inStudentView = teacher && studentView;
   return (
     <div className="min-h-dvh">
       <Header
         me={me.data}
         onOpenSettings={() => navigate({ view: "settings" })}
         onHome={() => navigate({ view: "home" })}
+        studentView={inStudentView}
+        onToggleStudentView={
+          teacher
+            ? () => {
+                setStudentView((v) => {
+                  localStorage.setItem(VIEW_AS_KEY, v ? "teacher" : "student");
+                  return !v;
+                });
+                navigate({ view: "home" });
+              }
+            : undefined
+        }
       />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
         {route.view === "settings" ? (
           <SettingsPage me={me.data} onBack={() => navigate({ view: "home" })} />
-        ) : !teacher ? (
+        ) : !teacher || inStudentView ? (
           <StudentHome me={me.data} />
         ) : route.view === "classroom" ? (
           <ClassroomView id={route.id} navigate={navigate} />

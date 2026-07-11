@@ -1,0 +1,1 @@
+ALTER TABLE "enrollments" ADD COLUMN "staff" boolean DEFAULT false NOT NULL;

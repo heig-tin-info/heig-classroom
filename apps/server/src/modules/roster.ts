@@ -167,6 +167,7 @@ export async function rosterView(db: Db, classroomId: string) {
       email: enrollments.email,
       status: enrollments.status,
       conflictFlag: enrollments.conflictFlag,
+      staff: enrollments.staff,
       claimedAt: enrollments.claimedAt,
       githubLogin: users.githubLogin,
       lastLoginAt: users.lastLoginAt,

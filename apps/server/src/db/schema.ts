@@ -139,6 +139,8 @@ export const enrollments = pgTable(
     userId: uuid("user_id").references(() => users.id),
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
     conflictFlag: boolean("conflict_flag").notNull().default(false),
+    /** Teacher/admin seat (self-enroll): excluded from the class headcount. */
+    staff: boolean("staff").notNull().default(false),
   },
   (t) => [
     uniqueIndex("enrollments_classroom_email_uq").on(t.classroomId, t.email),

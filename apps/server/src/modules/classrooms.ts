@@ -7,6 +7,7 @@ import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
 
 import { audit } from "../audit.js";
+import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
 import { listInstalledOrgs, orgExistsOnGithub, resolveOrgInstallation } from "../github/app.js";
@@ -96,8 +97,9 @@ export async function classroomsPlugin(
         name: classrooms.name,
         orgLogin: organizations.login,
         createdAt: classrooms.createdAt,
-        students: sql<number>`count(${enrollments.id})::int`,
-        claimed: sql<number>`count(${enrollments.id}) filter (where ${enrollments.status} = 'claimed')::int`,
+        // Staff seats (teacher self-enroll) are not part of the headcount.
+        students: sql<number>`count(${enrollments.id}) filter (where not ${enrollments.staff})::int`,
+        claimed: sql<number>`count(${enrollments.id}) filter (where ${enrollments.status} = 'claimed' and not ${enrollments.staff})::int`,
       })
       .from(classrooms)
       .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
@@ -130,6 +132,7 @@ export async function classroomsPlugin(
             nom: enrollments.nom,
             prenom: enrollments.prenom,
             status: enrollments.status,
+            staff: enrollments.staff,
           })
           .from(enrollments)
           .where(inArray(enrollments.classroomId, ids))
@@ -142,7 +145,7 @@ export async function classroomsPlugin(
         .map(({ classroomId: _c, ...a }) => a),
       roster: roster
         .filter((e) => e.classroomId === r.id)
-        .map((e) => ({ nom: e.nom, prenom: e.prenom, claimed: e.status === "claimed" })),
+        .map((e) => ({ nom: e.nom, prenom: e.prenom, claimed: e.status === "claimed", staff: e.staff })),
     }));
   });
 
@@ -239,6 +242,53 @@ export async function classroomsPlugin(
         payload: { name: room.name },
       });
       return reply.code(204).send();
+    },
+  );
+
+  // Self-enroll: the teacher takes a (staff) seat in their own classroom to
+  // exercise the student flow — accept, push, grades — without a second
+  // account. The seat is claimed immediately (the email is already verified)
+  // and flagged `staff` so it stays out of the class headcount.
+  app.post(
+    "/app/api/classrooms/:id/self-enroll",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await ownedClassroom(req, reply);
+      if (!room) return reply;
+      const me = req.user!;
+      try {
+        await app.db
+          .insert(enrollments)
+          .values({
+            id: randomUUID(),
+            classroomId: room.id,
+            nom: me.familyName,
+            prenom: me.givenName,
+            email: me.email.trim().toLowerCase(),
+            status: "claimed",
+            userId: me.id,
+            claimedAt: new Date(),
+            staff: true,
+          })
+          .onConflictDoUpdate({
+            // Email already imported in this roster: claim it and mark staff.
+            target: [enrollments.classroomId, enrollments.email],
+            set: { status: "claimed", userId: me.id, claimedAt: new Date(), staff: true },
+          });
+      } catch {
+        // UNIQUE(classroom_id, user_id): the user already claimed another
+        // entry of this roster under a different email.
+        return reply.code(409).send({ error: "already_enrolled" });
+      }
+      await audit(app.db, {
+        actorUserId: me.id,
+        actorType: "user",
+        action: "roster.self_enroll",
+        subjectType: "classroom",
+        subjectId: room.id,
+      });
+      publish("roster", [`classroom:${room.id}`, `user:${me.id}`]);
+      return reply.code(201).send({ ok: true });
     },
   );
 

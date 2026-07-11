@@ -69,7 +69,7 @@ export interface ClassroomSummary {
     startAt: string;
     deadlineAt: string;
   }[];
-  roster: { nom: string; prenom: string; claimed: boolean }[];
+  roster: { nom: string; prenom: string; claimed: boolean; staff: boolean }[];
 }
 
 export interface RosterEntry {
@@ -79,6 +79,7 @@ export interface RosterEntry {
   email: string;
   status: "pending" | "claimed";
   conflictFlag: boolean;
+  staff: boolean;
   githubLogin: string | null;
   lastLoginAt: string | null;
   avatarUrl: string | null;

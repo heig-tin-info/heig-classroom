@@ -31,6 +31,12 @@ const en = {
   "menu.signout": "Sign out",
   "menu.toggleTheme": "Toggle theme",
   "menu.user": "User menu",
+  "menu.studentView": "Switch to student view",
+  "menu.teacherView": "Back to teacher view",
+
+  "roster.join": "Join as student",
+  "roster.joined": "You have a seat in this classroom",
+  "roster.staff": "staff",
 
   "github.linked": "GitHub account linked.",
   "github.conflict": "This GitHub account is already linked to another user.",
@@ -168,6 +174,12 @@ const fr: Record<keyof Dict, string> = {
   "menu.signout": "Se déconnecter",
   "menu.toggleTheme": "Changer de thème",
   "menu.user": "Menu utilisateur",
+  "menu.studentView": "Passer en vue étudiant",
+  "menu.teacherView": "Revenir à la vue enseignant",
+
+  "roster.join": "Me joindre comme étudiant",
+  "roster.joined": "Vous avez une place dans cette classe",
+  "roster.staff": "staff",
 
   "github.linked": "Compte GitHub lié.",
   "github.conflict": "Ce compte GitHub est déjà lié à un autre utilisateur.",
