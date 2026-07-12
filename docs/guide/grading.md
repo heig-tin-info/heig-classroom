@@ -196,5 +196,16 @@ student repository inherits it without ever storing the plaintext key.
    new key in the console, update the org secret with the command above, then
    revoke the old key. No workflow change is needed — the secret name is stable.
 
-The shim workflow forwards the secret to the reusable pipeline with
-`secrets: inherit`, so nothing else needs configuring on the student side.
+The shim workflow forwards the secret to the reusable pipeline with an
+**explicit mapping** — `secrets: inherit` must NOT be relied upon here:
+organisation secrets do not cross the organisation boundary when the reusable
+workflow lives in another org (`heig-tin-info/score` vs the classroom org).
+With `inherit` the LLM tier runs with an empty key and fails; the shim
+therefore declares:
+
+```yaml
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+Nothing else needs configuring on the student side.
