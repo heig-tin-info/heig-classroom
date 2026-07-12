@@ -157,6 +157,15 @@ const en = {
   "notify.protected_reverted": "Protected files restored",
   "notify.deadline_applied": "Deadline enforced",
   "notify.sync": "Sync activity",
+
+  "settings.emails": "Email notifications",
+  "settings.emailsHint": "Sent to your account address; saved on your account.",
+  "email.assignment.published": "New assignment published",
+  "email.deadline.reminder": "Deadline reminder (24 h before)",
+  "email.grade.final": "Final grade available",
+  "email.repo.invitation": "Repository created",
+  "email.provision.error": "Repository provisioning failed",
+  "email.deadline.applied": "Deadline enforced (summary)",
 };
 
 export type Dict = typeof en;
@@ -300,6 +309,15 @@ const fr: Record<keyof Dict, string> = {
   "notify.protected_reverted": "Fichiers protégés restaurés",
   "notify.deadline_applied": "Échéance appliquée",
   "notify.sync": "Activité de synchronisation",
+
+  "settings.emails": "Notifications par e-mail",
+  "settings.emailsHint": "Envoyées à l'adresse du compte ; enregistrées sur le compte.",
+  "email.assignment.published": "Nouveau devoir publié",
+  "email.deadline.reminder": "Rappel d'échéance (24 h avant)",
+  "email.grade.final": "Note finale disponible",
+  "email.repo.invitation": "Dépôt créé",
+  "email.provision.error": "Échec de création d'un dépôt",
+  "email.deadline.applied": "Échéance appliquée (résumé)",
 };
 
 const DICTS: Record<Locale, Record<string, string>> = { en, fr };

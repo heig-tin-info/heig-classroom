@@ -354,7 +354,7 @@ async function handleWorkflowRun(
     event: run.event ?? "",
     checkSuiteId: run.check_suite_id ?? null,
     completedAt: run.updated_at ? new Date(run.updated_at) : new Date(),
-  });
+  }, config);
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
   publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }

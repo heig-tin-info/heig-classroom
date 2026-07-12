@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, BellRing, GraduationCap, Languages, School, ShieldCheck, Unlink } from "lucide-react";
+import { ArrowLeft, BellRing, GraduationCap, Languages, Mail, School, ShieldCheck, Unlink } from "lucide-react";
 
 import { AdminPanel } from "./AdminPanel";
 import { HelpIcon } from "./help";
@@ -59,6 +59,54 @@ function NotificationSettings() {
               className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
             />
             {t(`notify.${kind}` as Parameters<typeof t>[0])}
+          </label>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** Mirror of the server's EMAIL_KINDS catalogue (mailer.ts). */
+const EMAIL_KINDS: { kind: string; audience: "student" | "teacher" }[] = [
+  { kind: "assignment.published", audience: "student" },
+  { kind: "deadline.reminder", audience: "student" },
+  { kind: "grade.final", audience: "student" },
+  { kind: "repo.invitation", audience: "student" },
+  { kind: "provision.error", audience: "teacher" },
+  { kind: "deadline.applied", audience: "teacher" },
+];
+
+/** Per-kind email opt-outs, persisted on the account (server-side). */
+function EmailSettings({ me }: { me: Me }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (prefs: Record<string, boolean>) =>
+      api("/app/api/me", { method: "PATCH", body: JSON.stringify({ emailPrefs: prefs }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+  // Teachers/admins can hold student seats (self-enroll), so they get every
+  // toggle; students only see the kinds that can reach them.
+  const teacher = me.role === "teacher" || me.role === "admin";
+  const kinds = EMAIL_KINDS.filter((k) => teacher || k.audience === "student");
+  return (
+    <Card className="p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <Mail className="size-4 text-zinc-400" />
+        <h2 className="font-medium">{t("settings.emails")}</h2>
+        <span className="text-xs text-zinc-400">{t("settings.emailsHint")}</span>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {kinds.map(({ kind }) => (
+          <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={me.emailPrefs?.[kind] ?? true}
+              onChange={(e) => save.mutate({ [kind]: e.target.checked })}
+              disabled={save.isPending}
+              className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
+            />
+            {t(`email.${kind}` as Parameters<typeof t>[0])}
           </label>
         ))}
       </div>
@@ -189,6 +237,8 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
       ) : null}
 
       <NotificationSettings />
+
+      <EmailSettings me={me} />
 
       {me.role === "admin" ? (
         <div className="border-t border-zinc-200/60 pt-6 dark:border-zinc-800/60">

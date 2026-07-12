@@ -15,6 +15,7 @@ import { installationClient } from "./github/app.js";
 import { pushEmptyCommit, zurichIso } from "./github/commit.js";
 import { lockStudentRepo } from "./github/lock.js";
 import { selectGradeRun } from "./grading.js";
+import { mailRecipient, queueEmail } from "./mailer.js";
 
 export interface DeadlineJob {
   assignmentId: string;
@@ -27,6 +28,8 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
       .select({
         assignment: assignments,
         classroomId: classrooms.id,
+        classroomName: classrooms.name,
+        teacherId: classrooms.teacherId,
         installationId: organizations.installationId,
       })
       .from(assignments)
@@ -43,10 +46,14 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
 
     // Atomic claim: `deadline_applied_at` is set only once, but processing
     // continues even without the claim (resuming repositories that failed).
-    await app.db
+    // Winning the claim also gates the teacher email (once per deadline,
+    // retries after partial failures never re-send it).
+    const claim = await app.db
       .update(assignments)
       .set({ deadlineAppliedAt: new Date(), state: "locked" })
-      .where(and(eq(assignments.id, a.id), isNull(assignments.deadlineAppliedAt)));
+      .where(and(eq(assignments.id, a.id), isNull(assignments.deadlineAppliedAt)))
+      .returning({ id: assignments.id });
+    const claimedNow = claim.length > 0;
 
     const repos = await app.db
       .select()
@@ -166,6 +173,16 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
       "repos",
       repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),
     );
+    if (claimedNow) {
+      const teacher = await mailRecipient(app, row.teacherId);
+      if (teacher) {
+        await queueEmail(app, config, teacher, "deadline.applied", {
+          assignmentName: a.name,
+          classroomName: row.classroomName,
+          detail: `${repos.length - failures.length}/${repos.length} repositories`,
+        });
+      }
+    }
     // Failed repositories still need handling: pg-boss retries, and repos
     // already locked/marked are skipped on the next pass.
     if (failures.length > 0) {

@@ -19,6 +19,7 @@ import { installationClient } from "../github/app.js";
 import { fetchRepoLiveState } from "../github/metrics.js";
 import { provisionStudentRepo } from "../github/provision.js";
 import { gradeViewsByIds } from "../grading.js";
+import { mailRecipient, queueEmail } from "../mailer.js";
 import { claimEnrollments } from "./roster.js";
 
 /**
@@ -196,7 +197,12 @@ export async function studentPlugin(
       if (!params.success) return reply.code(404).send({ error: "not_found" });
 
       const [row] = await app.db
-        .select({ assignment: assignments, org: organizations })
+        .select({
+          assignment: assignments,
+          org: organizations,
+          classroomName: classrooms.name,
+          teacherId: classrooms.teacherId,
+        })
         .from(assignments)
         .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
         .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
@@ -301,6 +307,12 @@ export async function studentPlugin(
           kind: "assignment_accepted",
           message: `${me.givenName} ${me.familyName} accepted “${row.assignment.name}”`.trim(),
         });
+        // Repo confirmation: the GitHub invitation must still be accepted.
+        await queueEmail(app, config, me, "repo.invitation", {
+          assignmentName: row.assignment.name,
+          classroomName: row.classroomName,
+          repoFullName: result.fullName,
+        });
         return updated;
       } catch (err) {
         req.log.error({ err }, "provisioning failed");
@@ -315,6 +327,15 @@ export async function studentPlugin(
           subjectType: "student_repo",
           subjectId: repoRow!.id,
         });
+        // The teacher can often fix the cause (permissions, quota, template).
+        const teacher = await mailRecipient(app, row.teacherId);
+        if (teacher) {
+          await queueEmail(app, config, teacher, "provision.error", {
+            assignmentName: row.assignment.name,
+            classroomName: row.classroomName,
+            detail: `${me.givenName} ${me.familyName}`.trim() || me.email,
+          });
+        }
         return reply
           .code(502)
           .send({ error: "provision_failed", message: "Repository provisioning failed — try again" });

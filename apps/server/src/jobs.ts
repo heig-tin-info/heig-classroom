@@ -12,6 +12,7 @@ export const DEADLINE_QUEUE = "deadline.apply";
 export const TASK_QUEUE = "task.run";
 export const SYNC_QUEUE = "sync.apply";
 export const GRADE_DISPATCH_QUEUE = "grade.dispatch";
+export const EMAIL_QUEUE = "email.send";
 
 export interface WebhookJob {
   deliveryId: string;
@@ -20,6 +21,17 @@ export interface WebhookJob {
 
 export interface TaskJob {
   key: string;
+  [key: string]: unknown;
+}
+
+/** Payload of `email.send` (rendered upstream, see mailer.ts EmailJob). */
+export interface EmailJobData {
+  userId: string;
+  kind: string;
+  to: string;
+  subject: string;
+  text: string;
+  html: string;
   [key: string]: unknown;
 }
 
@@ -33,6 +45,7 @@ export async function startJobs(
     syncHandler: (job: { assignmentId: string }) => Promise<void>;
     gradeDispatchHandler: (job: { assignmentId: string }) => Promise<void>;
     taskRunner: (key: string) => Promise<void>;
+    emailHandler: (job: EmailJobData) => Promise<void>;
   },
 ) {
   const boss = new PgBoss({
@@ -64,6 +77,11 @@ export async function startJobs(
     retryBackoff: true,
     retryDelay: 30,
   });
+  await boss.createQueue(EMAIL_QUEUE, {
+    retryLimit: 5,
+    retryBackoff: true,
+    retryDelay: 30,
+  });
 
   if (opts.runWorkers) {
     await boss.work<WebhookJob>(WEBHOOK_QUEUE, async (jobs) => {
@@ -80,6 +98,9 @@ export async function startJobs(
     });
     await boss.work<TaskJob>(TASK_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.taskRunner(job.data.key);
+    });
+    await boss.work<EmailJobData>(EMAIL_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.emailHandler(job.data);
     });
   }
 

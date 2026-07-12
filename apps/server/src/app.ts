@@ -23,6 +23,8 @@ import { makeWebhookHandler, webhooksPlugin } from "./modules/webhooks.js";
 import { makeDeadlineHandler } from "./deadline.js";
 import { makeGradeDispatchHandler } from "./dispatch.js";
 import { makeSyncHandler } from "./sync.js";
+import { makeEmailHandler } from "./mailer.js";
+import { emailPlugin } from "./modules/email.js";
 import { startJobs } from "./jobs.js";
 import { runTask, seedTasks } from "./tasks.js";
 import { startTicker } from "./ticker.js";
@@ -79,6 +81,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
   await app.register(studentPlugin, { config });
+  await app.register(emailPlugin, { config });
 
   // Job queue + webhooks (M3). The webhooks plugin is encapsulated: its raw
   // JSON parser (HMAC) does not leak onto other routes. A database that is
@@ -94,6 +97,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
       syncHandler: makeSyncHandler(app, config),
       gradeDispatchHandler: makeGradeDispatchHandler(app, config),
       taskRunner: (key) => runTask(app, config, key),
+      emailHandler: makeEmailHandler(app, config),
     });
     await seedTasks(app);
     // Deadline ticker + scheduled tasks (ADR-006): worker side only.

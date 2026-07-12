@@ -44,6 +44,8 @@ export const users = pgTable(
     /** Interface language chosen by the user; null falls back to English. */
     locale: text("locale", { enum: ["en", "fr"] }),
     emailOptIn: boolean("email_opt_in").notNull().default(false),
+    /** Per-kind email opt-outs (mailer.ts EMAIL_KINDS); missing key = default. */
+    emailPrefs: jsonb("email_prefs").$type<Record<string, boolean>>(),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -186,6 +188,8 @@ export const assignments = pgTable(
     frozenAt: timestamp("frozen_at", { withTimezone: true }),
     /** GR-16: authoritative LLM review dispatched to every repo (grade-final). */
     llmDispatchedAt: timestamp("llm_dispatched_at", { withTimezone: true }),
+    /** J-1 email reminder sent (atomic claim in the ticker, one shot). */
+    reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },

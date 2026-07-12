@@ -176,7 +176,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
           event: run.event,
           checkSuiteId: run.check_suite_id ?? null,
           completedAt: new Date(run.updated_at),
-        });
+        }, config);
         if (id) {
           ingested += 1;
           touched.add(`classroom:${classroomId}`);

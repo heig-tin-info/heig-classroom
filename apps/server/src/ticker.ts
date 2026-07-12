@@ -10,14 +10,16 @@ import type { FastifyInstance } from "fastify";
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 
 import type { AppConfig } from "./config.js";
-import { assignments, scheduledTasks } from "./db/schema.js";
+import { assignments, classrooms, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
+import { zurichIso } from "./github/commit.js";
 import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
+import { classroomRecipients, queueEmail } from "./mailer.js";
 import { TASK_DEFS } from "./tasks.js";
 
 const TICK_MS = 20_000;
 
-export function startTicker(app: FastifyInstance, _config: AppConfig) {
+export function startTicker(app: FastifyInstance, config: AppConfig) {
   let running = false;
 
   const tick = async () => {
@@ -42,6 +44,44 @@ export function startTicker(app: FastifyInstance, _config: AppConfig) {
           { assignmentId: id },
           { singletonKey: id, retryLimit: 5, retryBackoff: true, retryDelay: 10 },
         );
+      }
+
+      // 1b. J-1 email reminder: published, due within 24 h, not yet reminded.
+      //     The conditional UPDATE is the atomic claim — one shot even with
+      //     several workers; rescheduling far enough resets nothing (the
+      //     reminder already went out for that deadline).
+      const remind = await app.db
+        .update(assignments)
+        .set({ reminderSentAt: sql`now()` })
+        .where(
+          and(
+            eq(assignments.state, "published"),
+            isNull(assignments.deadlineAppliedAt),
+            isNull(assignments.reminderSentAt),
+            isNull(assignments.archivedAt),
+            lte(assignments.deadlineAt, sql`now() + interval '24 hours'`),
+            sql`${assignments.deadlineAt} > now()`,
+          ),
+        )
+        .returning({
+          id: assignments.id,
+          name: assignments.name,
+          deadlineAt: assignments.deadlineAt,
+          classroomId: assignments.classroomId,
+        });
+      for (const a of remind) {
+        const [room] = await app.db
+          .select({ name: classrooms.name })
+          .from(classrooms)
+          .where(eq(classrooms.id, a.classroomId))
+          .limit(1);
+        for (const student of await classroomRecipients(app, a.classroomId)) {
+          await queueEmail(app, config, student, "deadline.reminder", {
+            assignmentName: a.name,
+            classroomName: room?.name ?? "",
+            deadlineAt: zurichIso(a.deadlineAt),
+          });
+        }
       }
 
       // 2. Definitive freeze at deadline + grace (ADR-012).

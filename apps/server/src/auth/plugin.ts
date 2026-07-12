@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { avatars, teacherGrants, users } from "../db/schema.js";
+import { isEmailKind, resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
@@ -238,22 +239,50 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
         avatarUrl,
         hasUploadedAvatar: Boolean(uploaded),
         locale: u.locale,
+        emailPrefs: resolvedPrefs(u.emailPrefs),
       };
     },
   );
 
-  // Interface language, persisted so it follows the user across devices.
+  // Account preferences persisted server-side: interface language and
+  // per-kind email opt-outs, so they follow the user across devices.
   app.patch(
     "/app/api/me",
     { preHandler: (req, reply) => app.requireSession(req, reply) },
     async (req, reply) => {
-      const body = req.body as { locale?: unknown };
-      const locale = body?.locale;
-      if (locale !== "en" && locale !== "fr" && locale !== null) {
-        return reply.code(400).send({ error: "validation", message: "Unsupported locale" });
+      const body = req.body as { locale?: unknown; emailPrefs?: unknown };
+      const patch: Partial<{ locale: "en" | "fr" | null; emailPrefs: Record<string, boolean> }> =
+        {};
+      if ("locale" in (body ?? {})) {
+        const locale = body.locale;
+        if (locale !== "en" && locale !== "fr" && locale !== null) {
+          return reply.code(400).send({ error: "validation", message: "Unsupported locale" });
+        }
+        patch.locale = locale;
       }
-      await app.db.update(users).set({ locale }).where(eq(users.id, req.user!.id));
-      return { locale };
+      if ("emailPrefs" in (body ?? {})) {
+        const prefs = body.emailPrefs;
+        if (
+          typeof prefs !== "object" ||
+          prefs === null ||
+          Object.entries(prefs).some(([k, v]) => !isEmailKind(k) || typeof v !== "boolean")
+        ) {
+          return reply.code(400).send({ error: "validation", message: "Bad email preferences" });
+        }
+        // Merge over the stored map: partial toggles never reset the others.
+        patch.emailPrefs = {
+          ...(req.user!.emailPrefs ?? {}),
+          ...(prefs as Record<string, boolean>),
+        };
+      }
+      if (Object.keys(patch).length === 0) {
+        return reply.code(400).send({ error: "validation", message: "Nothing to update" });
+      }
+      await app.db.update(users).set(patch).where(eq(users.id, req.user!.id));
+      return {
+        locale: patch.locale ?? req.user!.locale,
+        emailPrefs: resolvedPrefs(patch.emailPrefs ?? req.user!.emailPrefs),
+      };
     },
   );
 }

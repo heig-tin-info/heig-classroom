@@ -53,6 +53,7 @@ export interface Me {
   avatarUrl: string | null;
   hasUploadedAvatar: boolean;
   locale: "en" | "fr" | null;
+  emailPrefs: Record<string, boolean>;
 }
 
 export interface ClassroomSummary {

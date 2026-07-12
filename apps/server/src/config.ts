@@ -55,6 +55,14 @@ const EnvSchema = z.object({
    */
   SUPER_ADMIN_EMAIL: z.string().default(""),
 
+  // --- Transactional email (Scaleway TEM). Without the two SCW credentials
+  // the mailer runs in dry-run mode: emails are logged, never sent. ---
+  SCW_SECRET_KEY: z.string().default(""),
+  SCW_DEFAULT_PROJECT_ID: z.string().default(""),
+  MAIL_FROM: z.string().default("no-reply@classroom.chevallier.io"),
+  MAIL_FROM_NAME: z.string().default("HEIG Classroom"),
+  MAIL_REGION: z.string().default("fr-par"),
+
   // --- GitHub App (GH-01..03): provisioning, webhooks, bot identity. ---
   // Empty until the App is configured; the GitHub modules refuse to start
   // without them, the rest of the portal keeps working.

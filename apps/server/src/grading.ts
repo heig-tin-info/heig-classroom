@@ -11,8 +11,10 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Octokit } from "octokit";
 
 import { extractGrade, GRADE_ANNOTATION_TITLE } from "@hgc/domain";
+import type { AppConfig } from "./config.js";
 import { assignments, botCommits, gradeRuns, pushReceipts, studentRepos } from "./db/schema.js";
 import { publish } from "./events.js";
+import { mailRecipient, queueEmail } from "./mailer.js";
 
 export const GRADING_WORKFLOW_PATH = ".github/workflows/grading.yml";
 
@@ -216,6 +218,7 @@ export async function ingestCompletedRun(
   octokit: Octokit,
   ctx: RepoCtx,
   run: CompletedRun,
+  config: AppConfig,
 ): Promise<string | null> {
   const kind = runKind(run);
   if (!(await isEligible(app, ctx, run.headBranch, run.headSha, { skipBotCheck: kind === "llm" }))) {
@@ -286,6 +289,14 @@ export async function ingestCompletedRun(
         kind: "grade_captured",
         message: `LLM review ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
       });
+      // The authoritative review is in: tell the student (GR-16).
+      const student = await mailRecipient(app, ctx.repo.userId);
+      if (student) {
+        await queueEmail(app, config, student, "grade.final", {
+          assignmentName: ctx.assignment.name,
+          grade: `${parse.points}/${parse.max}`,
+        });
+      }
     }
     return id;
   }

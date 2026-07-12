@@ -21,8 +21,10 @@ import { SYNC_QUEUE } from "../jobs.js";
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { lockStudentRepo, unlockStudentRepo } from "../github/lock.js";
+import { zurichIso } from "../github/commit.js";
 import { fetchRepoLiveState, type RepoLiveState } from "../github/metrics.js";
 import { createSquashedRepo } from "../github/squash.js";
+import { classroomRecipients, queueEmail } from "../mailer.js";
 
 const IdParam = z.object({ id: z.uuid() });
 
@@ -219,7 +221,12 @@ export async function assignmentsPlugin(
       return null;
     }
     const [row] = await app.db
-      .select({ assignment: assignments, teacherId: classrooms.teacherId, org: organizations })
+      .select({
+        assignment: assignments,
+        teacherId: classrooms.teacherId,
+        classroomName: classrooms.name,
+        org: organizations,
+      })
       .from(assignments)
       .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
       .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
@@ -320,7 +327,14 @@ export async function assignmentsPlugin(
         }
         await app.db
           .update(assignments)
-          .set({ state: "published", deadlineAppliedAt: null, frozenAt: null, llmDispatchedAt: null })
+          .set({
+            state: "published",
+            deadlineAppliedAt: null,
+            frozenAt: null,
+            llmDispatchedAt: null,
+            // Re-arm the J-1 email reminder for the new deadline.
+            reminderSentAt: null,
+          })
           .where(eq(assignments.id, updated.id));
         // The provisional freeze no longer makes sense: it will be set again at
         // the new deadline. Same for the LLM review (GR-16): it graded the old
@@ -738,6 +752,14 @@ export async function assignmentsPlugin(
         subjectType: "assignment",
         subjectId: owned.assignment.id,
       });
+      // Announce to every claimed student (their preference filters).
+      for (const student of await classroomRecipients(app, owned.assignment.classroomId)) {
+        await queueEmail(app, config, student, "assignment.published", {
+          assignmentName: owned.assignment.name,
+          classroomName: owned.classroomName,
+          deadlineAt: zurichIso(owned.assignment.deadlineAt),
+        });
+      }
       return updated;
     },
   );
