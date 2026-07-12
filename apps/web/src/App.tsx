@@ -420,8 +420,12 @@ function AssignmentPage({
  * resolves the installation on the way and the badge turns green live (SSE).
  */
 function InstallWizard({ room }: { room: ClassroomDetail }) {
+  // target_id preselects the classroom's organization on GitHub (otherwise
+  // the account picker defaults to whatever GitHub fancies).
   const installUrl = room.appSlug
-    ? `https://github.com/apps/${room.appSlug}/installations/new?state=${room.id}`
+    ? room.org?.githubOrgId
+      ? `https://github.com/apps/${room.appSlug}/installations/new/permissions?target_id=${room.org.githubOrgId}&state=${room.id}`
+      : `https://github.com/apps/${room.appSlug}/installations/new?state=${room.id}`
     : null;
   const StepDot = ({ n, done }: { n: number; done?: boolean }) =>
     done ? (
@@ -458,6 +462,8 @@ function InstallWizard({ room }: { room: ClassroomDetail }) {
             {installUrl ? (
               <a
                 href={installUrl}
+                target="_blank"
+                rel="noreferrer"
                 className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
               >
                 <GithubIcon className="size-4" /> Install the GitHub App
@@ -475,7 +481,7 @@ function InstallWizard({ room }: { room: ClassroomDetail }) {
         <li className="flex items-start gap-2.5">
           <StepDot n={3} />
           <span className="text-zinc-500 dark:text-zinc-400">
-            GitHub brings you straight back here — the badge turns green automatically.
+            Validate on GitHub — the badge here turns green automatically.
           </span>
         </li>
       </ol>

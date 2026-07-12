@@ -260,7 +260,11 @@ export async function classroomsPlugin(
     const room = await ownedClassroom(req, reply);
     if (!room) return reply;
     let [org] = await app.db
-      .select({ login: organizations.login, installationId: organizations.installationId })
+      .select({
+        login: organizations.login,
+        installationId: organizations.installationId,
+        githubOrgId: organizations.githubOrgId,
+      })
       .from(organizations)
       .where(eq(organizations.id, room.orgId))
       .limit(1);
@@ -278,7 +282,7 @@ export async function classroomsPlugin(
               status: "active",
             })
             .where(eq(organizations.id, room.orgId));
-          org = { ...org, installationId: found.installationId };
+          org = { ...org, installationId: found.installationId, githubOrgId: found.githubOrgId };
           await audit(app.db, {
             actorType: "system",
             action: "org.installation_resolved",
@@ -289,6 +293,24 @@ export async function classroomsPlugin(
         }
       } catch (err) {
         req.log.warn({ err, org: org.login }, "installation resolution failed");
+      }
+    }
+    // The install wizard targets the exact organization on GitHub
+    // (installations/new/permissions?target_id=…), which needs its numeric
+    // id: resolve and remember it the first time.
+    if (org && org.githubOrgId === null) {
+      try {
+        const ghApp = githubApp(config);
+        if (ghApp) {
+          const { data } = await ghApp.octokit.request("GET /orgs/{org}", { org: org.login });
+          await app.db
+            .update(organizations)
+            .set({ githubOrgId: data.id })
+            .where(eq(organizations.id, room.orgId));
+          org = { ...org, githubOrgId: data.id };
+        }
+      } catch (err) {
+        req.log.warn({ err, org: org.login }, "org id resolution failed");
       }
     }
     const roster = await rosterView(app.db, room.id);

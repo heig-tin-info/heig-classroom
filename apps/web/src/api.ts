@@ -91,7 +91,7 @@ export interface RosterEntry {
 export interface ClassroomDetail {
   id: string;
   name: string;
-  org: { login: string; installationId: number | null } | null;
+  org: { login: string; installationId: number | null; githubOrgId: number | null } | null;
   roster: RosterEntry[];
   appSlug: string | null;
 }
