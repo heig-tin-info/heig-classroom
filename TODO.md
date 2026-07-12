@@ -84,7 +84,19 @@ sans re-diagnostiquer.
   exige `conclusion == success` pour retenir la review), mais l'annotation
   mensongère reste visible sur GitHub.
 - **Correctif visé** : si `GRADING.yml` absent → fail sans annotation GRADE ;
-  release `0.7.1` + bump du shim de `labo-02-quadratic` (et des handouts).
+  release `0.7.2` + bump du shim de `labo-02-quadratic` (et des handouts).
+
+### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
+- **Contexte** (E2E 2026-07-12) : `Commit the review file` pousse
+  `HEAD:master` (échoue toujours en stratégie « commit » : le commit-bot de
+  deadline a fait avancer master — attendu) puis fallback
+  `--force HEAD:refs/heads/grading`. Ce fallback est rejeté si le workflow du
+  sha gelé diffère de celui de master (« refusing to allow a GitHub App to
+  update workflow without `workflows` permission ») — cas rencontré juste
+  après le hot-fix du shim. En régime normal les deux coïncident et ça passe.
+- **Correctif visé (0.7.2)** : pousser la review via l'API contents (créer la
+  ref `grading` sur un sha existant, puis PUT `GRADING.yml` seul) — plus de
+  sensibilité au diff de workflows, et pas besoin d'élargir les permissions.
 
 ## Fonctionnalités reportées
 
