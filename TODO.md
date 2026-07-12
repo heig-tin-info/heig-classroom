@@ -66,11 +66,25 @@ sans re-diagnostiquer.
   donc le push du `grading.yml` passera une fois le 500 réglé.
 
 ### 5. Vérifier le secret `ANTHROPIC_API_KEY` avant le test E2E
-- Le job LLM (tier 2, à la deadline) lit `secrets.ANTHROPIC_API_KEY`. Doit être
-  un secret d'organisation scoppé aux dépôts de la classe sur
-  `heig-test-classroom`. N'a pas pu être vérifié (token `gh` sans `admin:org`).
+- **Confirmé manquant** (E2E du 2026-07-12, run 29186485269 sur
+  `quadratic-2-yves-chevallier`) : `ANTHROPIC_API_KEY` vide dans l'env du job
+  `llm-review` → « Could not resolve authentication method », pas de
+  `GRADING.yml`, pas de commit de review. À poser en secret d'organisation sur
+  `heig-test-classroom` (org admin requis ; token `gh` local sans `admin:org`).
   Procédure documentée dans `docs/guide/grading.md` §« Configuring the Anthropic
   API key ».
+
+### 6. score/grading.yml : ne pas émettre de GRADE quand le job LLM échoue
+- **Problème** : dans le workflow réutilisable (`heig-tin-info/score`,
+  `.github/workflows/grading.yml@0.7.0`), l'étape notice fait
+  `MARK=$(score json GRADING.yml … || echo 1)` : quand l'étape LLM meurt
+  (clé absente, panne API), `GRADING.yml` n'existe pas et le fallback publie
+  quand même `::notice title=GRADE::1/6` — un échec d'infra devient une note
+  étudiante. Côté plateforme c'est maintenant neutralisé (l'ingestion GR-16
+  exige `conclusion == success` pour retenir la review), mais l'annotation
+  mensongère reste visible sur GitHub.
+- **Correctif visé** : si `GRADING.yml` absent → fail sans annotation GRADE ;
+  release `0.7.1` + bump du shim de `labo-02-quadratic` (et des handouts).
 
 ## Fonctionnalités reportées
 

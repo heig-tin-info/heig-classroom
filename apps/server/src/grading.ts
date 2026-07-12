@@ -280,7 +280,11 @@ export async function ingestCompletedRun(
   if (kind === "llm") {
     // GR-16: the review lands in its own slot; the frozen CI grade is
     // untouched (GR-09 selection only ever sees `ci` runs).
-    if (parse.status === "ok") {
+    // A failed workflow never becomes the authoritative review: score's
+    // grading.yml falls back to "GRADE 1/6" when the LLM step dies (e.g.
+    // missing ANTHROPIC_API_KEY), which is an infrastructure failure, not a
+    // student grade. The run row above keeps the trace for debugging.
+    if (parse.status === "ok" && run.conclusion === "success") {
       await app.db
         .update(studentRepos)
         .set({ llmGradeRunId: id })
