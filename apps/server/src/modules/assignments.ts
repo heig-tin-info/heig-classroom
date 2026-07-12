@@ -699,33 +699,68 @@ export async function assignmentsPlugin(
     },
   );
 
-  // --- Repository activity for the expandable row (commits + timeline) ---
+  // --- Repository activity for the expandable row: commits across every
+  //     branch (with parents, so the client can draw a git graph), the branch
+  //     heads, and the test counters of every captured grading run. ---
   app.get(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/activity",
     { preHandler: requireTeacher },
     async (req, reply) => {
       const owned = await ownedStudentRepo(req, reply);
       if (!owned) return reply;
-      if (owned.org.installationId === null) return { commits: [] };
+      const empty = { commits: [], branches: [], tests: [] };
+      if (owned.org.installationId === null) return empty;
       const client = await installationClient(config, owned.org.installationId);
       const repoName = owned.repo.fullName!.split("/")[1]!;
+
+      // Test counters over time (TESTS annotation, score ≥ 0.7.2).
+      const tests = await app.db
+        .select({
+          date: gradeRuns.completedAt,
+          passed: gradeRuns.testsPassed,
+          total: gradeRuns.testsTotal,
+        })
+        .from(gradeRuns)
+        .where(and(eq(gradeRuns.studentRepoId, owned.repo.id), isNotNull(gradeRuns.testsTotal)))
+        .orderBy(gradeRuns.completedAt);
+
       try {
-        const { data } = await client.octokit.request("GET /repos/{owner}/{repo}/commits", {
-          owner: owned.org.login,
-          repo: repoName,
-          per_page: 100,
-        });
-        return {
-          commits: data.map((c) => ({
-            sha: c.sha,
-            message: (c.commit.message ?? "").split("\n")[0],
-            author: c.commit.author?.name ?? c.author?.login ?? "",
-            date: c.commit.author?.date ?? null,
-          })),
-        };
+        const { data: branchData } = await client.octokit.request(
+          "GET /repos/{owner}/{repo}/branches",
+          { owner: owned.org.login, repo: repoName, per_page: 10 },
+        );
+        const branches = branchData.map((b) => ({ name: b.name, headSha: b.commit.sha }));
+        // One listing per branch (capped), merged by sha: enough to draw the
+        // graph without walking the whole object database.
+        const bySha = new Map<
+          string,
+          { sha: string; message: string; author: string; date: string | null; parents: string[] }
+        >();
+        for (const branch of branches.slice(0, 6)) {
+          const { data } = await client.octokit.request("GET /repos/{owner}/{repo}/commits", {
+            owner: owned.org.login,
+            repo: repoName,
+            sha: branch.name,
+            per_page: 100,
+          });
+          for (const c of data) {
+            if (bySha.has(c.sha)) continue;
+            bySha.set(c.sha, {
+              sha: c.sha,
+              message: (c.commit.message ?? "").split("\n")[0]!,
+              author: c.commit.author?.name ?? c.author?.login ?? "",
+              date: c.commit.author?.date ?? null,
+              parents: (c.parents ?? []).map((p) => p.sha),
+            });
+          }
+        }
+        const commits = [...bySha.values()]
+          .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
+          .slice(0, 150);
+        return { commits, branches, tests };
       } catch (err) {
         // 409: empty git repository — legitimate for a fresh assignment.
-        if ((err as { status?: number }).status === 409) return { commits: [] };
+        if ((err as { status?: number }).status === 409) return { ...empty, tests };
         throw err;
       }
     },
