@@ -31,6 +31,8 @@ import { Badge, Button, GithubIcon, isoDateTime, Modal } from "./ui";
 export interface GradeView {
   points: number | null;
   max: number | null;
+  testsPassed: number | null;
+  testsTotal: number | null;
   parseStatus: "ok" | "no_annotation" | "malformed" | "multiple" | "fallback";
   conclusion: string;
   sha: string;
@@ -80,7 +82,21 @@ interface Detail {
   students: DetailStudent[];
 }
 
-function CiBadge({ s }: { s: DetailStudent["repo"] }) {
+function CiBadge({ s, tests }: { s: DetailStudent["repo"]; tests?: GradeView | null }) {
+  // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
+  // counts: "2/10 tests" says more than "pass 1/1".
+  if (tests?.testsTotal) {
+    const p = tests.testsPassed ?? 0;
+    const t = tests.testsTotal;
+    return (
+      <Badge
+        tone={p === t ? "green" : p === 0 ? "red" : "amber"}
+        icon={p === t ? CheckCircle2 : XCircle}
+      >
+        {p}/{t} tests
+      </Badge>
+    );
+  }
   if (!s || s.ciStatus === "none") return <span className="text-zinc-400">—</span>;
   const checks =
     s.checksPassed !== null && s.checksTotal !== null ? ` ${s.checksPassed}/${s.checksTotal}` : "";
@@ -552,7 +568,7 @@ function StudentRow({
       </td>
       <td className={`${cell} text-right`}>{r?.commitCount ?? "—"}</td>
       <td className={cell}>
-        <CiBadge s={r} />
+        <CiBadge s={r} tests={frozen ? (r?.frozenGrade ?? r?.grade) : r?.grade} />
       </td>
       <td className={`${cell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1">

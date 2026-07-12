@@ -74,17 +74,14 @@ sans re-diagnostiquer.
   Procédure documentée dans `docs/guide/grading.md` §« Configuring the Anthropic
   API key ».
 
-### 6. score/grading.yml : ne pas émettre de GRADE quand le job LLM échoue
-- **Problème** : dans le workflow réutilisable (`heig-tin-info/score`,
-  `.github/workflows/grading.yml@0.7.0`), l'étape notice fait
-  `MARK=$(score json GRADING.yml … || echo 1)` : quand l'étape LLM meurt
-  (clé absente, panne API), `GRADING.yml` n'existe pas et le fallback publie
-  quand même `::notice title=GRADE::1/6` — un échec d'infra devient une note
-  étudiante. Côté plateforme c'est maintenant neutralisé (l'ingestion GR-16
-  exige `conclusion == success` pour retenir la review), mais l'annotation
-  mensongère reste visible sur GitHub.
-- **Correctif visé** : si `GRADING.yml` absent → fail sans annotation GRADE ;
-  release `0.7.2` + bump du shim de `labo-02-quadratic` (et des handouts).
+### 6. ~~score/grading.yml : ne pas émettre de GRADE quand le job LLM échoue~~ — RÉGLÉ (0.7.2)
+- Corrigé dans `score@0.7.2` (2026-07-12) : `GRADING.yml` absent → le job
+  échoue avec une annotation d'erreur, sans GRADE. La release apporte aussi
+  l'annotation `TESTS::passed/total` (compteurs réels affichés par la
+  plateforme) et le bump des actions Node 24 (checkout@v7, setup-python@v6,
+  upload-artifact@v7). Shims bumpés : canonique + source/squashed/étudiant de
+  l'assignment actif. Les squashed/étudiants des assignments verrouillés
+  restent à 0.7.1 (sans effet tant qu'ils ne sont pas réouverts).
 
 ### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
 - **Contexte** (E2E 2026-07-12) : `Commit the review file` pousse

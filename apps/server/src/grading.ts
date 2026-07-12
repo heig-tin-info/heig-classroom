@@ -17,6 +17,8 @@ import { publish } from "./events.js";
 import { mailRecipient, queueEmail } from "./mailer.js";
 
 export const GRADING_WORKFLOW_PATH = ".github/workflows/grading.yml";
+/** Raw test counters notice published by score ≥ 0.7.2 ("passed/total"). */
+export const TESTS_ANNOTATION_TITLE = "TESTS";
 
 export interface RepoCtx {
   repo: typeof studentRepos.$inferSelect;
@@ -119,6 +121,8 @@ export async function selectGradeRun(
 export interface GradeView {
   points: number | null;
   max: number | null;
+  testsPassed: number | null;
+  testsTotal: number | null;
   parseStatus: string;
   conclusion: string;
   sha: string;
@@ -132,6 +136,8 @@ export function gradeView(run: typeof gradeRuns.$inferSelect): GradeView {
   return {
     points: run.gradePoints,
     max: run.gradeMax,
+    testsPassed: run.testsPassed,
+    testsTotal: run.testsTotal,
     parseStatus: run.parseStatus,
     conclusion: run.conclusion,
     sha: run.headSha,
@@ -159,7 +165,7 @@ async function extractGradeFromChecks(
   fullName: string,
   headSha: string,
   checkSuiteId: number | null,
-): Promise<ReturnType<typeof extractGrade>> {
+): Promise<{ grade: ReturnType<typeof extractGrade>; tests: { passed: number; total: number } | null }> {
   const [owner, repo] = fullName.split("/") as [string, string];
   const { data: checks } = await octokit.request(
     "GET /repos/{owner}/{repo}/commits/{ref}/check-runs",
@@ -169,6 +175,8 @@ async function extractGradeFromChecks(
     (c) => checkSuiteId === null || c.check_suite?.id === checkSuiteId,
   );
   const annotations: { title: string | null; message: string | null }[] = [];
+  // Raw test counters published by score ≥ 0.7.2 alongside the mark.
+  let tests: { passed: number; total: number } | null = null;
   for (const check of runs) {
     if (!check.output?.annotations_count) continue;
     const { data } = await octokit.request(
@@ -176,12 +184,16 @@ async function extractGradeFromChecks(
       { owner, repo, check_run_id: check.id, per_page: 100 },
     );
     for (const a of data) {
-      if (a.annotation_level === "notice" && a.title === GRADE_ANNOTATION_TITLE) {
+      if (a.annotation_level !== "notice") continue;
+      if (a.title === GRADE_ANNOTATION_TITLE) {
         annotations.push({ title: a.title, message: a.message });
+      } else if (a.title === TESTS_ANNOTATION_TITLE) {
+        const m = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(a.message ?? "");
+        if (m) tests = { passed: Number(m[1]), total: Number(m[2]) };
       }
     }
   }
-  return extractGrade(annotations);
+  return { grade: extractGrade(annotations), tests };
 }
 
 /** GR-06: pass/fail aggregation of all runs of a commit (ci_status reference). */
@@ -239,13 +251,16 @@ export async function ingestCompletedRun(
   if (existing.length > 0) return null; // already captured, nothing to redo
 
   let parse: ReturnType<typeof extractGrade>;
+  let tests: { passed: number; total: number } | null = null;
   if (run.path === GRADING_WORKFLOW_PATH) {
-    parse = await extractGradeFromChecks(
+    const extracted = await extractGradeFromChecks(
       octokit,
       ctx.repo.fullName!,
       run.headSha,
       run.checkSuiteId,
     );
+    parse = extracted.grade;
+    tests = extracted.tests;
   } else {
     // Repo/workflow outside the grading.yml convention: GradeRun without a grade (GR-06).
     parse = { status: "no_annotation" };
@@ -265,6 +280,8 @@ export async function ingestCompletedRun(
       conclusion: run.conclusion,
       gradePoints: parse.status === "ok" ? parse.points : null,
       gradeMax: parse.status === "ok" ? parse.max : null,
+      testsPassed: tests?.passed ?? null,
+      testsTotal: tests?.total ?? null,
       parseStatus:
         run.path === GRADING_WORKFLOW_PATH
           ? parse.status

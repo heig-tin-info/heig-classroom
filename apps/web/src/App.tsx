@@ -1021,7 +1021,13 @@ function RepoMetrics({ repo }: { repo: StudentRepo }) {
           })}
         </span>
       ) : null}
-      {repo.checksTotal ? (
+      {repo.grade?.testsTotal ? (
+        // Real test counters (TESTS annotation) beat check-run counts.
+        <span className="inline-flex items-center gap-1.5">
+          <TestDonut passed={repo.grade.testsPassed ?? 0} total={repo.grade.testsTotal} size={40} />
+          <span className="text-xs text-zinc-400">{t("student.tests")}</span>
+        </span>
+      ) : repo.checksTotal ? (
         <span className="inline-flex items-center gap-1.5">
           <TestDonut passed={repo.checksPassed ?? 0} total={repo.checksTotal} size={40} />
           <span className="text-xs text-zinc-400">{t("student.tests")}</span>

@@ -273,6 +273,9 @@ export const gradeRuns = pgTable(
     conclusion: text("conclusion").notNull(),
     gradePoints: doublePrecision("grade_points"),
     gradeMax: doublePrecision("grade_max"),
+    /** Raw test counters from the TESTS annotation (score ≥ 0.7.2), if any. */
+    testsPassed: integer("tests_passed"),
+    testsTotal: integer("tests_total"),
     parseStatus: text("parse_status", {
       enum: ["ok", "no_annotation", "malformed", "multiple", "fallback"],
     }).notNull(),
