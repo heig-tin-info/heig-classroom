@@ -30,7 +30,7 @@ export async function createSession(db: Db, userId: string, ttlHours: number) {
   return { token, csrf, expiresAt };
 }
 
-export async function findSessionUser(db: Db, token: string) {
+export async function findSessionUser(db: Db, token: string, opts?: { renewTtlHours?: number }) {
   const rows = await db
     .select({ user: users, expiresAt: sessions.expiresAt, sidHash: sessions.sidHash })
     .from(sessions)
@@ -43,7 +43,20 @@ export async function findSessionUser(db: Db, token: string) {
     await db.delete(sessions).where(eq(sessions.sidHash, row.sidHash));
     return null;
   }
-  return row.user;
+  // Sliding renewal: once less than half the TTL remains, push the expiry
+  // back to a full TTL. Active users stay signed in indefinitely; an idle
+  // session still dies after SESSION_TTL_HOURS. At most one UPDATE per
+  // half-TTL window, so the per-request cost stays nil.
+  let renewedTo: Date | null = null;
+  const ttlMs = (opts?.renewTtlHours ?? 0) * 3_600_000;
+  if (ttlMs > 0 && row.expiresAt.getTime() - Date.now() < ttlMs / 2) {
+    renewedTo = new Date(Date.now() + ttlMs);
+    await db
+      .update(sessions)
+      .set({ expiresAt: renewedTo })
+      .where(eq(sessions.sidHash, row.sidHash));
+  }
+  return { user: row.user, renewedTo };
 }
 
 export async function deleteSession(db: Db, token: string) {

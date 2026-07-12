@@ -88,10 +88,28 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
 
   // --- Session resolution on every request ---
   app.decorateRequest("user", null);
-  app.addHook("preHandler", async (req) => {
+  app.addHook("preHandler", async (req, reply) => {
     const token = req.cookies[SESSION_COOKIE];
     if (!token) return;
-    req.user = await findSessionUser(app.db, token);
+    const found = await findSessionUser(app.db, token, {
+      renewTtlHours: config.SESSION_TTL_HOURS,
+    });
+    if (!found) return;
+    req.user = found.user;
+    // Mirror the sliding renewal on the cookies, else the browser drops them
+    // while the server-side session is still alive.
+    if (found.renewedTo) {
+      const base = { path: "/", sameSite: "lax", secure } as const;
+      reply.setCookie(SESSION_COOKIE, token, {
+        ...base,
+        httpOnly: true,
+        expires: found.renewedTo,
+      });
+      const csrf = req.cookies[CSRF_COOKIE];
+      if (csrf) {
+        reply.setCookie(CSRF_COOKIE, csrf, { ...base, httpOnly: false, expires: found.renewedTo });
+      }
+    }
   });
 
   // --- Reusable guards ---

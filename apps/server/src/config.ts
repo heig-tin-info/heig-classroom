@@ -42,8 +42,12 @@ const EnvSchema = z.object({
 
   /** Signs the login state cookies (not the sessions, which live in the database). */
   COOKIE_SECRET: z.string().min(16).default("dev-cookie-secret-change-me"),
-  /** Session lifetime (AU-06: 12 h by default). */
-  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(72).default(12),
+  /**
+   * Session idle timeout (AU-06: 12 h by default). Sessions renew while in
+   * use (sliding expiry), so this bounds the inactivity gap, not the total
+   * signed-in time. 720 h = 30 days.
+   */
+  SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(12),
   /**
    * Super administrator (H2 revision, 2026-07-07): the only email managed
    * through the environment. Teachers are managed in the database, from the
