@@ -61,6 +61,7 @@ export interface ClassroomSummary {
   name: string;
   orgLogin: string;
   createdAt: string;
+  archivedAt: string | null;
   students: number;
   claimed: number;
   assignments: {

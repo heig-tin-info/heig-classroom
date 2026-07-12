@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
@@ -91,12 +91,15 @@ export async function classroomsPlugin(
   });
 
   app.get("/app/api/classrooms", { preHandler: requireTeacher }, async (req) => {
+    // ?archived=1 lists the archive instead of the active classrooms.
+    const archived = (req.query as { archived?: string }).archived === "1";
     const rows = await app.db
       .select({
         id: classrooms.id,
         name: classrooms.name,
         orgLogin: organizations.login,
         createdAt: classrooms.createdAt,
+        archivedAt: classrooms.archivedAt,
         // Staff seats (teacher self-enroll) are not part of the headcount.
         students: sql<number>`count(${enrollments.id}) filter (where not ${enrollments.staff})::int`,
         claimed: sql<number>`count(${enrollments.id}) filter (where ${enrollments.status} = 'claimed' and not ${enrollments.staff})::int`,
@@ -104,7 +107,12 @@ export async function classroomsPlugin(
       .from(classrooms)
       .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
       .leftJoin(enrollments, eq(enrollments.classroomId, classrooms.id))
-      .where(and(eq(classrooms.teacherId, req.user!.id), isNull(classrooms.archivedAt)))
+      .where(
+        and(
+          eq(classrooms.teacherId, req.user!.id),
+          archived ? isNotNull(classrooms.archivedAt) : isNull(classrooms.archivedAt),
+        ),
+      )
       .groupBy(classrooms.id, organizations.login)
       .orderBy(classrooms.createdAt);
 
@@ -237,6 +245,28 @@ export async function classroomsPlugin(
         actorUserId: req.user!.id,
         actorType: "user",
         action: "classroom.archive",
+        subjectType: "classroom",
+        subjectId: room.id,
+        payload: { name: room.name },
+      });
+      return reply.code(204).send();
+    },
+  );
+
+  app.post(
+    "/app/api/classrooms/:id/unarchive",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await ownedClassroom(req, reply);
+      if (!room) return reply;
+      await app.db
+        .update(classrooms)
+        .set({ archivedAt: null })
+        .where(eq(classrooms.id, room.id));
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "classroom.unarchive",
         subjectType: "classroom",
         subjectId: room.id,
         payload: { name: room.name },

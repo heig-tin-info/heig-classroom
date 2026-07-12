@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
+  ArchiveRestore,
   ArrowDown,
   ArrowUp,
   BookOpen,
@@ -689,9 +690,21 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
     setMode(m);
     localStorage.setItem("hgc-classrooms-view", m);
   };
+  const [showArchives, setShowArchives] = useState(false);
   const rooms = useQuery<ClassroomSummary[]>({
     queryKey: ["classrooms"],
     queryFn: () => api("/app/api/classrooms"),
+  });
+  const archivedRooms = useQuery<ClassroomSummary[]>({
+    queryKey: ["classrooms", "archived"],
+    queryFn: () => api("/app/api/classrooms?archived=1"),
+    enabled: showArchives,
+  });
+  const unarchive = useMutation({
+    mutationFn: (id: string) => api(`/app/api/classrooms/${id}/unarchive`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+    },
   });
   const installedOrgs = useQuery<string[]>({
     queryKey: ["installed-orgs"],
@@ -750,9 +763,67 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
           {toggle("list", List, t("view.list"))}
           {toggle("timeline", CalendarRange, t("view.timeline"))}
         </span>
+        <button
+          aria-label={t("classrooms.archives")}
+          title={t("classrooms.archives")}
+          aria-pressed={showArchives}
+          onClick={() => setShowArchives((v) => !v)}
+          className={`rounded-lg p-2 transition-colors ${
+            showArchives
+              ? "bg-accent/10 text-accent hover:bg-accent/20"
+              : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          }`}
+        >
+          <Archive className="size-4" />
+        </button>
       </div>
 
-      {rooms.data?.length ? (
+      {showArchives ? (
+        // The archive: read-only cards, one click to restore. The active
+        // views below stay untouched while browsing here.
+        (() => {
+          const archived = fuzzyFilter(
+            query,
+            archivedRooms.data ?? [],
+            (r) => `${r.name} ${r.orgLogin}`,
+          );
+          return archived.length ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {archived.map((c) => (
+                <Card key={c.id} className="p-4 opacity-80">
+                  <div className="flex items-center gap-2">
+                    <OrgAvatar login={c.orgLogin} className="size-6" />
+                    <span className="font-medium">{c.name}</span>
+                    <Badge tone="zinc" icon={Archive}>
+                      {t("classrooms.archived")}
+                    </Badge>
+                    <span className="flex-1" />
+                    <Button
+                      variant="subtle"
+                      onClick={() => unarchive.mutate(c.id)}
+                      disabled={unarchive.isPending}
+                    >
+                      <ArchiveRestore className="size-4" /> {t("classrooms.restore")}
+                    </Button>
+                  </div>
+                  <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+                    <OrgLink login={c.orgLogin} />
+                    {c.archivedAt ? (
+                      <span>· {t("classrooms.archivedOn", { date: c.archivedAt.slice(0, 10) })}</span>
+                    ) : null}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          ) : (
+            <Card>
+              <EmptyState icon={Archive} title={t("classrooms.archives.empty")}>
+                {t("classrooms.archives.emptyBody")}
+              </EmptyState>
+            </Card>
+          );
+        })()
+      ) : rooms.data?.length ? (
         mode === "timeline" ? (
           <TimelineView
             rooms={filtered}

@@ -203,10 +203,17 @@ export async function assignmentsPlugin(
     async (req, reply) => {
       const owned = await ownedClassroomWithOrg(req, reply);
       if (!owned) return reply;
+      // ?archived=1 lists the archive instead of the active assignments.
+      const archived = (req.query as { archived?: string }).archived === "1";
       return app.db
         .select()
         .from(assignments)
-        .where(and(eq(assignments.classroomId, owned.room.id), isNull(assignments.archivedAt)))
+        .where(
+          and(
+            eq(assignments.classroomId, owned.room.id),
+            archived ? isNotNull(assignments.archivedAt) : isNull(assignments.archivedAt),
+          ),
+        )
         .orderBy(desc(assignments.createdAt));
     },
   );
@@ -779,6 +786,28 @@ export async function assignmentsPlugin(
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.archive",
+        subjectType: "assignment",
+        subjectId: owned.assignment.id,
+      });
+      return updated;
+    },
+  );
+
+  app.post(
+    "/app/api/classrooms/:id/assignments/:aid/unarchive",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(req, reply);
+      if (!owned) return reply;
+      const [updated] = await app.db
+        .update(assignments)
+        .set({ archivedAt: null })
+        .where(eq(assignments.id, owned.assignment.id))
+        .returning();
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "assignment.unarchive",
         subjectType: "assignment",
         subjectId: owned.assignment.id,
       });

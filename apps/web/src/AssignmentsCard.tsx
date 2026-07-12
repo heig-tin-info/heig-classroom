@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
+  ArchiveRestore,
   Send,
   CalendarClock,
   ClipboardList,
@@ -487,17 +488,23 @@ function AssignmentRow({
   assignment: a,
   onEdit,
   onOpen,
+  archived = false,
 }: {
   classroomId: string;
   assignment: Assignment;
   onEdit: () => void;
   onOpen: () => void;
+  archived?: boolean;
 }) {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["assignments", classroomId] });
   const base = `/app/api/classrooms/${classroomId}/assignments/${a.id}`;
   const archive = useMutation({
     mutationFn: () => api(`${base}/archive`, { method: "POST" }),
+    onSuccess: invalidate,
+  });
+  const unarchive = useMutation({
+    mutationFn: () => api(`${base}/unarchive`, { method: "POST" }),
     onSuccess: invalidate,
   });
   const publish = useMutation({
@@ -524,6 +531,11 @@ function AssignmentRow({
             {a.name}
           </button>
           <StateBadge state={a.state} />
+          {archived ? (
+            <Badge tone="zinc" icon={Archive}>
+              archived
+            </Badge>
+          ) : null}
           <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
             <CalendarClock className="size-3.5" />
             {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
@@ -535,7 +547,16 @@ function AssignmentRow({
         </div>
       </div>
       <span className="flex shrink-0 items-center">
-        {a.state === "draft" ? (
+        {archived ? (
+          <IconButton
+            label="Restore"
+            onClick={() => unarchive.mutate()}
+            disabled={unarchive.isPending}
+          >
+            <ArchiveRestore className="size-4" />
+          </IconButton>
+        ) : null}
+        {!archived && a.state === "draft" ? (
           <IconButton
             label="Publish"
             onClick={() => {
@@ -555,18 +576,22 @@ function AssignmentRow({
         {/* Editable at every stage: moving the deadline of an expired
             assignment into the future reopens it (repos unlocked, grading
             resumes until the new deadline). */}
-        <IconButton label="Edit" onClick={onEdit}>
-          <Pencil className="size-4" />
-        </IconButton>
-        <IconButton
-          label="Archive"
-          onClick={() => {
-            if (window.confirm(`Archive “${a.name}”?`)) archive.mutate();
-          }}
-        >
-          <Archive className="size-4" />
-        </IconButton>
-        {a.state === "draft" ? (
+        {!archived ? (
+          <>
+            <IconButton label="Edit" onClick={onEdit}>
+              <Pencil className="size-4" />
+            </IconButton>
+            <IconButton
+              label="Archive"
+              onClick={() => {
+                if (window.confirm(`Archive “${a.name}”?`)) archive.mutate();
+              }}
+            >
+              <Archive className="size-4" />
+            </IconButton>
+          </>
+        ) : null}
+        {!archived && a.state === "draft" ? (
           <IconButton
             label="Delete"
             danger
@@ -599,9 +624,11 @@ export function AssignmentsCard({
   onOpenAssignment: (assignmentId: string) => void;
 }) {
   const [modal, setModal] = useState<"create" | Assignment | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const list = useQuery<Assignment[]>({
-    queryKey: ["assignments", classroomId],
-    queryFn: () => api(`/app/api/classrooms/${classroomId}/assignments`),
+    queryKey: ["assignments", classroomId, showArchived ? "archived" : "active"],
+    queryFn: () =>
+      api(`/app/api/classrooms/${classroomId}/assignments${showArchived ? "?archived=1" : ""}`),
   });
 
   return (
@@ -611,6 +638,19 @@ export function AssignmentsCard({
         <h2 className="font-medium">Assignments</h2>
         <HelpIcon topic="assignments" />
         <span className="flex-1" />
+        <button
+          aria-label="Archives"
+          title="Archives"
+          aria-pressed={showArchived}
+          onClick={() => setShowArchived((v) => !v)}
+          className={`rounded-lg p-2 transition-colors ${
+            showArchived
+              ? "bg-accent/10 text-accent hover:bg-accent/20"
+              : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+          }`}
+        >
+          <Archive className="size-4" />
+        </button>
         {appInstalled ? (
           <Button onClick={() => setModal("create")}>
             <Plus className="size-4" /> New assignment
@@ -631,11 +671,16 @@ export function AssignmentsCard({
               key={a.id}
               classroomId={classroomId}
               assignment={a}
+              archived={showArchived}
               onEdit={() => setModal(a)}
               onOpen={() => onOpenAssignment(a.id)}
             />
           ))}
         </ul>
+      ) : showArchived ? (
+        <EmptyState icon={Archive} title="No archived assignments">
+          Assignments you archive end up here and can be restored.
+        </EmptyState>
       ) : appInstalled ? (
         <EmptyState icon={ClipboardList} title="No assignments yet">
           Create the first assignment from a source repository of the organization.
