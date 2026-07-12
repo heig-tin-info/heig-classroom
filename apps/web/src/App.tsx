@@ -975,7 +975,8 @@ function RepoMetrics({ repo }: { repo: StudentRepo }) {
   );
 }
 
-function StudentAssignment({
+/** One assignment as a table row; the action (accept / open repo) sits right. */
+function StudentAssignmentRow({
   a,
   githubLinked,
 }: {
@@ -993,42 +994,72 @@ function StudentAssignment({
       ? ((accept.error.body as { message?: string })?.message ?? "Acceptance failed")
       : null;
   const locked = a.state === "locked" || a.repo?.lockedAt != null;
+  const accepted = a.repo?.provisionStatus === "ok" && a.repo.fullName;
+  const cell = "px-4 py-2.5 align-middle";
 
   return (
-    <li className={`space-y-1.5 py-2.5 text-sm ${locked ? "opacity-60" : ""}`}>
-      <div className="flex flex-wrap items-center gap-2">
-        {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
-        <span className="font-medium">{a.name}</span>
-        {locked ? <Badge tone="red">{t("student.locked")}</Badge> : null}
-        <span className="flex-1" />
-        <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-          <Clock className="size-3.5" /> {isoDateTime(a.deadlineAt)}
-        </span>
-        <Countdown deadline={a.deadlineAt} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        {a.repo?.provisionStatus === "ok" && a.repo.fullName ? (
-          <>
+    <tr className={`text-sm ${locked ? "opacity-60" : ""}`}>
+      <td className={`${cell} font-medium`}>
+        <span className="inline-flex items-center gap-1.5">
+          {locked ? <Lock className="size-3.5 shrink-0 text-zinc-400" /> : null}
+          {accepted ? (
             <a
-              href={`https://github.com/${a.repo.fullName}`}
+              href={`https://github.com/${a.repo!.fullName}`}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+              className="hover:text-accent hover:underline"
             >
-              <GithubIcon className="size-4" /> {t("student.openRepo")}
+              {a.name}
             </a>
-            {a.repo.invitationStatus === "pending" ? (
-              <span className="text-xs text-amber-600 dark:text-amber-400">
-                {t("student.acceptInvite")}
-              </span>
-            ) : null}
-            <RepoMetrics repo={a.repo} />
-          </>
+          ) : (
+            a.name
+          )}
+        </span>
+      </td>
+      <td className={cell}>
+        <div className="flex flex-col">
+          <span className="whitespace-nowrap text-zinc-500 dark:text-zinc-400">
+            {isoDateTime(a.deadlineAt)}
+          </span>
+          <span className="text-xs">
+            <Countdown deadline={a.deadlineAt} />
+          </span>
+        </div>
+      </td>
+      <td className={cell}>
+        {locked ? (
+          <Badge tone="red">{t("student.locked")}</Badge>
+        ) : accepted ? (
+          <Badge tone="green" icon={CheckCircle2}>
+            {t("status.accepted")}
+          </Badge>
+        ) : (
+          <Badge tone="zinc">{t("status.notAccepted")}</Badge>
+        )}
+        {accepted && a.repo!.invitationStatus === "pending" ? (
+          <p className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">
+            {t("student.acceptInvite")}
+          </p>
+        ) : null}
+      </td>
+      <td className={cell}>
+        {accepted ? <RepoMetrics repo={a.repo!} /> : <span className="text-zinc-400">—</span>}
+      </td>
+      <td className={`${cell} text-right`}>
+        {accepted ? (
+          <a
+            href={`https://github.com/${a.repo!.fullName}`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+          >
+            <GithubIcon className="size-4" /> {t("student.openRepo")}
+          </a>
         ) : (
           <>
             <Button
               onClick={() => accept.mutate()}
-              disabled={accept.isPending || !githubLinked}
+              disabled={accept.isPending || !githubLinked || locked}
               title={githubLinked ? undefined : t("student.linkPrompt")}
             >
               {accept.isPending ? (
@@ -1042,12 +1073,117 @@ function StudentAssignment({
               )}
             </Button>
             {acceptError ? (
-              <span className="text-xs text-red-600 dark:text-red-400">{acceptError}</span>
+              <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{acceptError}</p>
             ) : null}
           </>
         )}
+      </td>
+    </tr>
+  );
+}
+
+type StudentSortKey = "name" | "deadline" | "status" | "grade";
+
+/**
+ * One classroom as a full-width card holding a sortable assignment table.
+ * The global search filters the rows (a hit on the classroom name keeps
+ * everything); a classroom with no match disappears entirely.
+ */
+function StudentClassroomCard({
+  room,
+  githubLinked,
+  query,
+}: {
+  room: StudentClassroom;
+  githubLinked: boolean;
+  query: string;
+}) {
+  const t = useT();
+  const [sort, setSort] = useState<{ key: StudentSortKey; dir: 1 | -1 }>({
+    key: "deadline",
+    dir: 1,
+  });
+
+  const roomHit = query === "" || fuzzyFilter(query, [room], (r) => r.name).length > 0;
+  const visible = roomHit ? room.assignments : fuzzyFilter(query, room.assignments, (a) => a.name);
+  if (query !== "" && visible.length === 0) return null;
+
+  const rank = {
+    name: (a: StudentAssignmentT) => a.name.toLowerCase(),
+    deadline: (a: StudentAssignmentT) => new Date(a.deadlineAt).getTime(),
+    status: (a: StudentAssignmentT) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
+    grade: (a: StudentAssignmentT) =>
+      a.repo?.grade && a.repo.grade.parseStatus === "ok"
+        ? a.repo.grade.points! / (a.repo.grade.max! || 1)
+        : -1,
+  }[sort.key];
+  const sorted = [...visible].sort((a, b) => {
+    const va = rank(a);
+    const vb = rank(b);
+    return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
+  });
+
+  const Th = ({
+    k,
+    children,
+    className = "",
+  }: {
+    k: StudentSortKey;
+    children: React.ReactNode;
+    className?: string;
+  }) => (
+    <th className={`px-4 py-2 ${className}`}>
+      <button
+        onClick={() => setSort((s) => (s.key === k ? { key: k, dir: -s.dir as 1 | -1 } : { key: k, dir: 1 }))}
+        className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-700 dark:hover:text-zinc-200"
+      >
+        {children}
+        {sort.key === k ? (
+          sort.dir === 1 ? (
+            <ArrowUp className="size-3" />
+          ) : (
+            <ArrowDown className="size-3" />
+          )
+        ) : null}
+      </button>
+    </th>
+  );
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex flex-wrap items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
+        <OrgAvatar login={room.orgLogin} className="size-6" />
+        <span className="font-medium">{room.name}</span>
+        <span className="inline-flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
+          <span className="inline-flex items-center gap-1">
+            <Building2 className="size-3.5" /> {room.orgLogin}
+          </span>
+          <span>· {room.teacher}</span>
+        </span>
       </div>
-    </li>
+      {sorted.length ? (
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
+                <Th k="name">{t("nav.assignment")}</Th>
+                <Th k="deadline">{t("student.deadlineCol")}</Th>
+                <Th k="status">{t("assignment.col.status")}</Th>
+                <Th k="grade">{t("assignment.col.grade")}</Th>
+                <th />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+              {sorted.map((a) => (
+                <StudentAssignmentRow key={a.id} a={a} githubLinked={githubLinked} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="px-4 py-3 text-sm text-zinc-400">{t("student.noAssignments")}</p>
+      )}
+    </Card>
   );
 }
 
@@ -1076,7 +1212,6 @@ function StudentHome({ me }: { me: Me }) {
     room.assignments.map((a) => ({ room, a })),
   );
   const filteredFlat = fuzzyFilter(query, flat, ({ room, a }) => `${a.name} ${room.name}`);
-  const roomMatches = fuzzyFilter(query, rooms.data ?? [], (r) => r.name);
   const cell = "px-3 py-2";
 
   const toggle = (v: StudentView, Icon: typeof LayoutGrid, label: string) => (
@@ -1199,29 +1334,9 @@ function StudentHome({ me }: { me: Me }) {
           </div>
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {roomMatches.map((room) => (
-            <Card key={room.id} className="p-4">
-              <div className="flex items-center gap-2">
-                <OrgAvatar login={room.orgLogin} className="size-6" />
-                <span className="font-medium">{room.name}</span>
-              </div>
-              <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
-                <span className="inline-flex items-center gap-1">
-                  <Building2 className="size-3.5" /> {room.orgLogin}
-                </span>
-                <span>· {room.teacher}</span>
-              </p>
-              {room.assignments.length ? (
-                <ul className="mt-3 divide-y divide-zinc-100 dark:divide-zinc-800">
-                  {room.assignments.map((a) => (
-                    <StudentAssignment key={a.id} a={a} githubLinked={linked} />
-                  ))}
-                </ul>
-              ) : (
-                <p className="mt-3 text-sm text-zinc-400">{t("student.noAssignments")}</p>
-              )}
-            </Card>
+        <div className="space-y-4">
+          {(rooms.data ?? []).map((room) => (
+            <StudentClassroomCard key={room.id} room={room} githubLinked={linked} query={query} />
           ))}
         </div>
       )}
