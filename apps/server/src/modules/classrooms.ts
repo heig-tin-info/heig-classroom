@@ -10,7 +10,12 @@ import { audit } from "../audit.js";
 import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
-import { listInstalledOrgs, orgExistsOnGithub, resolveOrgInstallation } from "../github/app.js";
+import {
+  githubApp,
+  listInstalledOrgs,
+  orgExistsOnGithub,
+  resolveOrgInstallation,
+} from "../github/app.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
 
 const IdParam = z.object({ id: z.uuid() });
@@ -79,6 +84,65 @@ export async function classroomsPlugin(
     }
     return room;
   }
+
+  // GitHub App setup_url: after the owner clicks "Install" on GitHub, the
+  // browser lands here with the installation id. Resolving it right away
+  // (instead of waiting for the lazy GH-04 retry) turns the classroom badge
+  // green the moment the teacher is back. No session needed: the payload is
+  // verified against GitHub with the App JWT, and the update is idempotent.
+  app.get("/setup/github/installed", async (req, reply) => {
+    const q = req.query as { installation_id?: string; state?: string };
+    // `state` carries the classroom to return to (set on the install link).
+    const back =
+      q.state && z.uuid().safeParse(q.state).success ? `/classrooms/${q.state}` : "/";
+    const installationId = Number(q.installation_id);
+    const ghApp = githubApp(config);
+    if (!ghApp || !Number.isInteger(installationId) || installationId <= 0) {
+      return reply.redirect(back, 303);
+    }
+    try {
+      const { data } = await ghApp.octokit.request(
+        "GET /app/installations/{installation_id}",
+        { installation_id: installationId },
+      );
+      const account = data.account as { id?: number; login?: string; type?: string } | null;
+      if (account?.login && account.type === "Organization") {
+        const [org] = await app.db
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(sql`lower(${organizations.login}) = ${account.login.toLowerCase()}`)
+          .limit(1);
+        if (org) {
+          await app.db
+            .update(organizations)
+            .set({
+              installationId,
+              githubOrgId: account.id ?? null,
+              status: "active",
+            })
+            .where(eq(organizations.id, org.id));
+          await audit(app.db, {
+            actorType: "system",
+            action: "org.installation_resolved",
+            subjectType: "organization",
+            subjectId: org.id,
+            payload: { installationId, via: "setup_url" },
+          });
+          const rooms = await app.db
+            .select({ id: classrooms.id, teacherId: classrooms.teacherId })
+            .from(classrooms)
+            .where(eq(classrooms.orgId, org.id));
+          publish(
+            "orgs",
+            rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`]),
+          );
+        }
+      }
+    } catch (err) {
+      req.log.warn({ err, installationId }, "setup_url resolution failed");
+    }
+    return reply.redirect(back, 303);
+  });
 
   // Organizations offered at creation: those where the App is installed.
   app.get("/app/api/orgs", { preHandler: requireTeacher }, async (req) => {

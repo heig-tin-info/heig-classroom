@@ -71,10 +71,13 @@ v2.11.4 h1:XKxkMTgNSizEvKG6QHue6cAsFOteU2qA61w2tKkCWi0=
 ## 3. Applications GitHub de **production** (mêmes écrans qu'en dev, permissions
 GH-02 dans `docs/02-specs-fonctionnelles.md`) :
 
-- **GitHub App** `hgc-prod` : webhook `https://classroom.chevallier.io/webhooks/github`
-  (activable au jalon M3), générer le PEM, **installer sur l'organisation**
-  (All repositories).
-- **OAuth App** : callback `https://classroom.chevallier.io/app/auth/github/callback`.
+- **GitHub App** `hgc-prod` (unique, sert aussi le lien de compte) : webhook
+  `https://classroom.chevallier.io/webhooks/github`, callback
+  `https://classroom.chevallier.io/app/auth/github/callback`, setup URL
+  `https://classroom.chevallier.io/setup/github/installed`, installable sur
+  **Any account** ; générer le PEM + un client secret. L'installation sur chaque
+  org d'enseignement se fait ensuite depuis le portail (wizard de la classe).
+  Voir `docs/guide/github-apps.md`.
 
 ## 4. Code et secrets
 

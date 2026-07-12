@@ -414,6 +414,75 @@ function AssignmentPage({
   );
 }
 
+/**
+ * Guided GitHub App installation. Step 2 keeps the SAME tab: GitHub's
+ * setup_url brings the owner straight back to this classroom, the server
+ * resolves the installation on the way and the badge turns green live (SSE).
+ */
+function InstallWizard({ room }: { room: ClassroomDetail }) {
+  const installUrl = room.appSlug
+    ? `https://github.com/apps/${room.appSlug}/installations/new?state=${room.id}`
+    : null;
+  const StepDot = ({ n, done }: { n: number; done?: boolean }) =>
+    done ? (
+      <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400">
+        <CheckCircle2 className="size-3.5" />
+      </span>
+    ) : (
+      <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+        {n}
+      </span>
+    );
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <GithubIcon className="size-4 text-zinc-400" />
+        <h2 className="font-medium">Connect GitHub</h2>
+      </div>
+      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+        Assignments need the HEIG Classroom GitHub App installed on{" "}
+        <span className="font-medium text-zinc-700 dark:text-zinc-200">{room.org?.login}</span>:
+        it creates the student repositories, receives their pushes and collects the grades.
+      </p>
+      <ol className="space-y-2.5 text-sm">
+        <li className="flex items-start gap-2.5">
+          <StepDot n={1} done />
+          <span className="text-zinc-500 dark:text-zinc-400">
+            The organization <span className="font-mono">{room.org?.login}</span> exists on
+            GitHub.
+          </span>
+        </li>
+        <li className="flex items-start gap-2.5">
+          <StepDot n={2} />
+          <span className="flex flex-wrap items-center gap-2">
+            {installUrl ? (
+              <a
+                href={installUrl}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
+              >
+                <GithubIcon className="size-4" /> Install the GitHub App
+              </a>
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400">
+                The platform's GitHub App is not configured — contact the administrator.
+              </span>
+            )}
+            <span className="text-xs text-zinc-400">
+              You must be an owner of the organization. Pick “All repositories”.
+            </span>
+          </span>
+        </li>
+        <li className="flex items-start gap-2.5">
+          <StepDot n={3} />
+          <span className="text-zinc-500 dark:text-zinc-400">
+            GitHub brings you straight back here — the badge turns green automatically.
+          </span>
+        </li>
+      </ol>
+    </Card>
+  );
+}
+
 function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
   const qc = useQueryClient();
@@ -458,21 +527,9 @@ function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => v
             GitHub App installed
           </Badge>
         ) : (
-          <span className="inline-flex items-center gap-2">
-            <Badge tone="amber" icon={Clock}>
-              GitHub App not installed
-            </Badge>
-            {room.appSlug ? (
-              <a
-                href={`https://github.com/apps/${room.appSlug}/installations/new`}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
-              >
-                <GithubIcon className="size-4" /> Install GitHub App
-              </a>
-            ) : null}
-          </span>
+          <Badge tone="amber" icon={Clock}>
+            GitHub App not installed
+          </Badge>
         )}
         <span className="flex-1" />
         <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
@@ -483,6 +540,8 @@ function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => v
       {showSettings ? (
         <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={() => navigate({ view: "home" })} />
       ) : null}
+
+      {!room.org?.installationId ? <InstallWizard room={room} /> : null}
 
       <AssignmentsCard
         classroomId={room.id}
@@ -948,6 +1007,18 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
             <Plus className="size-4" /> {t("classrooms.create")}
           </Button>
         </form>
+        <p className="mt-2 text-xs text-zinc-400">
+          {t("classrooms.noOrgHint")}{" "}
+          <a
+            href="https://github.com/account/organizations/new?plan=free"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline"
+          >
+            {t("classrooms.noOrgLink")}
+          </a>{" "}
+          {t("classrooms.noOrgHint2")}
+        </p>
         {create.isError ? (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
             {create.error instanceof ApiError

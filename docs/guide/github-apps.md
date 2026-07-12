@@ -1,22 +1,23 @@
-# Setting up the production GitHub applications
+# Setting up the production GitHub App
 
-The portal talks to GitHub through two distinct applications. The GitHub App does
-everything the server does on repositories (provisioning, rulesets, webhooks) and
-signs its work as the `hgc-prod[bot]` identity. The OAuth App only serves one
-purpose: letting students link their GitHub account, with the minimal `read:user`
-scope.
+The portal talks to GitHub through **one single GitHub App**. It does everything
+the server does on repositories (provisioning, rulesets, webhooks) under the
+`hgc-prod[bot]` identity, **and** carries the user-to-server OAuth flow that
+lets students link their GitHub account — a GitHub App accepts up to ten
+callback URLs and its user tokens serve `GET /user` without any scope, so the
+former separate OAuth App is unnecessary.
 
-The development pair (`hgc-dev`, callbacks on `localhost:3000`) stays untouched. A
-GitHub OAuth App accepts a single callback URL, so pointing it at production would
-break local development. Production gets its own pair.
+The App is created **once**; onboarding a new teaching organization is then a
+matter of clicking **Install** from the classroom page (the in-app wizard walks
+the teacher through it — see *Onboarding an organization* below).
 
-## 1. GitHub App `hgc-prod`
+## 1. Create the GitHub App `hgc-prod` (one time)
 
-Create it inside the target organization at
-`https://github.com/organizations/<org>/settings/apps/new` and fill in:
+Create it at `https://github.com/organizations/<home-org>/settings/apps/new`
+and fill in:
 
 - **Name**: `hgc-prod` (the slug becomes the bot identity on commits)
-- **Description** (shown to users on the installation and authorization screens):
+- **Description** (shown on the installation and authorization screens):
 
 ```text
 HEIG Classroom drives the student repositories of this organization: it creates
@@ -26,11 +27,14 @@ Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.
 ```
 
 - **Homepage URL**: `https://classroom.chevallier.io`
-- **Callback URL**: leave empty, and uncheck *Request user authorization (OAuth)
-  during installation* (the App is server-only)
-- **Webhook**: uncheck *Active* for now. It will be enabled with milestone M3,
-  using `https://classroom.chevallier.io/webhooks/github` and a secret generated
-  with `openssl rand -hex 32` (mirrored in `GITHUB_WEBHOOK_SECRET`)
+- **Callback URL**: `https://classroom.chevallier.io/app/auth/github/callback`
+  (used by the account-linking flow), and leave *Request user authorization
+  (OAuth) during installation* **unchecked** — linking stays a separate act.
+- **Setup URL**: `https://classroom.chevallier.io/setup/github/installed` and
+  check *Redirect on update*. This is what makes the install wizard seamless:
+  GitHub sends the owner back to the classroom and the badge turns green live.
+- **Webhook**: *Active*, `https://classroom.chevallier.io/webhooks/github`,
+  secret mirrored in `GITHUB_WEBHOOK_SECRET`.
 - **Repository permissions** (the GH-02 table, nothing more):
 
 | Permission | Level |
@@ -44,40 +48,17 @@ Operated by the TIN department at HEIG-VD. Portal: https://classroom.chevallier.
 | Workflows | Read & write |
 
 - **Organization permissions**: Members, Read (optional)
-- **Subscribe to events**: once the webhook is active, subscribe to **Push**
-  (repository metrics, protected files, source-ahead detection), **Workflow
-  run** (CI status and grading), **Pull request** (sync pull request tracking)
-  and **Member** (clears the "accept the GitHub invitation" hint the moment a
-  student accepts). **Repository** is a useful addition for out-of-band renames.
-  The available checkboxes depend on the permissions above; installation events
+- **Subscribe to events**: **Push**, **Workflow run**, **Pull request**,
+  **Member** (and **Repository** for out-of-band renames). Installation events
   are always delivered to GitHub Apps, no subscription needed.
-- **Where can this App be installed**: *Only on this account*
+- **Where can this App be installed**: **Any account** — this is what lets a
+  teacher install it on a fresh organization with one click. The App stays
+  invisible to search; only people with the install link use it.
 
-Once created, note the **App ID** (the `Iv23…` Client ID works too), generate a
-**private key** under *Private keys* (a `.pem` file downloads), then open
-**Install App** in the left menu and install it on the organization with
-**All repositories**.
+Once created, note the **App ID** and the **Client ID**, generate a **client
+secret** (account linking) and a **private key** (a `.pem` file downloads).
 
-## 2. Production OAuth App
-
-Create it at `https://github.com/organizations/<org>/settings/applications/new`:
-
-- **Application name**: `HEIG Classroom`
-- **Application description**:
-
-```text
-Links your GitHub account to your HEIG Classroom profile so assignments can be
-delivered to you. Read-only access to your public profile, nothing else.
-```
-
-- **Homepage URL**: `https://classroom.chevallier.io`
-- **Authorization callback URL**:
-  `https://classroom.chevallier.io/app/auth/github/callback`
-- Do not check Enable Device Flow
-
-Note the **Client ID** and generate a client secret.
-
-## 3. Install the values on the server
+## 2. Install the values on the server
 
 ```bash
 # From your workstation, ship the downloaded PEM
@@ -91,13 +72,17 @@ chown 1000:1000 /opt/heig-classroom/secrets/hgc-prod.private-key.pem   # contain
 In `/opt/heig-classroom/.env.prod`:
 
 ```bash
-GITHUB_APP_ID=<hgc-prod App ID>
+GITHUB_APP_ID=<App ID>
 GITHUB_APP_PRIVATE_KEY_PATH=secrets/hgc-prod.private-key.pem
 GITHUB_APP_SLUG=hgc-prod
-GITHUB_WEBHOOK_SECRET=            # milestone M3
-GITHUB_OAUTH_CLIENT_ID=<OAuth App Client ID>
-GITHUB_OAUTH_CLIENT_SECRET=<client secret>
+GITHUB_WEBHOOK_SECRET=<webhook secret>
+GITHUB_APP_CLIENT_ID=<Client ID of the App>
+GITHUB_APP_CLIENT_SECRET=<client secret of the App>
 ```
+
+(The legacy `GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET` variables are
+still read as a fallback during the migration; drop them once the App's client
+is in place.)
 
 Then restart the app:
 
@@ -106,20 +91,35 @@ cd /opt/heig-classroom
 docker compose -f compose.prod.yml --env-file .env.prod up -d app
 ```
 
+## 3. Onboarding an organization (what a teacher does)
+
+1. **Create the organization** on GitHub if needed (free plan is fine) —
+   `https://github.com/account/organizations/new`. The classroom creation form
+   links there.
+2. **Create the classroom** in the portal, entering the organization login.
+3. The classroom page shows the **Connect GitHub** wizard: one click on
+   *Install the GitHub App* (the teacher must be an owner of the organization,
+   pick **All repositories**), GitHub validates the permissions and sends them
+   straight back — the badge turns green without a refresh.
+
+Nothing to configure server-side, no secret to transport: one App, N
+installations.
+
 ## 4. Verify
 
-Open a classroom bound to the organization: the **GitHub App installed** badge
-should turn green (installation is resolved on view). In the header, **Link
-GitHub** should walk you through the `read:user` authorization and come back with
-your login as a green badge. Finally, publish a test assignment and accept it
-with a student account: the `slug-<login>` repository appears in the
+In the header, **Link GitHub** should walk you through the App authorization
+and come back with your login as a green badge. Publish a test assignment and
+accept it with a student account: the `slug-<login>` repository appears in the
 organization, protected by the `hgc-protect` ruleset.
 
 ## Notes
 
-One App installed per teaching organization is all it takes; the same App serves
-every classroom bound to that organization. The PEM key never goes into git or
-into the database (ADR-010), keep an encrypted copy in the vault. GitHub accepts
-two active keys at once, which makes rotation painless. Switching from the dev App
-to the prod App does not invalidate repositories that were already provisioned, as
-long as the new App is installed on the same organization.
+The same App serves every classroom of every organization it is installed on.
+The PEM key never goes into git or into the database (ADR-010); keep an
+encrypted copy in the vault. GitHub accepts two active keys at once, which
+makes rotation painless. Rate limits are **per installation**, so organizations
+do not compete with each other. The trade-off of the single-App model: one
+shared bot identity and one private key for all organizations — acceptable for
+a single institution; if an external org ever demands isolation, the GitHub
+App *manifest flow* is the documented escape hatch (per-org app generated in
+two clicks).

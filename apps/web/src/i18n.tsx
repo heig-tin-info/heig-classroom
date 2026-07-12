@@ -78,6 +78,9 @@ const en = {
   "classrooms.org": "GitHub organization",
   "classrooms.orgPick": "Pick an organization (App installed)",
   "classrooms.orgOther": "Other organization…",
+  "classrooms.noOrgHint": "No organization yet?",
+  "classrooms.noOrgLink": "Create one on GitHub",
+  "classrooms.noOrgHint2": "(free plan works), then enter its name here — a wizard on the classroom page walks you through installing the App.",
   "classrooms.create": "Create",
   "classrooms.createFailed": "Creation failed.",
 
@@ -241,6 +244,9 @@ const fr: Record<keyof Dict, string> = {
   "classrooms.org": "Organisation GitHub",
   "classrooms.orgPick": "Choisir une organisation (App installée)",
   "classrooms.orgOther": "Autre organisation…",
+  "classrooms.noOrgHint": "Pas encore d'organisation ?",
+  "classrooms.noOrgLink": "Créez-la sur GitHub",
+  "classrooms.noOrgHint2": "(le plan gratuit suffit), puis saisissez son nom ici — un assistant sur la page de la classe vous guide pour installer l'App.",
   "classrooms.create": "Créer",
   "classrooms.createFailed": "La création a échoué.",
 

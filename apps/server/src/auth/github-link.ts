@@ -1,8 +1,9 @@
 /**
- * GitHub account linking (AU-08..12): a web application OAuth flow distinct
- * from the edu-ID login, minimal `read:user` scope. The OAuth token is
- * DISCARDED after reading the identity; only github_user_id (immutable key),
- * github_login (display) and github_linked_at are stored (NFR-02, C-06).
+ * GitHub account linking (AU-08..12): the user-to-server OAuth flow of the
+ * GitHub App itself (no separate OAuth App, no scope — an App user token
+ * serves GET /user). The token is DISCARDED after reading the identity; only
+ * github_user_id (immutable key), github_login (display) and
+ * github_linked_at are stored (NFR-02, C-06).
  */
 import { randomBytes } from "node:crypto";
 
@@ -29,8 +30,8 @@ async function fetchGithubIdentity(
     method: "POST",
     headers: { accept: "application/json", "content-type": "application/json" },
     body: JSON.stringify({
-      client_id: config.GITHUB_OAUTH_CLIENT_ID,
-      client_secret: config.GITHUB_OAUTH_CLIENT_SECRET,
+      client_id: config.GITHUB_APP_CLIENT_ID,
+      client_secret: config.GITHUB_APP_CLIENT_SECRET,
       code,
     }),
   });
@@ -67,10 +68,10 @@ export async function githubLinkPlugin(
     "/app/auth/github/link",
     { preHandler: (req, reply) => app.requireSession(req, reply) },
     async (_req, reply) => {
-      if (!config.GITHUB_OAUTH_CLIENT_ID) {
+      if (!config.GITHUB_APP_CLIENT_ID) {
         return reply
           .code(503)
-          .send({ error: "github_oauth_unconfigured", message: "OAuth App not configured" });
+          .send({ error: "github_oauth_unconfigured", message: "GitHub App client not configured" });
       }
       const state = randomBytes(16).toString("base64url");
       reply.setCookie(STATE_COOKIE, state, {
@@ -82,9 +83,9 @@ export async function githubLinkPlugin(
         maxAge: 600,
       });
       const url = new URL("https://github.com/login/oauth/authorize");
-      url.searchParams.set("client_id", config.GITHUB_OAUTH_CLIENT_ID);
+      url.searchParams.set("client_id", config.GITHUB_APP_CLIENT_ID);
       url.searchParams.set("redirect_uri", redirectUri);
-      url.searchParams.set("scope", "read:user");
+      // No scope: GitHub App user tokens don't use scopes; GET /user works.
       url.searchParams.set("state", state);
       return reply.redirect(url.href, 303);
     },
