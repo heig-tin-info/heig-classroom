@@ -1304,6 +1304,7 @@ function StudentHome({ me }: { me: Me }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold tracking-tight">{t("student.title")}</h1>
+        <HelpIcon topic="student-home" />
         <span className="flex-1" />
         <label className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />

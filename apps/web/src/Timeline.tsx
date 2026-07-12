@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 
 import type { ClassroomSummary } from "./api";
+import { HelpIcon } from "./help";
 import { Card, EmptyState, OrgAvatar } from "./ui";
 
 /**
@@ -234,8 +235,9 @@ export function TimelineView({
   return (
     <Card className="p-4">
       <div className="mb-2 flex items-center justify-end gap-1 text-zinc-500">
-        <span className="mr-auto text-xs text-zinc-400">
+        <span className="mr-auto inline-flex items-center gap-1 text-xs text-zinc-400">
           Wheel / drag to pan · ⌘/Ctrl + wheel to zoom
+          <HelpIcon topic="timeline" />
         </span>
         <IconButton label="Zoom out" onClick={() => zoomBy(1.6)} icon={ZoomOut} />
         <IconButton label="Zoom in" onClick={() => zoomBy(1 / 1.6)} icon={ZoomIn} />
