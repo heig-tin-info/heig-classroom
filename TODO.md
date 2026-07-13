@@ -6,45 +6,31 @@ sans re-diagnostiquer.
 
 ## Infra / déploiement
 
-### 1. Sortir le build d'image de la VM de prod
-- **Problème** : le déploiement se fait par `docker compose ... up -d --build`
-  directement sur la VM (453 MiB / 1 CPU). Le build fait swapper l'hôte
-  (load 3-4) pendant toute sa durée et **étrangle l'app en fonctionnement** :
-  toutes les requêtes Postgres échouent alors avec `Connection terminated due
-  to connection timeout` (login, ticker, pg-boss). Se manifeste comme un bug de
-  requête mais n'en est pas un — la SQL tourne très bien en direct via psql.
-  Vécu le 2026-07-10 (erreur 500 au login pendant un déploiement).
-- **Cause aggravante** : `NODE_OPTIONS=--max-old-space-size=1536` dans le
-  `Dockerfile` (nécessaire pour éviter l'OOM du build) fait swapper d'autant
-  plus.
-- **Correctif visé** : builder l'image en CI (GitHub Actions) → push sur GHCR →
-  `docker pull` + `up -d` sur la VM. Retirer `build:` de `compose.prod.yml` au
-  profit de `image: ghcr.io/...`. Déploiement = simple pull (quelques secondes),
-  zéro contention, zéro downtime.
+### 1. Sortir le build d'image de la VM de prod — TOUJOURS À FAIRE (vérifié 2026-07-13)
+- **État vérifié le 2026-07-13** : `ci.yml` ne fait que les checks
+  (build/typecheck/test), aucun build d'image ni push GHCR ; sur la VM,
+  `compose.prod.yml` a toujours `build: .` → le déploiement builde sur place.
+  Disque : monté à **95 %** ; `docker builder prune -f` + `image prune -f`
+  passés ce jour → **83 %** (1.5 G libres). Le prune n'est qu'un palliatif :
+  chaque rebuild on-VM régénère ~1 G de cache.
+- **Problème** : le build sur la VM (453 MiB / 1 CPU) fait swapper l'hôte
+  (load 3-4) et **étrangle l'app en fonctionnement** : toutes les requêtes
+  Postgres échouent avec `Connection terminated due to connection timeout`
+  (login, ticker, pg-boss). Vécu le 2026-07-10 (500 au login pendant un
+  déploiement). Aggravé par `NODE_OPTIONS=--max-old-space-size=1536` du
+  `Dockerfile`. Un disque plein arrêterait net toutes les écritures Postgres.
+- **Correctif visé** : job `image` dans `ci.yml` (sur main) : build →
+  push `ghcr.io/heig-tin-info/heig-classroom:latest` + sha ; job `deploy` :
+  ssh sur la VM, `docker compose pull && up -d`. `compose.prod.yml` :
+  remplacer `build: .` par `image: ghcr.io/...`. Déploiement = simple pull,
+  zéro contention, zéro downtime. Mettre à jour `deploy.md` §7 dans la foulée
+  (le gotcha du build on-VM y est absent).
 - **Contournement en attendant** : ne pas redéployer (rebuild) pendant que
   quelqu'un utilise la plateforme.
-
-### 2. Disque de la VM à ~93 %
-- **Problème** : `/` à 7.9G/8.6G (651 MiB libres). Un disque plein arrête net
-  **toutes les écritures Postgres** — plus grave que la pression RAM.
-- **Cause** : les builds Docker successifs sur la VM accumulent des couches
-  d'images et un cache builder.
-- **Correctif** : `docker image prune -f` + `docker builder prune -f`
-  (récupère probablement plusieurs centaines de Mo). Résolu structurellement
-  par le point 1 (plus de build sur la VM).
 - **Lié** : la copie off-VM des backups (rclone) n'est toujours pas câblée
   (voir `compose.prod.yml`, service `backup`, et `deploy.md` §Backups).
 
 ## Pipeline de correction
-
-### 5. Vérifier le secret `ANTHROPIC_API_KEY` avant le test E2E
-- **Confirmé manquant** (E2E du 2026-07-12, run 29186485269 sur
-  `quadratic-2-yves-chevallier`) : `ANTHROPIC_API_KEY` vide dans l'env du job
-  `llm-review` → « Could not resolve authentication method », pas de
-  `GRADING.yml`, pas de commit de review. À poser en secret d'organisation sur
-  `heig-test-classroom` (org admin requis ; token `gh` local sans `admin:org`).
-  Procédure documentée dans `docs/guide/grading.md` §« Configuring the Anthropic
-  API key ».
 
 ### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
 - **Contexte** (E2E 2026-07-12) : `Commit the review file` pousse
@@ -94,27 +80,71 @@ sans re-diagnostiquer.
   (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
   d'introduire une machine à états.
 
-## Refactoring / dette code — reste à faire
+## Refactoring — plan de finalisation (brief pour agent)
 
-(Le brief clean-code P1–P4 a été exécuté le 2026-07-13, commits
-`refactor(...)` ; il ne reste que les points ci-dessous.)
+> Le brief clean-code P1–P4 a été exécuté le 2026-07-13 (commits
+> `refactor(...)`). Ce plan couvre le reliquat. Mêmes garde-fous : un commit
+> par lot, `pnpm -r typecheck && pnpm -r test && pnpm --filter @hgc/web build`
+> vert après chaque lot, invariants commentés (GR-xx…) conservés. Ordre
+> suggéré : A → B → C ; D et E dès que leurs préconditions tombent.
 
-1. **Tests dépendants de la DB** : `selectGradeRun` (GR-09),
-   `isAfterDeadline` (GR-14.3), ingestion LLM `conclusion !== success`
-   jamais authoritative, claim roster en conflit. Nécessite un harnais DB
-   de test (p. ex. PGlite + drizzle, ou Postgres jetable en CI) — à
-   instruire avant d'écrire ces tests.
-2. Vars legacy `GITHUB_OAUTH_CLIENT_ID/SECRET` : supprimer le fallback
-   (config.ts) **une fois** `GITHUB_APP_CLIENT_SECRET` non vide en prod.
-3. Ops (manuel, hors code) : supprimer les dépôts `*-squashed` vides
-   orphelins dans `heig-test-classroom` (essais des 7-10 juillet), le dépôt
-   sonde `heig-test-classroom/secret-probe`, le secret d'org `TEST_SECRET`,
-   l'ancienne app `hgc-prod` et l'ancienne OAuth App (après bascule du
-   client secret), et `/opt/heig-classroom/deploy.old`.
-4. `deploy.md` : le §7 « Mise à jour » ne mentionne pas le gotcha du build
-   on-VM (voir §1 Infra) — croiser les deux.
-5. **Performance (mesurer d'abord)** :
-   - `GET …/detail` fait un `fetchRepoLiveState` par repo étudiant à chaque
-     affichage → cache court (30-60 s) ou rafraîchissement SSE asynchrone.
-   - Bundle web ~730 kB minifié (warning vite) : le découpage par page étant
-     fait, code-split (dynamic import des vues teacher/student).
+### Lot A — Harnais DB de test + tests manquants (le plus rentable)
+
+1. Ajouter `@electric-sql/pglite` en devDependency du serveur et un helper
+   `src/test/db.ts` : PGlite en mémoire + `drizzle-orm/pglite` +
+   `migrate()` sur `apps/server/drizzle/` → retourne un `db` compatible
+   `app.db` (et un stub `app` minimal `{ db, log }`).
+2. `grading.test.ts` (données insérées via drizzle, pas de GitHub) :
+   - `selectGradeRun` (GR-09) : ignore les runs `kind='llm'`, ignore
+     `afterDeadline=true`, ignore `parseStatus` malformed/multiple, prend le
+     plus récent `completedAt` parmi ok|fallback.
+   - `isAfterDeadline` (GR-14.3) : receipt avant/après deadline ; sans
+     receipt → conservateur dès que la deadline est passée. (Fonction privée :
+     l'exporter, ou la couvrir via `ingestCompletedRun`.)
+   - Ingestion LLM : `conclusion !== "success"` ou parse != ok → la ligne
+     gradeRuns existe mais `llmGradeRunId` inchangé (bug réel vécu) ;
+     idempotence sur (workflowRunId, runAttempt) → second ingest = null.
+3. `roster.test.ts` : claim avec UNIQUE(classroom_id, user_id) déjà pris →
+   `conflictFlag` posé (AU-18).
+4. Si PGlite s'avère incompatible (extensions, types), repli : Postgres
+   jetable dans le CI (service container) + `TEST_DATABASE_URL`, tests
+   marqués `describe.skipIf(!process.env.TEST_DATABASE_URL)`.
+
+### Lot B — Code-split du bundle web (mesuré : 838 kB / 261 kB gzip, 1 chunk)
+
+1. Le plus gros poste : `xlsx` (SheetJS) importé statiquement dans
+   `RosterImport.tsx` → `const XLSX = await import("xlsx")` au moment du
+   parse (drop de fichier). À lui seul devrait faire tomber le warning.
+2. `React.lazy` + `<Suspense>` dans `App.tsx` pour les vues par rôle :
+   `TeacherHome`/`ClassroomView`/`AssignmentDetail` (teacher) vs
+   `StudentHome` (student) — un étudiant ne télécharge plus l'UI teacher,
+   et réciproquement. `SettingsPage`/`AdminPanel` lazy aussi.
+3. Vérifier `pnpm --filter @hgc/web build` avant/après et noter les tailles
+   ici. Cible : chunk initial < ~300 kB minifié.
+
+### Lot C — Cache du live-state GitHub (mesurer d'abord)
+
+1. Instrumenter `GET …/detail` : logguer nb de repos et durée totale des
+   `fetchRepoLiveState` (N appels GitHub par affichage → latence + rate
+   limit sur une classe de 30+).
+2. Puis TTL court en mémoire (30-60 s) par `fullName` dans
+   `github/metrics.ts` (Map + timestamp, pas de dépendance), ou
+   rafraîchissement asynchrone poussé par SSE si la mesure montre que le
+   blocage vient de la requête. Décider sur mesures, pas avant.
+
+### Lot D — Vars OAuth legacy (précondition NON remplie, vérifié 2026-07-13)
+
+- `.env.prod` sur la VM utilise toujours `GITHUB_OAUTH_CLIENT_ID/SECRET` ;
+  `GITHUB_APP_CLIENT_SECRET` n'y est pas posé.
+- **Étape ops d'abord** : poser `GITHUB_APP_CLIENT_ID/SECRET` (client secret
+  de l'App `heig-classroom`) dans `.env.prod`, redéployer, vérifier le login
+  GitHub. **Ensuite seulement** : supprimer les deux vars legacy et le
+  fallback `config.ts:111-113`, et les retirer de `.env.example`.
+
+### Lot E — Ops (manuel, hors code)
+
+- Supprimer les dépôts `*-squashed` vides orphelins dans
+  `heig-test-classroom` (essais des 7-10 juillet), le dépôt sonde
+  `heig-test-classroom/secret-probe`, le secret d'org `TEST_SECRET`,
+  l'ancienne app `hgc-prod` et l'ancienne OAuth App (après le lot D), et
+  `/opt/heig-classroom/deploy.old` sur la VM.
