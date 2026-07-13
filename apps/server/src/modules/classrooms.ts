@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { ClassroomCreate } from "@hgc/contracts";
@@ -16,9 +16,8 @@ import {
   orgExistsOnGithub,
   resolveOrgInstallation,
 } from "../github/app.js";
+import { ownedClassroom, ownedEnrollment, teacherGuard } from "./guards.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
-
-const IdParam = z.object({ id: z.uuid() });
 
 const RowsBody = z.object({
   rows: z
@@ -56,34 +55,7 @@ export async function classroomsPlugin(
   opts: { config: AppConfig },
 ) {
   const { config } = opts;
-  /** Teacher only (AU-23/24); 404 for anything that is not theirs. */
-  const requireTeacher = async (req: FastifyRequest, reply: FastifyReply) => {
-    const denied = await app.requireSession(req, reply);
-    if (denied) return denied;
-    if (req.user!.role !== "teacher" && req.user!.role !== "admin") {
-      return reply.code(403).send({ error: "forbidden" });
-    }
-    return undefined;
-  };
-
-  /** Loads the classroom if and only if it belongs to the current teacher. */
-  async function ownedClassroom(req: FastifyRequest, reply: FastifyReply) {
-    const params = IdParam.safeParse(req.params);
-    if (!params.success) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    const [room] = await app.db
-      .select()
-      .from(classrooms)
-      .where(and(eq(classrooms.id, params.data.id), eq(classrooms.teacherId, req.user!.id)))
-      .limit(1);
-    if (!room) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    return room;
-  }
+  const requireTeacher = teacherGuard(app);
 
   // GitHub App setup_url: after the owner clicks "Install" on GitHub, the
   // browser lands here with the installation id. Resolving it right away
@@ -257,7 +229,7 @@ export async function classroomsPlugin(
   });
 
   app.get("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(req, reply);
+    const room = await ownedClassroom(app, req, reply);
     if (!room) return reply;
     let [org] = await app.db
       .select({
@@ -321,7 +293,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/archive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(req, reply);
+      const room = await ownedClassroom(app, req, reply);
       if (!room) return reply;
       await app.db
         .update(classrooms)
@@ -343,7 +315,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/unarchive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(req, reply);
+      const room = await ownedClassroom(app, req, reply);
       if (!room) return reply;
       await app.db
         .update(classrooms)
@@ -369,7 +341,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/self-enroll",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(req, reply);
+      const room = await ownedClassroom(app, req, reply);
       if (!room) return reply;
       const me = req.user!;
       try {
@@ -410,7 +382,6 @@ export async function classroomsPlugin(
 
   // --- Roster editing, entry by entry ---
 
-  const EnrollmentParam = z.object({ id: z.uuid(), eid: z.uuid() });
   const EnrollmentPatch = z
     .object({
       nom: z.string().min(1).max(200).optional(),
@@ -419,33 +390,11 @@ export async function classroomsPlugin(
     })
     .refine((b) => b.nom || b.prenom || b.email, { message: "Nothing to update" });
 
-  /** Loads the entry if the classroom belongs to the current teacher. */
-  async function ownedEnrollment(req: FastifyRequest, reply: FastifyReply) {
-    const params = EnrollmentParam.safeParse(req.params);
-    if (!params.success) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    const [row] = await app.db
-      .select({ enrollment: enrollments, teacherId: classrooms.teacherId })
-      .from(enrollments)
-      .innerJoin(classrooms, eq(enrollments.classroomId, classrooms.id))
-      .where(
-        and(eq(enrollments.id, params.data.eid), eq(enrollments.classroomId, params.data.id)),
-      )
-      .limit(1);
-    if (!row || row.teacherId !== req.user!.id) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    return row.enrollment;
-  }
-
   app.patch(
     "/app/api/classrooms/:id/roster/:eid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(req, reply);
+      const entry = await ownedEnrollment(app, req, reply);
       if (!entry) return reply;
       const body = EnrollmentPatch.safeParse(req.body);
       if (!body.success) {
@@ -490,7 +439,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster/:eid/unclaim",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(req, reply);
+      const entry = await ownedEnrollment(app, req, reply);
       if (!entry) return reply;
       const [updated] = await app.db
         .update(enrollments)
@@ -513,7 +462,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster/:eid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(req, reply);
+      const entry = await ownedEnrollment(app, req, reply);
       if (!entry) return reply;
       await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
       await audit(app.db, {
@@ -529,7 +478,7 @@ export async function classroomsPlugin(
   );
 
   app.patch("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(req, reply);
+    const room = await ownedClassroom(app, req, reply);
     if (!room) return reply;
     const body = z.object({ name: z.string().min(1).max(200) }).safeParse(req.body);
     if (!body.success) {
@@ -552,7 +501,7 @@ export async function classroomsPlugin(
   });
 
   app.delete("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(req, reply);
+    const room = await ownedClassroom(app, req, reply);
     if (!room) return reply;
     await app.db.delete(classrooms).where(eq(classrooms.id, room.id));
     await audit(app.db, {
@@ -570,7 +519,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(req, reply);
+      const room = await ownedClassroom(app, req, reply);
       if (!room) return reply;
       // Two forms: raw CSV (text/csv) or tabular {rows} lines (JSON),
       // typically extracted from an Excel file client-side.

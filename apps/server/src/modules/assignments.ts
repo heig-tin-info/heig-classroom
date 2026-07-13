@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 
@@ -12,7 +12,6 @@ import {
   enrollments,
   gradeDispatches,
   gradeRuns,
-  organizations,
   studentRepos,
   users,
 } from "../db/schema.js";
@@ -25,8 +24,12 @@ import { zurichIso } from "../github/commit.js";
 import { fetchRepoLiveState, type RepoLiveState } from "../github/metrics.js";
 import { createSquashedRepo } from "../github/squash.js";
 import { classroomRecipients, queueEmail } from "../mailer.js";
-
-const IdParam = z.object({ id: z.uuid() });
+import {
+  ownedAssignment,
+  ownedClassroomWithOrg,
+  ownedStudentRepo,
+  teacherGuard,
+} from "./guards.js";
 
 const AssignmentCreate = z
   .object({
@@ -62,35 +65,7 @@ export async function assignmentsPlugin(
   opts: { config: AppConfig },
 ) {
   const { config } = opts;
-
-  const requireTeacher = async (req: FastifyRequest, reply: FastifyReply) => {
-    const denied = await app.requireSession(req, reply);
-    if (denied) return denied;
-    if (req.user!.role !== "teacher" && req.user!.role !== "admin") {
-      return reply.code(403).send({ error: "forbidden" });
-    }
-    return undefined;
-  };
-
-  /** Classroom + organization, if and only if the teacher owns it. */
-  async function ownedClassroomWithOrg(req: FastifyRequest, reply: FastifyReply) {
-    const params = IdParam.safeParse(req.params);
-    if (!params.success) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    const [row] = await app.db
-      .select({ room: classrooms, org: organizations })
-      .from(classrooms)
-      .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
-      .where(and(eq(classrooms.id, params.data.id), eq(classrooms.teacherId, req.user!.id)))
-      .limit(1);
-    if (!row) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    return row;
-  }
+  const requireTeacher = teacherGuard(app);
 
   async function clientFor(
     reply: FastifyReply,
@@ -111,7 +86,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/org-repos",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(req, reply);
+      const owned = await ownedClassroomWithOrg(app, req, reply);
       if (!owned) return reply;
       const client = await clientFor(reply, owned.org);
       if (!client) return reply;
@@ -139,7 +114,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/org-repos/:repo/tree",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(req, reply);
+      const owned = await ownedClassroomWithOrg(app, req, reply);
       if (!owned) return reply;
       const client = await clientFor(reply, owned.org);
       if (!client) return reply;
@@ -201,7 +176,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(req, reply);
+      const owned = await ownedClassroomWithOrg(app, req, reply);
       if (!owned) return reply;
       // ?archived=1 lists the archive instead of the active assignments.
       const archived = (req.query as { archived?: string }).archived === "1";
@@ -218,34 +193,6 @@ export async function assignmentsPlugin(
     },
   );
 
-  const AssignmentParam = z.object({ id: z.uuid(), aid: z.uuid() });
-
-  /** Loads the assignment if its classroom belongs to the current teacher. */
-  async function ownedAssignment(req: FastifyRequest, reply: FastifyReply) {
-    const params = AssignmentParam.safeParse(req.params);
-    if (!params.success) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    const [row] = await app.db
-      .select({
-        assignment: assignments,
-        teacherId: classrooms.teacherId,
-        classroomName: classrooms.name,
-        org: organizations,
-      })
-      .from(assignments)
-      .innerJoin(classrooms, eq(assignments.classroomId, classrooms.id))
-      .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
-      .where(and(eq(assignments.id, params.data.aid), eq(assignments.classroomId, params.data.id)))
-      .limit(1);
-    if (!row || row.teacherId !== req.user!.id) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    return row;
-  }
-
   const AssignmentPatch = z
     .object({
       name: z.string().min(1).max(200).optional(),
@@ -261,7 +208,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const body = AssignmentPatch.safeParse(req.body);
       if (!body.success) {
@@ -413,7 +360,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/detail",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const a = owned.assignment;
 
@@ -525,7 +472,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/sync",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const a = owned.assignment;
       if (a.state === "draft" || a.archivedAt) {
@@ -560,7 +507,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-runs",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const params = z.object({ rid: z.uuid() }).safeParse(req.params);
       if (!params.success) return reply.code(404).send({ error: "not_found" });
@@ -596,36 +543,12 @@ export async function assignmentsPlugin(
   );
 
   // --- Manual lock / unlock of a student repository (US-22: "one more push") ---
-  const RepoParam = z.object({ id: z.uuid(), aid: z.uuid(), rid: z.uuid() });
-
-  async function ownedStudentRepo(req: FastifyRequest, reply: FastifyReply) {
-    const owned = await ownedAssignment(req, reply);
-    if (!owned) return null;
-    const params = RepoParam.safeParse(req.params);
-    if (!params.success) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    const [repo] = await app.db
-      .select()
-      .from(studentRepos)
-      .where(
-        and(eq(studentRepos.id, params.data.rid), eq(studentRepos.assignmentId, owned.assignment.id)),
-      )
-      .limit(1);
-    if (!repo || repo.provisionStatus !== "ok" || !repo.fullName) {
-      await reply.code(404).send({ error: "not_found" });
-      return null;
-    }
-    return { ...owned, repo };
-  }
-
   for (const action of ["lock", "unlock"] as const) {
     app.post(
       `/app/api/classrooms/:id/assignments/:aid/repos/:rid/${action}`,
       { preHandler: requireTeacher },
       async (req, reply) => {
-        const owned = await ownedStudentRepo(req, reply);
+        const owned = await ownedStudentRepo(app, req, reply);
         if (!owned) return reply;
         if (owned.org.installationId === null) {
           return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
@@ -664,7 +587,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-now",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedStudentRepo(req, reply);
+      const owned = await ownedStudentRepo(app, req, reply);
       if (!owned) return reply;
       if (owned.org.installationId === null) {
         return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
@@ -707,7 +630,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/activity",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedStudentRepo(req, reply);
+      const owned = await ownedStudentRepo(app, req, reply);
       if (!owned) return reply;
       const empty = { commits: [], branches: [], tests: [] };
       if (owned.org.installationId === null) return empty;
@@ -771,7 +694,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/publish",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       if (owned.assignment.state !== "draft") {
         return reply
@@ -811,7 +734,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/archive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const [updated] = await app.db
         .update(assignments)
@@ -833,7 +756,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid/unarchive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       const [updated] = await app.db
         .update(assignments)
@@ -855,7 +778,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments/:aid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(req, reply);
+      const owned = await ownedAssignment(app, req, reply);
       if (!owned) return reply;
       if (owned.assignment.state !== "draft") {
         return reply
@@ -888,7 +811,7 @@ export async function assignmentsPlugin(
     "/app/api/classrooms/:id/assignments",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(req, reply);
+      const owned = await ownedClassroomWithOrg(app, req, reply);
       if (!owned) return reply;
       const body = AssignmentCreate.safeParse(req.body);
       if (!body.success) {

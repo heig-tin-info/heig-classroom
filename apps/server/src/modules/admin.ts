@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -8,6 +8,7 @@ import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { classrooms, scheduledTasks, teacherGrants, users } from "../db/schema.js";
 import { TASK_DEFS, taskDef } from "../tasks.js";
+import { adminGuard } from "./guards.js";
 import { TASK_QUEUE } from "../jobs.js";
 
 /**
@@ -20,12 +21,7 @@ import { TASK_QUEUE } from "../jobs.js";
 export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfig }) {
   const { config } = opts;
 
-  const requireAdmin = async (req: FastifyRequest, reply: FastifyReply) => {
-    const denied = await app.requireSession(req, reply);
-    if (denied) return denied;
-    if (req.user!.role !== "admin") return reply.code(403).send({ error: "forbidden" });
-    return undefined;
-  };
+  const requireAdmin = adminGuard(app);
 
   app.get("/app/api/admin/teachers", { preHandler: requireAdmin }, async () => {
     return app.db
