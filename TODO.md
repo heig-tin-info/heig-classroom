@@ -116,131 +116,50 @@ sans re-diagnostiquer.
   (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
   d'introduire une machine à états.
 
-## Refactoring dette clean-code — brief pour agent
+## Refactoring dette clean-code — ÉTAT (exécuté le 2026-07-13)
 
-> Document autoportant : un agent peut exécuter cette section sans autre
-> contexte. Objectif : réduire la dette structurelle SANS changer aucun
-> comportement observable.
+Le brief P1–P5 a été exécuté (série de commits `refactor(...)` du
+2026-07-13, un commit par lot, suite verte à chaque étape). Bilan :
 
-### Garde-fous (à respecter à chaque étape)
+- **P1 (découpage)** — fait. Web : `App.tsx` 1564 → 135 lignes
+  (`Header.tsx`, `TeacherHome.tsx`, `ClassroomView.tsx`, `StudentHome.tsx`,
+  `Breadcrumb.tsx`) ; `AssignmentDetail.tsx` → `activity/` (graph.ts pur +
+  ActivityPanel.tsx) + `GradeHistoryModal.tsx` ; `AssignmentsCard.tsx` →
+  `AssignmentForm.tsx`. Serveur : `modules/assignments.ts` →
+  `assignments/{index,lifecycle,detail,actions,shared}.ts` (mêmes URLs).
+- **P2 (duplication)** — fait. Types de payload API dans
+  `packages/contracts/src/api.ts` (SSOT, importés des deux côtés ; `GradeView`
+  dé-dupliqué, `completedAt` sérialisé en ISO — JSON identique) ;
+  `modules/guards.ts` (teacherGuard/adminGuard + loaders `owned*`) ;
+  `github/git.ts` (`gitRunner({identity})` + `authUrl`) ;
+  `apiErrorMessage()` dans `web/api.ts` ; `useSortableTable`/`SortHeader`
+  partagés (4 tables).
+- **P3 (cohérence)** — fait. Échelle `Z.*` documentée dans `ui.tsx` ;
+  `Field` a une prop `fullWidth` explicite ; `EventType`/`Topic` typés dans
+  `events.ts` et catalogue `AuditAction` fermé dans `audit.ts`. Décision
+  i18n inscrite dans `i18n.tsx` : l'UI teacher reste EN, les surfaces
+  étudiantes passent par `t()` (en+fr).
+- **P4.1** — fait : colonne `users.email_opt_in` supprimée (migration 0017).
+- **P5 (tests)** — partiel : `github/retry`, `mailer` (prefs, HMAC unsub,
+  gate `queueEmail`) côté serveur ; première suite vitest web (fuzzy,
+  router, `buildGraph`, `compactDuration`/`humanize`). 32 tests serveur,
+  18 web.
 
-- **Zéro changement fonctionnel** : mêmes routes, mêmes payloads JSON, même
-  rendu. Les refactorings sont des déplacements/factorisations, pas des
-  réécritures.
-- **Vérification** après chaque lot : `pnpm -r typecheck && pnpm -r test &&
-  pnpm --filter @hgc/web build` — tout doit rester vert.
-- **Un commit par lot**, message `refactor(scope): …`, jamais de lot mixte
-  (déplacement + changement de logique dans le même commit).
-- Ne pas toucher : `apps/server/drizzle/**` (migrations figées), les fichiers
-  d'aide `apps/web/src/help/*.md`, la doc `docs/**`.
-- Les invariants métier commentés dans le code (GR-xx, GH-xx, AU-xx, ADR-xxx)
-  doivent suivre le code déplacé — ne jamais perdre ces commentaires.
+### Reste à faire
 
-### P1 — Découpage des fichiers monstres (structure seule)
-
-État mesuré (2026-07-13) : `App.tsx` 1564 lignes, `AssignmentDetail.tsx` 1074,
-`modules/assignments.ts` 996, `AssignmentsCard.tsx` 783.
-
-1. **`apps/web/src/App.tsx` → éclater par page**, sans changer un pixel :
-   `Header.tsx` (Header, UserMenu, ThemeToggle, Logo, GithubBanner),
-   `TeacherHome.tsx` (TeacherHome, ClassroomsList, RosterPopover, vue archives),
-   `ClassroomView.tsx` (ClassroomView, ClassroomSettings, InstallWizard),
-   `StudentHome.tsx` (StudentHome, StudentClassroomCard, StudentAssignmentRow,
-   RepoMetrics, Countdown), `Breadcrumb.tsx`. `App.tsx` ne garde que le
-   routage, `useMe`, `VIEW_AS_KEY` et la composition.
-2. **`apps/web/src/AssignmentDetail.tsx`** : sortir `activity/` (ActivityPanel,
-   ActivityChart, TestsChart, CommitList + buildGraph/LANE_COLORS) et
-   `GradeHistoryModal` ; garder la table et les lignes.
-3. **`apps/web/src/AssignmentsCard.tsx`** : sortir `AssignmentForm.tsx`
-   (form + TreeView/buildTree + CreatingOverlay + humanize/compactDuration).
-4. **`apps/server/src/modules/assignments.ts`** : découper en sous-modules
-   enregistrés par le plugin existant (mêmes URLs) : `assignments/detail.ts`
-   (GET detail + grade history + activity), `assignments/lifecycle.ts`
-   (create/patch/publish/archive/unarchive/delete + reopen),
-   `assignments/actions.ts` (grade-now, sync, lock/unlock, repos).
-
-### P2 — Duplication mesurée à factoriser
-
-1. **`requireTeacher` dupliqué** dans `modules/classrooms.ts:60` et
-   `modules/assignments.ts:66` (+ `requireAdmin` dans `admin.ts`) → un
-   `modules/guards.ts` unique. Même occasion : les helpers `ownedClassroom` /
-   `ownedClassroomWithOrg` / `ownedAssignment` / `ownedStudentRepo` suivent le
-   même motif « charge si teacherId = moi sinon 404 » → factoriser.
-2. **`git()` / `gitBare()` définis 3×** (`github/squash.ts`,
-   `github/provision.ts`, `github/sync.ts`) → `github/git.ts` unique (attention:
-   squash.ts passe `-c user.name/email`, pas les autres — paramètre).
-3. **Types API dupliqués main/serveur** : `GradeView` existe en double
-   (`server/grading.ts` et `web/AssignmentDetail.tsx`) ; `ClassroomSummary`,
-   `RosterEntry`, `Assignment`, `StudentRepo`, `ActivityData`… sont maintenus à
-   la main dans `web/api.ts` et chaque composant. `packages/contracts` n'exporte
-   que 2 fichiers → y déplacer tous les types de payload API et les importer
-   des deux côtés. C'est le lot au meilleur ratio risque/valeur : toute dérive
-   de payload devient une erreur de compilation.
-4. **Extraction du message d'erreur API** répétée 5× côté web
-   (`(err.body as { message?: string })?.message ?? "…"`) → helper
-   `apiErrorMessage(err, fallback)` dans `web/api.ts`.
-5. **Trois tables triables artisanales** (ClassroomsList dans App.tsx,
-   StudentClassroomCard `Th`, RosterTable sort) → un composant/hook
-   `useSortableTable` + `<SortHeader>` partagé.
-
-### P3 — Cohérence
-
-1. **i18n incomplète** : StudentHome/SettingsPage passent par `t()`, mais
-   AssignmentsCard (tout le modal), ClassroomView (« Roster », wizard),
-   RosterTable, AssignmentDetail sont en anglais codé en dur. Décision à
-   inscrire : l'UI teacher reste EN ou passe par i18n — puis appliquer
-   uniformément (les étudiants, eux, ont déjà le FR).
-2. **Échelle de z-index ad hoc** (`z-30/40/50/[60]/[75]/[80]/[90]` semés dans
-   Modal/help/CreatingOverlay/tooltip) → constantes documentées (ex.
-   `Z.modal < Z.overlay < Z.help < Z.tooltip`) dans `ui.tsx`.
-3. **`Field` className hack** (`className.includes("w-full")` dans `ui.tsx`)
-   → props explicites (`fullWidth?: boolean`) ou `labelClassName`.
-4. **Constantes d'événements** : actions d'audit (`"assignment.publish"`, …)
-   et topics SSE (`classroom:`, `user:`, `teacher:`) en chaînes libres partout
-   → module de constantes typées côté serveur.
-
-### P4 — Nettoyage (petits lots indépendants)
-
-1. `users.email_opt_in` (schema.ts:46) : colonne jamais lue ni écrite,
-   remplacée de fait par `email_prefs` → migration de suppression + retrait du
-   schéma (et de docs/03 §users).
-2. Vars legacy `GITHUB_OAUTH_CLIENT_ID/SECRET` (config.ts) : supprimer le
-   fallback **une fois** le client secret de l'App `heig-classroom` posé dans
-   `.env.prod` (vérifier avant : `GITHUB_APP_CLIENT_SECRET` non vide en prod).
-3. Ops (manuel, hors code) : supprimer les dépôts `*-squashed` vides orphelins
-   dans `heig-test-classroom`, le dépôt sonde `heig-test-classroom/secret-probe`,
-   le secret d'org `TEST_SECRET`, l'ancienne app `hgc-prod` et l'ancienne OAuth
-   App (après bascule du client secret), et `/opt/heig-classroom/deploy.old`.
-4. `deploy.md` : le §7 « Mise à jour » ne mentionne pas le gotcha du build
-   on-VM (voir §1 Infra) — croiser les deux.
-
-### P5 — Tests (couverture ciblée, pas de dogme)
-
-Existant : 6 fichiers de tests (domain roster/grade, server dispatch/deadline/
-app/session). **Zéro test web.** Manques les plus rentables, dans l'ordre :
-
-1. `server/grading.ts` : `selectGradeRun` (GR-09 : kind/afterDeadline/
-   parseStatus), `isAfterDeadline` (GR-14.3 conservateur sans receipt),
-   ingestion LLM `conclusion !== success` jamais authoritative (bug réel vécu).
-2. `server/mailer.ts` : `resolvedPrefs`, gate des préférences dans
-   `queueEmail`, `verifyUnsubSignature` (bon/mauvais HMAC).
-3. `modules/roster.ts` : claim en conflit (UNIQUE classroom/user → conflictFlag).
-4. `github/retry.ts` : transitoire vs permanent, épuisement des retries.
-5. Web : au minimum les purs utilitaires (`fuzzyFilter`, `buildGraph` lanes/
-   edges, `compactDuration`, `humanize`, `parsePath`/`routeToPath`) en vitest
-   sans DOM — gros gain pour presque rien.
-
-### P6 — Performance (à instruire avant de coder)
-
-- `GET …/detail` fait un `fetchRepoLiveState` GitHub **par repo étudiant** à
-  chaque affichage (N appels, latence et rate limit) — mesurer, puis cache
-  court (30-60 s) par repo ou rafraîchissement asynchrone (SSE) plutôt que
-  bloquant dans la requête.
-- Bundle web : 730 kB minifié, warning vite ; code-split par page une fois le
-  découpage P1 fait (dynamic import des vues teacher/student).
-
-### Ordre suggéré
-
-P2.3 (contracts) → P1.1/P1.2/P1.3 (découpage web) → P2.1/P2.2/P2.4/P2.5 →
-P1.4 (découpage serveur) → P5 (tests, peut se faire en parallèle) → P3 → P4.
-P6 séparément, mesures d'abord.
+1. **P5.1/P5.3 — tests dépendants de la DB** : `selectGradeRun` (GR-09),
+   `isAfterDeadline` (GR-14.3), ingestion LLM `conclusion !== success`
+   jamais authoritative, claim roster en conflit. Nécessite un harnais DB
+   de test (p. ex. PGlite + drizzle, ou Postgres jetable en CI) — à
+   instruire avant d'écrire ces tests.
+2. **P4.2** : supprimer le fallback `GITHUB_OAUTH_CLIENT_ID/SECRET`
+   (config.ts) **une fois** `GITHUB_APP_CLIENT_SECRET` non vide en prod.
+3. **P4.3 (ops, hors code)** : dépôts `*-squashed` orphelins,
+   `secret-probe`, secret `TEST_SECRET`, ancienne app `hgc-prod` + OAuth
+   App, `/opt/heig-classroom/deploy.old`.
+4. **P4.4** : croiser `deploy.md` §7 avec le gotcha du build on-VM (§1 Infra).
+5. **P6 — Performance (mesurer d'abord)** :
+   - `GET …/detail` fait un `fetchRepoLiveState` par repo étudiant à chaque
+     affichage → cache court (30-60 s) ou rafraîchissement SSE asynchrone.
+   - Bundle web ~730 kB minifié (warning vite) : le découpage P1 étant fait,
+     code-split par page (dynamic import des vues teacher/student).
