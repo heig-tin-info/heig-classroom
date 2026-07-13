@@ -1,4 +1,5 @@
 import {
+  Bot,
   CircleCheck,
   GitCommitHorizontal,
   GitPullRequest,
@@ -10,38 +11,38 @@ import {
 } from "lucide-react";
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
+import type { NoticeKind } from "@hgc/contracts";
+
 import { Z } from "./ui";
 
 /**
- * Real-time notifications: SSE events may carry a typed notice; enabled ones
- * pop as toasts at the bottom left and auto-dismiss. Preferences are per
- * kind, stored in this browser (localStorage).
+ * Real-time notifications: SSE events may carry a typed notice (NoticeKind,
+ * shared with the server via @hgc/contracts); enabled ones pop as toasts at
+ * the bottom left and auto-dismiss. Preferences are per kind, stored in this
+ * browser (localStorage).
  */
-export type NoticeKind =
-  | "student_joined"
-  | "assignment_accepted"
-  | "commit_pushed"
-  | "grade_captured"
-  | "protected_reverted"
-  | "deadline_applied"
-  | "sync";
 
-export const NOTICE_KINDS: { kind: NoticeKind; label: string; defaultOn: boolean }[] = [
-  { kind: "student_joined", label: "Student joined a classroom", defaultOn: true },
-  { kind: "assignment_accepted", label: "Assignment accepted", defaultOn: true },
-  { kind: "commit_pushed", label: "Commit pushed", defaultOn: false },
-  { kind: "grade_captured", label: "Grade captured", defaultOn: true },
-  { kind: "protected_reverted", label: "Protected files restored", defaultOn: true },
-  { kind: "deadline_applied", label: "Deadline enforced", defaultOn: true },
-  { kind: "sync", label: "Sync activity", defaultOn: true },
-];
+/** Local default per kind — the Record enforces the catalogue is complete. */
+const NOTICE_DEFAULTS: Record<NoticeKind, boolean> = {
+  student_joined: true,
+  assignment_accepted: true,
+  commit_pushed: false,
+  grade_captured: true,
+  protected_reverted: true,
+  deadline_applied: true,
+  llm_review_dispatched: true,
+  sync: true,
+};
+
+/** Settings order: labels come from i18n (`notify.<kind>`). */
+export const NOTICE_KINDS = (Object.keys(NOTICE_DEFAULTS) as NoticeKind[]).map((kind) => ({
+  kind,
+}));
 
 const PREFS_KEY = "hgc-notify-prefs";
 
 export function notifyPrefs(): Record<NoticeKind, boolean> {
-  const defaults = Object.fromEntries(
-    NOTICE_KINDS.map((k) => [k.kind, k.defaultOn]),
-  ) as Record<NoticeKind, boolean>;
+  const defaults = { ...NOTICE_DEFAULTS };
   try {
     const stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Partial<
       Record<NoticeKind, boolean>
@@ -65,6 +66,7 @@ const ICONS: Record<NoticeKind, typeof UserPlus> = {
   grade_captured: GraduationCap,
   protected_reverted: ShieldAlert,
   deadline_applied: Lock,
+  llm_review_dispatched: Bot,
   sync: GitPullRequest,
 };
 

@@ -1,7 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { useNotify, type NoticeKind } from "./notify";
+import type { NoticeKind } from "@hgc/contracts";
+
+import { useNotify } from "./notify";
 
 /**
  * Live updates over SSE (no WebSocket — ADR-005). Events are refresh hints,

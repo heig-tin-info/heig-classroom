@@ -176,6 +176,7 @@ const en = {
   "notify.grade_captured": "Grade captured",
   "notify.protected_reverted": "Protected files restored",
   "notify.deadline_applied": "Deadline enforced",
+  "notify.llm_review_dispatched": "LLM review dispatched",
   "notify.sync": "Sync activity",
 
   "settings.emails": "Email notifications",
@@ -342,6 +343,7 @@ const fr: Record<keyof Dict, string> = {
   "notify.grade_captured": "Note capturée",
   "notify.protected_reverted": "Fichiers protégés restaurés",
   "notify.deadline_applied": "Échéance appliquée",
+  "notify.llm_review_dispatched": "Review LLM déclenchée",
   "notify.sync": "Activité de synchronisation",
 
   "settings.emails": "Notifications par e-mail",

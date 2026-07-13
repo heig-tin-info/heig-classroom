@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 
 import type { AppConfig } from "./config.js";
+import { EMAIL_KINDS } from "@hgc/contracts";
+
 import {
-  EMAIL_KINDS,
   queueEmail,
   resolvedPrefs,
   unsubSignature,

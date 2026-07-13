@@ -11,29 +11,12 @@ import type { FastifyInstance } from "fastify";
 
 import { and, eq } from "drizzle-orm";
 
+import { EMAIL_KINDS, type EmailKind } from "@hgc/contracts";
+
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { enrollments, users } from "./db/schema.js";
 import { EMAIL_QUEUE, type EmailJobData } from "./jobs.js";
-
-/**
- * Notification catalogue. `audience` only drives which toggles each role sees
- * in the settings; the trigger sites decide the actual recipient.
- */
-export const EMAIL_KINDS = {
-  "assignment.published": { audience: "student", default: true },
-  "deadline.reminder": { audience: "student", default: true },
-  "grade.final": { audience: "student", default: true },
-  "repo.invitation": { audience: "student", default: true },
-  "provision.error": { audience: "teacher", default: true },
-  "deadline.applied": { audience: "teacher", default: true },
-} as const;
-
-export type EmailKind = keyof typeof EMAIL_KINDS;
-
-export function isEmailKind(k: string): k is EmailKind {
-  return k in EMAIL_KINDS;
-}
 
 /** Resolved preference map (defaults filled in) for the settings API. */
 export function resolvedPrefs(prefs: Record<string, boolean> | null): Record<EmailKind, boolean> {

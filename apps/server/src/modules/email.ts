@@ -10,7 +10,9 @@ import { z } from "zod";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { users } from "../db/schema.js";
-import { isEmailKind, verifyUnsubSignature } from "../mailer.js";
+import { isEmailKind } from "@hgc/contracts";
+
+import { verifyUnsubSignature } from "../mailer.js";
 
 const UnsubQuery = z.object({ u: z.uuid(), k: z.string(), s: z.string() });
 

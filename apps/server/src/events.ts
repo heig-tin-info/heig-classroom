@@ -6,17 +6,11 @@
  */
 import { EventEmitter } from "node:events";
 
+import type { NoticeKind } from "@hgc/contracts";
+
 /** Real-time notification attached to an event (toast in the UI). */
 export interface AppNotice {
-  kind:
-    | "student_joined"
-    | "assignment_accepted"
-    | "commit_pushed"
-    | "grade_captured"
-    | "protected_reverted"
-    | "deadline_applied"
-    | "llm_review_dispatched"
-    | "sync";
+  kind: NoticeKind;
   message: string;
 }
 

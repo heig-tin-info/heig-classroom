@@ -7,7 +7,9 @@ import { eq } from "drizzle-orm";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { avatars, teacherGrants, users } from "../db/schema.js";
-import { isEmailKind, resolvedPrefs } from "../mailer.js";
+import { isEmailKind } from "@hgc/contracts";
+
+import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {

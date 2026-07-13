@@ -5,10 +5,10 @@ import { ArrowLeft, BellRing, GraduationCap, Languages, Mail, School, ShieldChec
 import { AdminPanel } from "./AdminPanel";
 import { HelpIcon } from "./help";
 import { useI18n, LOCALES } from "./i18n";
-import { NOTICE_KINDS, notifyPrefs, setNotifyPref, type NoticeKind } from "./notify";
-import { AvatarEditor } from "./AvatarEditor";
-import type { Me } from "@hgc/contracts";
+import { EMAIL_KINDS, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
 
+import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
+import { AvatarEditor } from "./AvatarEditor";
 import { api } from "./api";
 import { Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
 
@@ -68,16 +68,6 @@ function NotificationSettings() {
   );
 }
 
-/** Mirror of the server's EMAIL_KINDS catalogue (mailer.ts). */
-const EMAIL_KINDS: { kind: string; audience: "student" | "teacher" }[] = [
-  { kind: "assignment.published", audience: "student" },
-  { kind: "deadline.reminder", audience: "student" },
-  { kind: "grade.final", audience: "student" },
-  { kind: "repo.invitation", audience: "student" },
-  { kind: "provision.error", audience: "teacher" },
-  { kind: "deadline.applied", audience: "teacher" },
-];
-
 /** Per-kind email opt-outs, persisted on the account (server-side). */
 function EmailSettings({ me }: { me: Me }) {
   const { t } = useI18n();
@@ -90,7 +80,9 @@ function EmailSettings({ me }: { me: Me }) {
   // Teachers/admins can hold student seats (self-enroll), so they get every
   // toggle; students only see the kinds that can reach them.
   const teacher = me.role === "teacher" || me.role === "admin";
-  const kinds = EMAIL_KINDS.filter((k) => teacher || k.audience === "student");
+  const kinds = (Object.keys(EMAIL_KINDS) as EmailKind[]).filter(
+    (kind) => teacher || EMAIL_KINDS[kind].audience === "student",
+  );
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -99,7 +91,7 @@ function EmailSettings({ me }: { me: Me }) {
         <span className="text-xs text-zinc-400">{t("settings.emailsHint")}</span>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        {kinds.map(({ kind }) => (
+        {kinds.map((kind) => (
           <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
             <input
               type="checkbox"
