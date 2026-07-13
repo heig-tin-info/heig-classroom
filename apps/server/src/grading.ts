@@ -76,7 +76,7 @@ export async function isEligible(
 }
 
 /** GR-14: `after_deadline` based on the server receipt time of the commit. */
-async function isAfterDeadline(
+export async function isAfterDeadline(
   app: FastifyInstance,
   ctx: RepoCtx,
   headSha: string,
