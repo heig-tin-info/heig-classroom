@@ -118,29 +118,56 @@ test importés ; l'admin est `SUPER_ADMIN_EMAIL` ; les teachers se gèrent dans 
 Le déploiement est fait par le CI (`.github/workflows/ci.yml`) : chaque push
 sur `main` passe les checks, construit l'image sur GitHub Actions, la pousse
 sur GHCR (`ghcr.io/heig-tin-info/heig-classroom`, tags `latest` + sha), puis
-le job `deploy` se connecte à la VM et fait `git pull` + `docker compose pull
-app` + `up -d` — quelques secondes, zéro contention.
+le job `deploy` se connecte en SSH à la VM et déclenche `deploy.sh` (pull de
+l'image + `up -d`) — quelques secondes, zéro contention.
 
 **Ne jamais builder sur la VM** (453 MiB / 1 CPU) : un build local fait
 swapper l'hôte et étrangle Postgres — timeouts `Connection terminated` sur
 login/ticker/pg-boss, vécu le 2026-07-10 — et remplit le disque (~1 G de
 cache builder par cycle).
 
-Prérequis (une fois) : secret de repo `DEPLOY_SSH_KEY` = clé privée ed25519
-dédiée dont la clé publique est dans `/root/.ssh/authorized_keys` de la VM.
+### Sécurité de l'accès CI → VM (forced command)
+
+La clé du CI est épinglée à `deploy.sh` dans `authorized_keys` : avec cette
+clé le runner ne peut **que** déployer, jamais ouvrir un shell (même en cas
+de fuite du secret). Le package GHCR reste privé : le runner passe son token
+éphémère comme « commande » SSH (→ `$SSH_ORIGINAL_COMMAND`), que `deploy.sh`
+utilise pour le `docker login` le temps du pull — aucun credential registre
+n'est stocké sur la VM.
+
+### Mise en place (une fois)
+
+1. Générer une paire dédiée :
+   ```bash
+   ssh-keygen -t ed25519 -f ci_deploy -N "" -C ci-deploy@heig-classroom
+   ```
+2. Clé **privée** → **secret Actions** (⚠ pas une Deploy Key) :
+   ```bash
+   gh secret set DEPLOY_SSH_KEY --repo heig-tin-info/heig-classroom < ci_deploy
+   ```
+3. Clé **publique** → `authorized_keys` de la VM, épinglée à `deploy.sh` :
+   ```bash
+   # sur la VM
+   printf 'command="/opt/heig-classroom/deploy.sh",restrict %s\n' \
+     "$(cat ci_deploy.pub)" >> /root/.ssh/authorized_keys
+   ```
+   (`deploy.sh` arrive par `git pull` ; il est versionné et déjà exécutable.)
+
 Sans le secret, le job `deploy` se skippe proprement (l'image est quand même
 publiée sur GHCR).
 
-Déploiement manuel (si le CI est indisponible) :
+### Déploiement manuel (si le CI est indisponible)
 
 ```bash
 cd /opt/heig-classroom && git pull --ff-only
-# GHCR privé : docker login ghcr.io avec un PAT read:packages
+echo <PAT read:packages> | docker login ghcr.io -u heig-tin-info --password-stdin
 docker compose -f compose.prod.yml --env-file .env.prod pull app
 docker compose -f compose.prod.yml --env-file .env.prod up -d
 ```
 
-Rollback : les tags sha restent sur GHCR —
+### Rollback
+
+Les tags sha restent sur GHCR :
 
 ```bash
 IMAGE_TAG=<sha du commit sain> docker compose -f compose.prod.yml \

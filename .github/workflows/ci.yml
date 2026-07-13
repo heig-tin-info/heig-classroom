@@ -48,10 +48,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Deploy = ssh + compose pull + up -d (a few seconds, zero contention).
-  # Requires the DEPLOY_SSH_KEY secret (private key whose public half is in
-  # the VM's authorized_keys); without it the job no-ops so the pipeline
-  # stays green while the key is not provisioned yet.
+  # Deploy: the runner SSHes to the VM, whose authorized_keys pins the CI key
+  # to /opt/heig-classroom/deploy.sh (forced command) — the key can ONLY
+  # deploy, never open a shell. The ephemeral GHCR token is passed as the SSH
+  # command (→ $SSH_ORIGINAL_COMMAND) so the private image pulls without any
+  # credential stored on the VM. Requires the DEPLOY_SSH_KEY secret (private
+  # key whose public half is that forced-command line); without it the job
+  # no-ops so the pipeline stays green until the key is provisioned.
   deploy:
     needs: image
     runs-on: ubuntu-latest
@@ -74,17 +77,8 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           echo 'classroom.chevallier.io ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDlhwwqTDukdVfgHNPbi6hTovwF1MhZEKnDj7NSdHYQl' >> ~/.ssh/known_hosts
-      - name: Pull image and restart (no build on the VM)
+      - name: Trigger deploy (forced command runs deploy.sh on the VM)
         if: env.DEPLOY_SSH_KEY != ''
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          ssh root@classroom.chevallier.io "
-            set -eu
-            cd /opt/heig-classroom
-            git pull --ff-only
-            echo '$GHCR_TOKEN' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin
-            docker compose -f compose.prod.yml --env-file .env.prod pull app
-            docker compose -f compose.prod.yml --env-file .env.prod up -d
-            docker image prune -f
-          "
+        run: ssh -i ~/.ssh/id_ed25519 root@classroom.chevallier.io "$GHCR_TOKEN"
