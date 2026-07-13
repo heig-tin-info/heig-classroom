@@ -25,7 +25,7 @@ import { HelpIcon } from "./help";
 import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
-import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, useSortableTable } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, useSortableTable, Z } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
 
@@ -36,7 +36,7 @@ function RosterPopover({ room, children }: { room: ClassroomSummary; children: R
     <span className="group/pop relative inline-flex">
       {children}
       {room.roster.length > 0 ? (
-        <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-max max-w-64 rounded-xl bg-white p-3 text-left shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800">
+        <span className={`pointer-events-none absolute left-0 top-full ${Z.popover} mt-1 hidden w-max max-w-64 rounded-xl bg-white p-3 text-left shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800`}>
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-400">
             {t("classrooms.roster")}
           </span>

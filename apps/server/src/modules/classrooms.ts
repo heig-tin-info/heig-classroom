@@ -106,7 +106,7 @@ export async function classroomsPlugin(
             .where(eq(classrooms.orgId, org.id));
           publish(
             "orgs",
-            rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`]),
+            rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
           );
         }
       }

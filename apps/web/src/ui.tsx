@@ -5,6 +5,23 @@ import type { ComponentType, ReactNode } from "react";
 
 import { HelpIcon } from "./help";
 
+/**
+ * Stacking scale (SSOT): popovers < modal = toasts < modal overlay <
+ * help drawer < tooltips. Literal Tailwind tokens live here so the JIT
+ * scanner picks them up; compose with template strings.
+ */
+export const Z = {
+  popover: "z-30",
+  modal: "z-50",
+  toast: "z-50",
+  /** Above the modal: CreatingOverlay greys the whole dialog out. */
+  overlay: "z-[60]",
+  /** Help must be able to slide over a modal that summoned it. */
+  helpBackdrop: "z-[75]",
+  help: "z-[80]",
+  tooltip: "z-[90]",
+} as const;
+
 // --- Sortable tables (one motif for every hand-rolled table) ---
 
 export interface SortState<K extends string> {
@@ -121,7 +138,7 @@ export function IconButton({
         ? createPortal(
             <span
               role="tooltip"
-              className="pointer-events-none fixed z-[90] whitespace-nowrap rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600"
+              className={`pointer-events-none fixed ${Z.tooltip} whitespace-nowrap rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600`}
               style={{
                 left: tip.x,
                 top: tip.y,
@@ -177,7 +194,7 @@ export function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm"
+      className={`fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm`}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -313,18 +330,24 @@ export function EmptyState({
 export function Field({
   label,
   help,
+  fullWidth,
   className = "",
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & { label: string; help?: string }) {
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  help?: string;
+  /** Stretch label and input to the parent width (grid cells). */
+  fullWidth?: boolean;
+}) {
   return (
-    <label className={`flex flex-col gap-1 text-sm ${className.includes("w-full") ? "w-full" : ""}`}>
+    <label className={`flex flex-col gap-1 text-sm ${fullWidth ? "w-full" : ""}`}>
       <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
         {label}
         {help ? <HelpIcon topic={help} /> : null}
       </span>
       <input
         {...props}
-        className={`rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}
+        className={`rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900 ${fullWidth ? "w-full" : ""} ${className}`}
       />
     </label>
   );

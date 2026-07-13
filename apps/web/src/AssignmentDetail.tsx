@@ -32,7 +32,7 @@ import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
-import { Badge, Button, GithubIcon, isoDateTime, SortHeader, useSortableTable } from "./ui";
+import { Badge, Button, GithubIcon, isoDateTime, SortHeader, useSortableTable, Z } from "./ui";
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
@@ -106,7 +106,7 @@ function RepoLink({ fullName, login }: { fullName: string; login: string | null 
       >
         <GithubIcon className="size-4" />
       </a>
-      <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden whitespace-nowrap rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800">
+      <span className={`pointer-events-none absolute left-0 top-full ${Z.popover} mt-1 hidden whitespace-nowrap rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800`}>
         {login ? (
           <span className="font-medium">{login}</span>
         ) : null}

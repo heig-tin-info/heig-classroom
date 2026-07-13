@@ -23,6 +23,7 @@ import {
   isoDateTime,
   localDateTimeInputValue,
   Progress,
+  Z,
 } from "./ui";
 
 // --- Repository tree with protected-file checkboxes ---
@@ -129,9 +130,9 @@ function CreatingOverlay() {
     return () => clearInterval(id);
   }, []);
   return (
-    // Above the modal (z-50): the whole dialog greys out, spinner on top.
+    // Above the modal (Z.modal): the whole dialog greys out, spinner on top.
     <div
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm dark:bg-zinc-950/70"
+      className={`fixed inset-0 ${Z.overlay} flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm dark:bg-zinc-950/70`}
       role="status"
       aria-live="polite"
     >
@@ -312,7 +313,7 @@ export function AssignmentForm({
           placeholder="Lab 1 — Pointers"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          className="w-full"
+          fullWidth
           required
         />
       </div>
@@ -324,7 +325,7 @@ export function AssignmentForm({
           type="datetime-local"
           value={startAt}
           onChange={(e) => setStartAt(e.target.value)}
-          className="w-full"
+          fullWidth
           required
         />
         <Field
@@ -333,7 +334,7 @@ export function AssignmentForm({
           type="datetime-local"
           value={deadlineAt}
           onChange={(e) => setDeadlineAt(e.target.value)}
-          className="w-full"
+          fullWidth
           required
         />
       </div>

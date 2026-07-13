@@ -19,7 +19,7 @@ import {
   users,
   webhookDeliveries,
 } from "./db/schema.js";
-import { publish } from "./events.js";
+import { publish, type Topic } from "./events.js";
 import { githubApp, installationClient } from "./github/app.js";
 import { fetchRepoLiveState } from "./github/metrics.js";
 import { ingestCompletedRun, type RepoCtx } from "./grading.js";
@@ -148,7 +148,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
       ),
     );
   const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
-  const touched = new Set<string>();
+  const touched = new Set<Topic>();
   let ingested = 0;
   for (const { repo, assignment, classroomId, installationId } of rows) {
     let client = clients.get(installationId!);
@@ -217,7 +217,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
       ),
     );
   const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
-  const touched = new Set<string>();
+  const touched = new Set<Topic>();
   let updated = 0;
   for (const { repo, classroomId, installationId, githubLogin } of rows) {
     let client = clients.get(installationId!);

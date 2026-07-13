@@ -130,7 +130,7 @@ export async function githubLinkPlugin(
         .where(eq(enrollments.userId, req.user!.id));
       publish("github", [
         `user:${req.user!.id}`,
-        ...rooms.map((r) => `classroom:${r.id}`),
+        ...rooms.map((r) => `classroom:${r.id}` as const),
       ]);
       await audit(app.db, {
         actorUserId: req.user!.id,

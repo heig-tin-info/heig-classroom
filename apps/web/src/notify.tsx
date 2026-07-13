@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
 
+import { Z } from "./ui";
+
 /**
  * Real-time notifications: SSE events may carry a typed notice; enabled ones
  * pop as toasts at the bottom left and auto-dismiss. Preferences are per
@@ -94,7 +96,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ notify }}>
       {children}
-      <div className="pointer-events-none fixed bottom-4 left-4 z-50 flex flex-col gap-2">
+      <div className={`pointer-events-none fixed bottom-4 left-4 ${Z.toast} flex flex-col gap-2`}>
         {toasts.map((t) => {
           const Icon = ICONS[t.kind];
           return (

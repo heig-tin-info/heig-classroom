@@ -171,7 +171,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
     });
     publish(
       "repos",
-      repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),
+      [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
     );
     if (claimedNow) {
       const teacher = await mailRecipient(app, row.teacherId);

@@ -189,7 +189,7 @@ export function makeSyncHandler(app: FastifyInstance, config: AppConfig) {
     });
     publish(
       "repos",
-      repos.map((r) => `user:${r.userId}`).concat(`classroom:${row.classroomId}`),
+      [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
     );
     if (failures.length > 0) {
       throw new Error(`sync incomplete: ${failures.join(", ")}`);

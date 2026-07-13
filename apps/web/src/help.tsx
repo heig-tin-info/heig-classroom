@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 
 import { useI18n } from "./i18n";
 import { Markdown } from "./markdown";
+import { Z } from "./ui";
 
 /**
  * Contextual help: small "?" icons on the main components open a collapsible
@@ -63,9 +64,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
       {/* Transparent overlay to capture the outside click while open. Above
           the modals (z-50): help opened from a dialog must not slide UNDER
           its backdrop — and closing the help must not close the dialog. */}
-      {topic ? <div className="fixed inset-0 z-[75]" onClick={() => setTopic(null)} /> : null}
+      {topic ? <div className={`fixed inset-0 ${Z.helpBackdrop}`} onClick={() => setTopic(null)} /> : null}
       <div
-        className={`fixed inset-y-0 right-0 z-[80] w-80 transform bg-white shadow-[-8px_0_32px_rgb(0_0_0/0.12)] transition-transform duration-200 dark:bg-zinc-900 dark:shadow-[-8px_0_32px_rgb(0_0_0/0.5)] ${
+        className={`fixed inset-y-0 right-0 ${Z.help} w-80 transform bg-white shadow-[-8px_0_32px_rgb(0_0_0/0.12)] transition-transform duration-200 dark:bg-zinc-900 dark:shadow-[-8px_0_32px_rgb(0_0_0/0.5)] ${
           source ? "translate-x-0" : "translate-x-full"
         }`}
         role="complementary"
