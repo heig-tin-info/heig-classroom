@@ -8,7 +8,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 
-import type { ClassroomSummary } from "./api";
+import type { ClassroomSummary } from "@hgc/contracts";
 import { HelpIcon } from "./help";
 import { Card, EmptyState, IconButton, OrgAvatar } from "./ui";
 

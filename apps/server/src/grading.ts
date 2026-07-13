@@ -10,6 +10,7 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import type { Octokit } from "octokit";
 
+import type { GradeView } from "@hgc/contracts";
 import { extractGrade, GRADE_ANNOTATION_TITLE } from "@hgc/domain";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, gradeRuns, pushReceipts, studentRepos } from "./db/schema.js";
@@ -117,21 +118,6 @@ export async function selectGradeRun(
   return row?.id ?? null;
 }
 
-/** API view of a GradeRun (GR-10/11), same shape on the student and teacher sides. */
-export interface GradeView {
-  points: number | null;
-  max: number | null;
-  testsPassed: number | null;
-  testsTotal: number | null;
-  parseStatus: string;
-  conclusion: string;
-  sha: string;
-  branch: string;
-  kind: "ci" | "llm";
-  afterDeadline: boolean;
-  completedAt: Date;
-}
-
 export function gradeView(run: typeof gradeRuns.$inferSelect): GradeView {
   return {
     points: run.gradePoints,
@@ -144,7 +130,9 @@ export function gradeView(run: typeof gradeRuns.$inferSelect): GradeView {
     branch: run.headBranch,
     kind: run.kind,
     afterDeadline: run.afterDeadline,
-    completedAt: run.completedAt,
+    // Wire format (GradeView contract): the timestamp travels as an ISO
+    // string — identical to what JSON serialization produced before.
+    completedAt: run.completedAt.toISOString(),
   };
 }
 

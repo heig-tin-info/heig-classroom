@@ -16,7 +16,9 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { api, ApiError, type RosterEntry } from "./api";
+import type { RosterEntry } from "@hgc/contracts";
+
+import { api, ApiError } from "./api";
 import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime } from "./ui";
 
 const cell = "px-3 py-2";

@@ -22,68 +22,22 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import type {
+  ActivityData,
+  AssignmentDetailPayload,
+  AssignmentDetailStudent,
+  Commit,
+  GradeRunHistory,
+  GradeView,
+} from "@hgc/contracts";
+
 import { api, ApiError } from "./api";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
 import { Badge, Button, GithubIcon, isoDateTime, Modal } from "./ui";
 
-export interface GradeView {
-  points: number | null;
-  max: number | null;
-  testsPassed: number | null;
-  testsTotal: number | null;
-  parseStatus: "ok" | "no_annotation" | "malformed" | "multiple" | "fallback";
-  conclusion: string;
-  sha: string;
-  branch: string;
-  afterDeadline: boolean;
-  completedAt: string;
-}
-
-interface DetailStudent {
-  enrollmentId: string;
-  nom: string;
-  prenom: string;
-  email: string;
-  claimStatus: "pending" | "claimed";
-  githubLogin: string | null;
-  repo: {
-    id: string;
-    fullName: string | null;
-    provisionStatus: "pending" | "ok" | "error";
-    provisionError: string | null;
-    invitationStatus: "none" | "pending" | "accepted";
-    acceptedAt: string;
-    lockedAt: string | null;
-    syncPr: { number: number; state: "open" | "merged" | "closed" | null } | null;
-    grade: GradeView | null;
-    frozenGrade: GradeView | null;
-    lastCommitSha: string | null;
-    lastCommitAt: string | null;
-    commitCount: number | null;
-    checksPassed: number | null;
-    checksTotal: number | null;
-    ciStatus: "none" | "pending" | "pass" | "fail";
-    missing?: boolean;
-  } | null;
-}
-
-interface Detail {
-  assignment: {
-    id: string;
-    name: string;
-    state: "draft" | "published" | "locked";
-    startAt: string;
-    deadlineAt: string;
-    sourceAheadSha: string | null;
-    sourcePushedAt: string | null;
-    syncedAt: string | null;
-  };
-  students: DetailStudent[];
-}
-
-function CiBadge({ s, tests }: { s: DetailStudent["repo"]; tests?: GradeView | null }) {
+function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
   // counts: "2/10 tests" says more than "pass 1/1".
   if (tests?.testsTotal) {
@@ -144,12 +98,6 @@ export function GradeBadge({
   );
 }
 
-interface HistoryRun extends GradeView {
-  id: string;
-  workflowRunId: number;
-  runAttempt: number;
-}
-
 /** History of a student's CI runs (GR-11/13). */
 function GradeHistoryModal({
   classroomId,
@@ -166,11 +114,7 @@ function GradeHistoryModal({
   student: string;
   onClose: () => void;
 }) {
-  const history = useQuery<{
-    currentGradeRunId: string | null;
-    frozenGradeRunId: string | null;
-    runs: HistoryRun[];
-  }>({
+  const history = useQuery<GradeRunHistory>({
     queryKey: ["grade-runs", repoId],
     queryFn: () =>
       api(
@@ -297,20 +241,6 @@ function RepoLink({ fullName, login }: { fullName: string; login: string | null 
       </span>
     </span>
   );
-}
-
-interface Commit {
-  sha: string;
-  message: string;
-  author: string;
-  date: string | null;
-  parents: string[];
-}
-
-interface ActivityData {
-  commits: Commit[];
-  branches: { name: string; headSha: string }[];
-  tests: { date: string; passed: number | null; total: number | null }[];
 }
 
 /**
@@ -651,7 +581,7 @@ function StudentRow({
   assignmentId: string;
   /** Deadline enforced (state locked): the displayed grade is the frozen one. */
   frozen: boolean;
-  s: DetailStudent;
+  s: AssignmentDetailStudent;
 }) {
   const t = useT();
   const [showHistory, setShowHistory] = useState(false);
@@ -885,7 +815,7 @@ function SyncBanner({
   a,
 }: {
   classroomId: string;
-  a: Detail["assignment"];
+  a: AssignmentDetailPayload["assignment"];
 }) {
   const sync = useMutation({
     mutationFn: () =>
@@ -935,7 +865,7 @@ export function AssignmentDetail({
   const [query, setQuery] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [dir, setDir] = useState<1 | -1>(1);
-  const detail = useQuery<Detail>({
+  const detail = useQuery<AssignmentDetailPayload>({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
       api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/detail`),
@@ -952,7 +882,7 @@ export function AssignmentDetail({
   const { assignment: a, students } = detail.data;
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
 
-  const sortVal = (s: DetailStudent): string | number => {
+  const sortVal = (s: AssignmentDetailStudent): string | number => {
     switch (sortKey) {
       case "name":
         return `${s.nom} ${s.prenom}`;

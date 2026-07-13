@@ -7,7 +7,9 @@ import { HelpIcon } from "./help";
 import { useI18n, LOCALES } from "./i18n";
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref, type NoticeKind } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
-import { api, type Me } from "./api";
+import type { Me } from "@hgc/contracts";
+
+import { api } from "./api";
 import { Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
 
 function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: string }) {

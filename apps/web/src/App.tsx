@@ -33,15 +33,16 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import {
-  api,
-  ApiError,
-  type ClassroomDetail,
-  type ClassroomSummary,
-  type Me,
-  type RosterEntry,
-} from "./api";
-import type { GradeView } from "./AssignmentDetail";
+import type {
+  ClassroomDetail,
+  ClassroomSummary,
+  Me,
+  StudentAssignment,
+  StudentClassroom,
+  StudentRepo,
+} from "@hgc/contracts";
+
+import { api, ApiError } from "./api";
 import { AssignmentDetail } from "./AssignmentDetail";
 import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
@@ -1038,36 +1039,6 @@ function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
 }
 
 
-interface StudentRepo {
-  fullName: string | null;
-  provisionStatus: "pending" | "ok" | "error";
-  invitationStatus: "none" | "pending" | "accepted";
-  ciStatus: "none" | "pending" | "pass" | "fail";
-  lockedAt: string | null;
-  commitCount: number | null;
-  checksPassed: number | null;
-  checksTotal: number | null;
-  grade: GradeView | null;
-  gradeFrozen: boolean;
-}
-
-interface StudentAssignmentT {
-  id: string;
-  name: string;
-  state: "published" | "locked";
-  startAt: string;
-  deadlineAt: string;
-  repo: StudentRepo | null;
-}
-
-interface StudentClassroom {
-  id: string;
-  name: string;
-  orgLogin: string;
-  teacher: string;
-  assignments: StudentAssignmentT[];
-}
-
 /** Live countdown to (or since) the deadline, refreshed every 30 s. */
 function Countdown({ deadline }: { deadline: string }) {
   const t = useT();
@@ -1134,7 +1105,7 @@ function StudentAssignmentRow({
   a,
   githubLinked,
 }: {
-  a: StudentAssignmentT;
+  a: StudentAssignment;
   githubLinked: boolean;
 }) {
   const t = useT();
@@ -1263,10 +1234,10 @@ function StudentClassroomCard({
   if (query !== "" && visible.length === 0) return null;
 
   const rank = {
-    name: (a: StudentAssignmentT) => a.name.toLowerCase(),
-    deadline: (a: StudentAssignmentT) => new Date(a.deadlineAt).getTime(),
-    status: (a: StudentAssignmentT) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
-    grade: (a: StudentAssignmentT) =>
+    name: (a: StudentAssignment) => a.name.toLowerCase(),
+    deadline: (a: StudentAssignment) => new Date(a.deadlineAt).getTime(),
+    status: (a: StudentAssignment) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
+    grade: (a: StudentAssignment) =>
       a.repo?.grade && a.repo.grade.parseStatus === "ok"
         ? a.repo.grade.points! / (a.repo.grade.max! || 1)
         : -1,

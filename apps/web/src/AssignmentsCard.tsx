@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import type { Assignment, OrgRepo, RepoTree } from "@hgc/contracts";
+
 import { HelpIcon } from "./help";
 import { api, ApiError } from "./api";
 import {
@@ -34,38 +36,6 @@ import {
   Modal,
   Progress,
 } from "./ui";
-
-interface Assignment {
-  id: string;
-  name: string;
-  slug: string;
-  state: "draft" | "published" | "locked";
-  startAt: string;
-  deadlineAt: string;
-  graceMinutes: number;
-  sourceFullName: string;
-  squashedFullName: string | null;
-  sourceStrategy: "whole" | "squash";
-  deadlineStrategy: "lock" | "commit";
-  branches: string[];
-  protectedFiles: string[];
-}
-
-interface OrgRepo {
-  name: string;
-  defaultBranch: string;
-}
-
-interface RepoTree {
-  name: string;
-  defaultBranch: string;
-  branches: string[];
-  headSha: string;
-  headDate: string | null;
-  tree: { path: string; type: "blob" | "tree" }[];
-  truncated: boolean;
-  suggestedProtected: string[];
-}
 
 function StateBadge({ state }: { state: Assignment["state"] }) {
   if (state === "published") return <Badge tone="green">published</Badge>;
