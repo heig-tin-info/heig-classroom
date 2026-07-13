@@ -1,8 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   Check,
   CheckCircle2,
   Clock,
@@ -14,12 +12,12 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import type { RosterEntry } from "@hgc/contracts";
 
 import { api, ApiError, apiErrorMessage } from "./api";
-import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime } from "./ui";
+import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime, SortHeader, useSortableTable } from "./ui";
 
 const cell = "px-3 py-2";
 
@@ -217,40 +215,17 @@ export function RosterTable({
   classroomId: string;
   roster: RosterEntry[];
 }) {
-  const [sortKey, setSortKey] = useState<SortKey>("nom");
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
-  const sorted = useMemo(() => {
-    const data = [...roster];
-    data.sort((a, b) => {
-      const x = a[sortKey] ?? "";
-      const y = b[sortKey] ?? "";
-      return String(x).localeCompare(String(y), undefined, { sensitivity: "base" }) * sortDir;
-    });
-    return data;
-  }, [roster, sortKey, sortDir]);
-
-  function SortHeader({ k, children }: { k: SortKey; children: React.ReactNode }) {
-    const active = sortKey === k;
-    return (
-      <th className={`${cell} font-medium`}>
-        <button
-          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
-          onClick={() => {
-            if (active) setSortDir((d) => (d === 1 ? -1 : 1));
-            else {
-              setSortKey(k);
-              setSortDir(1);
-            }
-          }}
-        >
-          {children}
-          {active ? (
-            sortDir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
-          ) : null}
-        </button>
-      </th>
-    );
-  }
+  const { sorted, sort, toggle } = useSortableTable(
+    roster,
+    (r, k: SortKey) => r[k] ?? "",
+    { key: "nom", dir: 1 },
+    (x, y) => String(x).localeCompare(String(y), undefined, { sensitivity: "base" }),
+  );
+  const Th = ({ k, children }: { k: SortKey; children: React.ReactNode }) => (
+    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium`}>
+      {children}
+    </SortHeader>
+  );
 
   if (roster.length === 0) {
     return (
@@ -264,12 +239,12 @@ export function RosterTable({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-            <SortHeader k="nom">Last name</SortHeader>
-            <SortHeader k="prenom">First name</SortHeader>
-            <SortHeader k="email">E-mail</SortHeader>
-            <SortHeader k="status">Status</SortHeader>
-            <SortHeader k="githubLogin">GitHub</SortHeader>
-            <SortHeader k="lastLoginAt">Last sign-in</SortHeader>
+            <Th k="nom">Last name</Th>
+            <Th k="prenom">First name</Th>
+            <Th k="email">E-mail</Th>
+            <Th k="status">Status</Th>
+            <Th k="githubLogin">GitHub</Th>
+            <Th k="lastLoginAt">Last sign-in</Th>
             <th className={cell} aria-label="Actions" />
           </tr>
         </thead>

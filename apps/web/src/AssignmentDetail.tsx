@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
@@ -34,7 +32,7 @@ import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
-import { Badge, Button, GithubIcon, isoDateTime } from "./ui";
+import { Badge, Button, GithubIcon, isoDateTime, SortHeader, useSortableTable } from "./ui";
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
@@ -410,27 +408,14 @@ export function AssignmentDetail({
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [dir, setDir] = useState<1 | -1>(1);
   const detail = useQuery<AssignmentDetailPayload>({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
       api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/detail`),
   });
 
-  if (detail.isLoading) {
-    return (
-      <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-        Fetching repository states from GitHub…
-      </p>
-    );
-  }
-  if (!detail.data) return null;
-  const { assignment: a, students } = detail.data;
-  const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
-
-  const sortVal = (s: AssignmentDetailStudent): string | number => {
-    switch (sortKey) {
+  const rank = (s: AssignmentDetailStudent, key: SortKey): string | number => {
+    switch (key) {
       case "name":
         return `${s.nom} ${s.prenom}`;
       case "lastCommitAt":
@@ -443,44 +428,33 @@ export function AssignmentDetail({
         return s.repo?.provisionStatus === "ok" ? 2 : s.claimStatus === "claimed" ? 1 : 0;
     }
   };
+  const students = detail.data?.students ?? [];
   const shown = fuzzyFilter(
     query,
     students,
     (s) => `${s.nom} ${s.prenom} ${s.githubLogin ?? ""} ${s.email}`,
   );
-  const rows =
-    query.trim() !== ""
-      ? shown // la recherche trie déjà par pertinence
-      : [...shown].sort((x, y) => {
-          const vx = sortVal(x);
-          const vy = sortVal(y);
-          return (
-            (typeof vx === "number" && typeof vy === "number"
-              ? vx - vy
-              : String(vx).localeCompare(String(vy))) * dir
-          );
-        });
+  const { sorted, sort, toggle } = useSortableTable(shown, rank, { key: "name", dir: 1 });
 
-  function Th({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) {
-    const active = sortKey === k;
+  if (detail.isLoading) {
     return (
-      <th className={`${cell} font-medium ${right ? "text-right" : ""}`}>
-        <button
-          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
-          onClick={() => {
-            if (active) setDir((d) => (d === 1 ? -1 : 1));
-            else {
-              setSortKey(k);
-              setDir(1);
-            }
-          }}
-        >
-          {children}
-          {active ? (dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : null}
-        </button>
-      </th>
+      <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
+        Fetching repository states from GitHub…
+      </p>
     );
   }
+  if (!detail.data) return null;
+  const a = detail.data.assignment;
+  const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
+
+  // La recherche trie déjà par pertinence.
+  const rows = query.trim() !== "" ? shown : sorted;
+
+  const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (
+    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium ${right ? "text-right" : ""}`}>
+      {children}
+    </SortHeader>
+  );
 
   return (
     <div className="space-y-3">

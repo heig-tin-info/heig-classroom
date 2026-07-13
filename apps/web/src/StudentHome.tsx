@@ -1,8 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
-  ArrowDown,
-  ArrowUp,
   Building2,
   CheckCircle2,
   ClipboardList,
@@ -22,7 +20,7 @@ import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
-import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar } from "./ui";
+import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, useSortableTable } from "./ui";
 
 /** Live countdown to (or since) the deadline, refreshed every 30 s. */
 function Countdown({ deadline }: { deadline: string }) {
@@ -209,54 +207,36 @@ function StudentClassroomCard({
   query: string;
 }) {
   const t = useT();
-  const [sort, setSort] = useState<{ key: StudentSortKey; dir: 1 | -1 }>({
-    key: "deadline",
-    dir: 1,
-  });
-
   const roomHit = query === "" || fuzzyFilter(query, [room], (r) => r.name).length > 0;
   const visible = roomHit ? room.assignments : fuzzyFilter(query, room.assignments, (a) => a.name);
-  if (query !== "" && visible.length === 0) return null;
 
-  const rank = {
-    name: (a: StudentAssignment) => a.name.toLowerCase(),
-    deadline: (a: StudentAssignment) => new Date(a.deadlineAt).getTime(),
-    status: (a: StudentAssignment) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
-    grade: (a: StudentAssignment) =>
+  const ranks: Record<StudentSortKey, (a: StudentAssignment) => string | number> = {
+    name: (a) => a.name.toLowerCase(),
+    deadline: (a) => new Date(a.deadlineAt).getTime(),
+    status: (a) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
+    grade: (a) =>
       a.repo?.grade && a.repo.grade.parseStatus === "ok"
         ? a.repo.grade.points! / (a.repo.grade.max! || 1)
         : -1,
-  }[sort.key];
-  const sorted = [...visible].sort((a, b) => {
-    const va = rank(a);
-    const vb = rank(b);
-    return (va < vb ? -1 : va > vb ? 1 : 0) * sort.dir;
-  });
+  };
+  const { sorted, sort, toggle } = useSortableTable(
+    visible,
+    (a, key: StudentSortKey) => ranks[key](a),
+    { key: "deadline", dir: 1 },
+    (va, vb) => (va < vb ? -1 : va > vb ? 1 : 0),
+  );
+  if (query !== "" && visible.length === 0) return null;
 
-  const Th = ({
-    k,
-    children,
-    className = "",
-  }: {
-    k: StudentSortKey;
-    children: React.ReactNode;
-    className?: string;
-  }) => (
-    <th className={`px-4 py-2 ${className}`}>
-      <button
-        onClick={() => setSort((s) => (s.key === k ? { key: k, dir: -s.dir as 1 | -1 } : { key: k, dir: 1 }))}
-        className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-700 dark:hover:text-zinc-200"
-      >
-        {children}
-        {sort.key === k ? (
-          sort.dir === 1 ? (
-            <ArrowUp className="size-3" />
-          ) : (
-            <ArrowDown className="size-3" />
-          )
-        ) : null}
-      </button>
-    </th>
+  const Th = ({ k, children }: { k: StudentSortKey; children: React.ReactNode }) => (
+    <SortHeader
+      k={k}
+      sort={sort}
+      onToggle={toggle}
+      className="px-4 py-2"
+      buttonClassName="hover:text-zinc-700 dark:hover:text-zinc-200"
+    >
+      {children}
+    </SortHeader>
   );
 
   return (

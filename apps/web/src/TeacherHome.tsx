@@ -2,8 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
-  ArrowDown,
-  ArrowUp,
   Building2,
   CalendarRange,
   CheckCircle2,
@@ -27,7 +25,7 @@ import { HelpIcon } from "./help";
 import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
-import { Badge, Button, Card, EmptyState, Field, OrgAvatar } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, useSortableTable } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
 
@@ -88,50 +86,25 @@ function ClassroomsList({
 }) {
   const t = useT();
   type Key = "name" | "org" | "students" | "claimed" | "assignments" | "createdAt";
-  const [sortKey, setSortKey] = useState<Key>("name");
-  const [dir, setDir] = useState<1 | -1>(1);
   const cell = "px-3 py-2";
-  const val = (r: ClassroomSummary) =>
-    sortKey === "name"
+  const rank = (r: ClassroomSummary, key: Key) =>
+    key === "name"
       ? r.name
-      : sortKey === "org"
+      : key === "org"
         ? r.orgLogin
-        : sortKey === "students"
+        : key === "students"
           ? r.students
-          : sortKey === "claimed"
+          : key === "claimed"
             ? r.claimed
-            : sortKey === "assignments"
+            : key === "assignments"
               ? r.assignments.length
               : r.createdAt;
-  const sorted = [...rooms].sort((a, b) => {
-    const x = val(a);
-    const y = val(b);
-    return (
-      (typeof x === "number" && typeof y === "number"
-        ? x - y
-        : String(x).localeCompare(String(y))) * dir
-    );
-  });
-  function Th({ k, children, right }: { k: Key; children: React.ReactNode; right?: boolean }) {
-    const active = sortKey === k;
-    return (
-      <th className={`${cell} font-medium ${right ? "text-right" : ""}`}>
-        <button
-          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
-          onClick={() => {
-            if (active) setDir((d) => (d === 1 ? -1 : 1));
-            else {
-              setSortKey(k);
-              setDir(1);
-            }
-          }}
-        >
-          {children}
-          {active ? (dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />) : null}
-        </button>
-      </th>
-    );
-  }
+  const { sorted, sort, toggle } = useSortableTable(rooms, rank, { key: "name", dir: 1 });
+  const Th = ({ k, children, right }: { k: Key; children: React.ReactNode; right?: boolean }) => (
+    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium ${right ? "text-right" : ""}`}>
+      {children}
+    </SortHeader>
+  );
   return (
     <Card>
       <div className="overflow-x-auto">

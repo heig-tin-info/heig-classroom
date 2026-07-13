@@ -1,9 +1,72 @@
-import { Building2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Building2, X } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
 import { HelpIcon } from "./help";
+
+// --- Sortable tables (one motif for every hand-rolled table) ---
+
+export interface SortState<K extends string> {
+  key: K;
+  dir: 1 | -1;
+}
+
+const defaultCompare = (x: string | number, y: string | number) =>
+  typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+
+/**
+ * Sort state + sorted rows for a client-side table: clicking the active
+ * column flips the direction, clicking another selects it ascending.
+ */
+export function useSortableTable<T, K extends string>(
+  rows: T[],
+  rank: (row: T, key: K) => string | number,
+  initial: SortState<NoInfer<K>>,
+  compare: (x: string | number, y: string | number) => number = defaultCompare,
+) {
+  const [sort, setSort] = useState<SortState<K>>(initial);
+  const toggle = (k: K) =>
+    setSort((s) => (s.key === k ? { key: k, dir: s.dir === 1 ? -1 : 1 } : { key: k, dir: 1 }));
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => compare(rank(a, sort.key), rank(b, sort.key)) * sort.dir),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rank/compare are stable per table
+    [rows, sort],
+  );
+  return { sorted, sort, toggle };
+}
+
+/** Clickable column header bound to useSortableTable. */
+export function SortHeader<K extends string>({
+  k,
+  sort,
+  onToggle,
+  children,
+  className = "",
+  buttonClassName = "hover:text-zinc-900 dark:hover:text-zinc-100",
+}: {
+  k: K;
+  sort: SortState<K>;
+  onToggle: (k: K) => void;
+  children: ReactNode;
+  className?: string;
+  buttonClassName?: string;
+}) {
+  const active = sort.key === k;
+  return (
+    <th className={className}>
+      <button
+        className={`inline-flex items-center gap-1 uppercase tracking-wide ${buttonClassName}`}
+        onClick={() => onToggle(k)}
+      >
+        {children}
+        {active ? (
+          sort.dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />
+        ) : null}
+      </button>
+    </th>
+  );
+}
 
 /**
  * Icon-only button with a real tooltip: a small dark bubble rendered in a
