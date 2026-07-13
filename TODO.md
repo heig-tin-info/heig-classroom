@@ -35,20 +35,7 @@ sans re-diagnostiquer.
 - **Lié** : la copie off-VM des backups (rclone) n'est toujours pas câblée
   (voir `compose.prod.yml`, service `backup`, et `deploy.md` §Backups).
 
-### 3. Réglage mémoire Postgres — FAIT, à surveiller
-- `compose.prod.yml` : `shared_buffers` 128→32 MiB, `max_connections` 100→40,
-  workers parallèles désactivés, etc. (commit du 2026-07-10). Correction plutôt
-  que performance, adapté à la VM. À réévaluer si la charge augmente
-  (plus d'étudiants / classes simultanées).
-
 ## Pipeline de correction
-
-### 4. Création du dépôt squashé — HTTP 500 au push — RÉGLÉ (2026-07-13) sauf nettoyage
-- **Corrigé** : retry du push avec backoff (1 s/2 s/4 s) sur erreur transitoire
-  (500/502/503, « hung up », early EOF), et réutilisation d'un dépôt cible déjà
-  existant **et vide** (leftover d'un essai raté) au lieu du 409 — « try
-  again » fonctionne désormais. Reste : supprimer à la main les `*-squashed`
-  vides orphelins dans l'org de test (7-10 juillet).
 
 ### 5. Vérifier le secret `ANTHROPIC_API_KEY` avant le test E2E
 - **Confirmé manquant** (E2E du 2026-07-12, run 29186485269 sur
@@ -58,15 +45,6 @@ sans re-diagnostiquer.
   `heig-test-classroom` (org admin requis ; token `gh` local sans `admin:org`).
   Procédure documentée dans `docs/guide/grading.md` §« Configuring the Anthropic
   API key ».
-
-### 6. ~~score/grading.yml : ne pas émettre de GRADE quand le job LLM échoue~~ — RÉGLÉ (0.7.2)
-- Corrigé dans `score@0.7.2` (2026-07-12) : `GRADING.yml` absent → le job
-  échoue avec une annotation d'erreur, sans GRADE. La release apporte aussi
-  l'annotation `TESTS::passed/total` (compteurs réels affichés par la
-  plateforme) et le bump des actions Node 24 (checkout@v7, setup-python@v6,
-  upload-artifact@v7). Shims bumpés : canonique + source/squashed/étudiant de
-  l'assignment actif. Les squashed/étudiants des assignments verrouillés
-  restent à 0.7.1 (sans effet tant qu'ils ne sont pas réouverts).
 
 ### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
 - **Contexte** (E2E 2026-07-12) : `Commit the review file` pousse
@@ -116,50 +94,27 @@ sans re-diagnostiquer.
   (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
   d'introduire une machine à états.
 
-## Refactoring dette clean-code — ÉTAT (exécuté le 2026-07-13)
+## Refactoring / dette code — reste à faire
 
-Le brief P1–P5 a été exécuté (série de commits `refactor(...)` du
-2026-07-13, un commit par lot, suite verte à chaque étape). Bilan :
+(Le brief clean-code P1–P4 a été exécuté le 2026-07-13, commits
+`refactor(...)` ; il ne reste que les points ci-dessous.)
 
-- **P1 (découpage)** — fait. Web : `App.tsx` 1564 → 135 lignes
-  (`Header.tsx`, `TeacherHome.tsx`, `ClassroomView.tsx`, `StudentHome.tsx`,
-  `Breadcrumb.tsx`) ; `AssignmentDetail.tsx` → `activity/` (graph.ts pur +
-  ActivityPanel.tsx) + `GradeHistoryModal.tsx` ; `AssignmentsCard.tsx` →
-  `AssignmentForm.tsx`. Serveur : `modules/assignments.ts` →
-  `assignments/{index,lifecycle,detail,actions,shared}.ts` (mêmes URLs).
-- **P2 (duplication)** — fait. Types de payload API dans
-  `packages/contracts/src/api.ts` (SSOT, importés des deux côtés ; `GradeView`
-  dé-dupliqué, `completedAt` sérialisé en ISO — JSON identique) ;
-  `modules/guards.ts` (teacherGuard/adminGuard + loaders `owned*`) ;
-  `github/git.ts` (`gitRunner({identity})` + `authUrl`) ;
-  `apiErrorMessage()` dans `web/api.ts` ; `useSortableTable`/`SortHeader`
-  partagés (4 tables).
-- **P3 (cohérence)** — fait. Échelle `Z.*` documentée dans `ui.tsx` ;
-  `Field` a une prop `fullWidth` explicite ; `EventType`/`Topic` typés dans
-  `events.ts` et catalogue `AuditAction` fermé dans `audit.ts`. Décision
-  i18n inscrite dans `i18n.tsx` : l'UI teacher reste EN, les surfaces
-  étudiantes passent par `t()` (en+fr).
-- **P4.1** — fait : colonne `users.email_opt_in` supprimée (migration 0017).
-- **P5 (tests)** — partiel : `github/retry`, `mailer` (prefs, HMAC unsub,
-  gate `queueEmail`) côté serveur ; première suite vitest web (fuzzy,
-  router, `buildGraph`, `compactDuration`/`humanize`). 32 tests serveur,
-  18 web.
-
-### Reste à faire
-
-1. **P5.1/P5.3 — tests dépendants de la DB** : `selectGradeRun` (GR-09),
+1. **Tests dépendants de la DB** : `selectGradeRun` (GR-09),
    `isAfterDeadline` (GR-14.3), ingestion LLM `conclusion !== success`
    jamais authoritative, claim roster en conflit. Nécessite un harnais DB
    de test (p. ex. PGlite + drizzle, ou Postgres jetable en CI) — à
    instruire avant d'écrire ces tests.
-2. **P4.2** : supprimer le fallback `GITHUB_OAUTH_CLIENT_ID/SECRET`
+2. Vars legacy `GITHUB_OAUTH_CLIENT_ID/SECRET` : supprimer le fallback
    (config.ts) **une fois** `GITHUB_APP_CLIENT_SECRET` non vide en prod.
-3. **P4.3 (ops, hors code)** : dépôts `*-squashed` orphelins,
-   `secret-probe`, secret `TEST_SECRET`, ancienne app `hgc-prod` + OAuth
-   App, `/opt/heig-classroom/deploy.old`.
-4. **P4.4** : croiser `deploy.md` §7 avec le gotcha du build on-VM (§1 Infra).
-5. **P6 — Performance (mesurer d'abord)** :
+3. Ops (manuel, hors code) : supprimer les dépôts `*-squashed` vides
+   orphelins dans `heig-test-classroom` (essais des 7-10 juillet), le dépôt
+   sonde `heig-test-classroom/secret-probe`, le secret d'org `TEST_SECRET`,
+   l'ancienne app `hgc-prod` et l'ancienne OAuth App (après bascule du
+   client secret), et `/opt/heig-classroom/deploy.old`.
+4. `deploy.md` : le §7 « Mise à jour » ne mentionne pas le gotcha du build
+   on-VM (voir §1 Infra) — croiser les deux.
+5. **Performance (mesurer d'abord)** :
    - `GET …/detail` fait un `fetchRepoLiveState` par repo étudiant à chaque
      affichage → cache court (30-60 s) ou rafraîchissement SSE asynchrone.
-   - Bundle web ~730 kB minifié (warning vite) : le découpage P1 étant fait,
-     code-split par page (dynamic import des vues teacher/student).
+   - Bundle web ~730 kB minifié (warning vite) : le découpage par page étant
+     fait, code-split (dynamic import des vues teacher/student).
