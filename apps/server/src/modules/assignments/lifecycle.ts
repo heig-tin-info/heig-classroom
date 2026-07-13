@@ -34,9 +34,6 @@ const AssignmentCreate = z
     message: "Deadline must be after the start date",
   });
 
-/** Files pre-checked as protected if they exist in the source (GH-30). */
-const PROTECTED_CANDIDATES = ["criteria.yml", "README.md", ".github/workflows/grading.yml"];
-
 function slugify(name: string): string {
   return name
     .normalize("NFD")

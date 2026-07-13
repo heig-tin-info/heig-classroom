@@ -9,7 +9,6 @@ import { z } from "zod";
 import { audit } from "../../audit.js";
 import type { AppConfig } from "../../config.js";
 import { studentRepos } from "../../db/schema.js";
-import { installationClient } from "../../github/app.js";
 import { lockStudentRepo, unlockStudentRepo } from "../../github/lock.js";
 import { SYNC_QUEUE } from "../../jobs.js";
 import { ownedAssignment, ownedClassroomWithOrg, ownedStudentRepo, teacherGuard } from "../guards.js";
@@ -158,10 +157,8 @@ export async function assignmentActionRoutes(
       async (req, reply) => {
         const owned = await ownedStudentRepo(app, req, reply);
         if (!owned) return reply;
-        if (owned.org.installationId === null) {
-          return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
-        }
-        const client = await installationClient(config, owned.org.installationId);
+        const client = await clientFor(config, reply, owned.org);
+        if (!client) return reply;
         const repoName = owned.repo.fullName!.split("/")[1]!;
         if (action === "lock") {
           await lockStudentRepo(client.octokit, owned.org.login, repoName);
@@ -197,10 +194,8 @@ export async function assignmentActionRoutes(
     async (req, reply) => {
       const owned = await ownedStudentRepo(app, req, reply);
       if (!owned) return reply;
-      if (owned.org.installationId === null) {
-        return reply.code(409).send({ error: "app_not_installed", message: "GitHub App is not installed" });
-      }
-      const client = await installationClient(config, owned.org.installationId);
+      const client = await clientFor(config, reply, owned.org);
+      if (!client) return reply;
       const repoName = owned.repo.fullName!.split("/")[1]!;
       const ref = owned.repo.defaultBranch ?? owned.assignment.branches[0] ?? "main";
       try {
