@@ -330,8 +330,8 @@ function AssignmentForm({
       <div className="grid gap-3 sm:grid-cols-2">
         {existing ? (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              Source repository
+            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+              Source repository <HelpIcon topic="assignment-source" />
             </span>
             <span className="inline-flex items-center gap-1.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">
               <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
@@ -341,8 +341,8 @@ function AssignmentForm({
           // The repository comes first: picking it pre-fills a humanized name
           // ("labo-02-quadratic" → "Labo 02 Quadratic") that stays editable.
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-              Source repository
+            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+              Source repository <HelpIcon topic="assignment-source" />
             </span>
             <select
               className={`${select} w-full`}
@@ -378,6 +378,7 @@ function AssignmentForm({
       <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Start"
+          help="assignment-dates"
           type="datetime-local"
           value={startAt}
           onChange={(e) => setStartAt(e.target.value)}
@@ -386,6 +387,7 @@ function AssignmentForm({
         />
         <Field
           label="Deadline"
+          help="assignment-dates"
           type="datetime-local"
           value={deadlineAt}
           onChange={(e) => setDeadlineAt(e.target.value)}
@@ -397,7 +399,9 @@ function AssignmentForm({
       <div className="grid gap-3 sm:grid-cols-3">
         {!existing ? (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Distributed source</span>
+            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+              Distributed source <HelpIcon topic="distributed-source" />
+            </span>
             <select
               className={`${select} w-full`}
               value={sourceStrategy}
@@ -410,7 +414,9 @@ function AssignmentForm({
         ) : null}
         {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
           <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">Branch to squash</span>
+            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+              Branch to squash <HelpIcon topic="squash-branch" />
+            </span>
             <select
               className={`${select} w-full`}
               value={branch}
@@ -425,7 +431,9 @@ function AssignmentForm({
           </label>
         ) : null}
         <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">At deadline</span>
+          <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+            At deadline <HelpIcon topic="deadline-strategy" />
+          </span>
           <select
             className={`${select} w-full`}
             value={deadlineStrategy}
