@@ -12,7 +12,7 @@ import { githubLinkPlugin } from "./auth/github-link.js";
 import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
-import { assignmentsPlugin } from "./modules/assignments.js";
+import { assignmentsPlugin } from "./modules/assignments/index.js";
 import { publish } from "./events.js";
 import { adminPlugin } from "./modules/admin.js";
 import { avatarPlugin } from "./modules/avatar.js";
