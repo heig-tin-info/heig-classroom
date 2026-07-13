@@ -1,4 +1,7 @@
 /** Portal API client: session cookies + double-submit CSRF header. */
+import { useQuery } from "@tanstack/react-query";
+
+import type { Me } from "@hgc/contracts";
 
 function csrfToken(): string {
   return (
@@ -40,4 +43,20 @@ export async function api<T>(
     throw new ApiError(res.status, await res.json().catch(() => null));
   }
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+}
+
+/** Current session, or null when signed out (401). */
+export function useMe() {
+  return useQuery<Me | null>({
+    queryKey: ["me"],
+    retry: false,
+    queryFn: async () => {
+      try {
+        return await api<Me>("/app/api/me");
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) return null;
+        throw e;
+      }
+    },
+  });
 }
