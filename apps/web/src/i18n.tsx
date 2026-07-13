@@ -8,6 +8,12 @@ import { api } from "./api";
  * chosen language to the user's account (so it follows them across devices)
  * with a localStorage mirror for an instant, flash-free first paint. English
  * is the fallback for any missing key or unset locale.
+ *
+ * Scope (decided 2026-07-13): student-facing surfaces (StudentHome, settings,
+ * emails, toasts) go through `t()` and are maintained in en+fr; teacher-only
+ * surfaces (classroom management, assignment forms, roster, admin) stay in
+ * plain English — teachers work in English here and duplicating those strings
+ * is not worth the upkeep. Don't add `t()` to teacher-only components.
  */
 export type Locale = "en" | "fr";
 
