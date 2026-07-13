@@ -58,6 +58,9 @@ export async function assignmentDetailRoutes(
 
       const provisioned = repos.filter((r) => r.provisionStatus === "ok" && r.fullName);
       if (provisioned.length > 0 && owned.org.installationId !== null) {
+        // Instrumentation for the planned live-state cache: N GitHub calls
+        // per view; decide TTL vs SSE refresh on these numbers.
+        const liveStart = Date.now();
         const client = await installationClient(config, owned.org.installationId);
         await Promise.all(
           provisioned.map(async (r) => {
@@ -79,6 +82,10 @@ export async function assignmentDetailRoutes(
               req.log.warn({ err, repo: r.fullName }, "live state fetch failed");
             }
           }),
+        );
+        req.log.info(
+          { assignment: a.id, repos: provisioned.length, ms: Date.now() - liveStart },
+          "detail: live repo states fetched",
         );
       }
 
