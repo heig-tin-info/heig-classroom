@@ -6,27 +6,30 @@ sans re-diagnostiquer.
 
 ## Infra / déploiement
 
-### 1. Sortir le build d'image de la VM de prod — TOUJOURS À FAIRE (vérifié 2026-07-13)
-- **État vérifié le 2026-07-13** : `ci.yml` ne fait que les checks
-  (build/typecheck/test), aucun build d'image ni push GHCR ; sur la VM,
-  `compose.prod.yml` a toujours `build: .` → le déploiement builde sur place.
-  Disque : monté à **95 %** ; `docker builder prune -f` + `image prune -f`
-  passés ce jour → **83 %** (1.5 G libres). Le prune n'est qu'un palliatif :
-  chaque rebuild on-VM régénère ~1 G de cache.
-- **Problème** : le build sur la VM (453 MiB / 1 CPU) fait swapper l'hôte
-  (load 3-4) et **étrangle l'app en fonctionnement** : toutes les requêtes
-  Postgres échouent avec `Connection terminated due to connection timeout`
-  (login, ticker, pg-boss). Vécu le 2026-07-10 (500 au login pendant un
-  déploiement). Aggravé par `NODE_OPTIONS=--max-old-space-size=1536` du
-  `Dockerfile`. Un disque plein arrêterait net toutes les écritures Postgres.
-- **Correctif visé** : job `image` dans `ci.yml` (sur main) : build →
-  push `ghcr.io/heig-tin-info/heig-classroom:latest` + sha ; job `deploy` :
-  ssh sur la VM, `docker compose pull && up -d`. `compose.prod.yml` :
-  remplacer `build: .` par `image: ghcr.io/...`. Déploiement = simple pull,
-  zéro contention, zéro downtime. Mettre à jour `deploy.md` §7 dans la foulée
-  (le gotcha du build on-VM y est absent).
-- **Contournement en attendant** : ne pas redéployer (rebuild) pendant que
-  quelqu'un utilise la plateforme.
+### 1. Build CI → GHCR → deploy — PIPELINE EN PLACE (2026-07-13), un secret à poser
+- **Fait (2026-07-13)** : `ci.yml` a désormais un job `image` (build sur
+  Actions → push `ghcr.io/heig-tin-info/heig-classroom:latest` + sha, cache
+  gha) et un job `deploy` (ssh, host key épinglée → `git pull` +
+  `docker compose pull app` + `up -d` + `image prune`). `compose.prod.yml`
+  passe à `image: ghcr.io/...:${IMAGE_TAG:-latest}` (rollback par sha),
+  `deploy.md` §7 réécrit (gotcha du build on-VM inclus). Disque VM prunés le
+  même jour : 95 % → 83 %.
+- **Reste (opérateur, la création de credentials m'est bloquée)** : générer
+  une clé ed25519 dédiée, poser la clé publique dans
+  `/root/.ssh/authorized_keys` de la VM et la clé privée en secret de repo
+  `DEPLOY_SSH_KEY`. Tant que le secret manque, le job `deploy` se skippe
+  proprement (l'image est quand même publiée).
+
+  ```bash
+  ssh-keygen -t ed25519 -f /tmp/deploy_key -N "" -C gha-deploy@heig-classroom
+  ssh root@classroom.chevallier.io "cat >> /root/.ssh/authorized_keys" < /tmp/deploy_key.pub
+  gh secret set DEPLOY_SSH_KEY --repo heig-tin-info/heig-classroom < /tmp/deploy_key
+  rm /tmp/deploy_key /tmp/deploy_key.pub
+  ```
+- **Rappel du pourquoi** : un build sur la VM (453 MiB / 1 CPU) fait swapper
+  l'hôte et étrangle Postgres (`Connection terminated`, vécu 2026-07-10) et
+  remplit le disque (~1 G de cache par cycle). Ne plus jamais `--build` sur
+  la VM.
 - **Lié** : la copie off-VM des backups (rclone) n'est toujours pas câblée
   (voir `compose.prod.yml`, service `backup`, et `deploy.md` §Backups).
 

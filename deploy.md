@@ -115,10 +115,36 @@ test importés ; l'admin est `SUPER_ADMIN_EMAIL` ; les teachers se gèrent dans 
 
 ## 7. Mise à jour / rollback
 
+Le déploiement est fait par le CI (`.github/workflows/ci.yml`) : chaque push
+sur `main` passe les checks, construit l'image sur GitHub Actions, la pousse
+sur GHCR (`ghcr.io/heig-tin-info/heig-classroom`, tags `latest` + sha), puis
+le job `deploy` se connecte à la VM et fait `git pull` + `docker compose pull
+app` + `up -d` — quelques secondes, zéro contention.
+
+**Ne jamais builder sur la VM** (453 MiB / 1 CPU) : un build local fait
+swapper l'hôte et étrangle Postgres — timeouts `Connection terminated` sur
+login/ticker/pg-boss, vécu le 2026-07-10 — et remplit le disque (~1 G de
+cache builder par cycle).
+
+Prérequis (une fois) : secret de repo `DEPLOY_SSH_KEY` = clé privée ed25519
+dédiée dont la clé publique est dans `/root/.ssh/authorized_keys` de la VM.
+Sans le secret, le job `deploy` se skippe proprement (l'image est quand même
+publiée sur GHCR).
+
+Déploiement manuel (si le CI est indisponible) :
+
 ```bash
-cd /opt/heig-classroom/app && git pull
-docker compose -f compose.prod.yml --env-file .env.prod up -d --build
-# rollback : git checkout <tag-précédent> puis même commande ;
+cd /opt/heig-classroom && git pull --ff-only
+# GHCR privé : docker login ghcr.io avec un PAT read:packages
+docker compose -f compose.prod.yml --env-file .env.prod pull app
+docker compose -f compose.prod.yml --env-file .env.prod up -d
+```
+
+Rollback : les tags sha restent sur GHCR —
+
+```bash
+IMAGE_TAG=<sha du commit sain> docker compose -f compose.prod.yml \
+  --env-file .env.prod up -d
 # migrations additives — en cas de doute, restaurer la base (§8).
 ```
 

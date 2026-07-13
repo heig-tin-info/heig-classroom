@@ -1,11 +1,13 @@
 # Production -- classroom.chevallier.io
 # Caddy runs NATIVELY on the host (see deploy.md): only loopback ports
 # are published here. Start with:
-#   docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+#   docker compose -f compose.prod.yml --env-file .env.prod up -d
 services:
   app:
-    build: .
-    image: hgc-server:prod
+    # Image built in CI and pulled from GHCR — NEVER built on this VM
+    # (453 MiB / 1 CPU: an on-VM build starves Postgres, deploy.md §7).
+    # Rollback: IMAGE_TAG=<commit sha> docker compose ... up -d
+    image: ghcr.io/heig-tin-info/heig-classroom:${IMAGE_TAG:-latest}
     restart: always
     env_file: .env.prod
     environment:
