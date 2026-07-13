@@ -32,6 +32,35 @@ curl http://localhost:3000/healthz
 curl http://localhost:3000/metrics
 ```
 
+## Deployment
+
+Production runs at <https://classroom.chevallier.io> (a single small VM:
+Postgres, the app container, and Caddy natively on the host). Deployment is
+fully automated by CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)):
+every push to `main`
+
+1. runs the checks (build, typecheck, test);
+2. builds the production image on GitHub Actions and pushes it to GHCR
+   (`ghcr.io/heig-tin-info/heig-classroom`, tags `latest` + commit sha);
+3. SSHes to the VM and triggers [deploy.sh](deploy.sh), which pulls the new
+   image and runs `docker compose up -d` — a few seconds, no contention.
+
+The image is **never built on the VM** (453 MiB / 1 CPU): an on-VM build swaps
+the host and starves Postgres, and fills the disk. Security: the CI key is
+pinned to `deploy.sh` in the VM's `authorized_keys`
+(`command="…",restrict`), so it can only deploy — never open a shell. The GHCR
+package stays private; the runner's ephemeral token is handed to the VM over
+SSH just for the pull, so no registry credential is stored on the VM.
+
+Roll back to a previous image on the VM:
+
+```bash
+IMAGE_TAG=<commit-sha> docker compose -f compose.prod.yml --env-file .env.prod up -d
+```
+
+One-time operator setup (VM provisioning, the `DEPLOY_SSH_KEY` secret, backups)
+is documented in [deploy.md](deploy.md).
+
 ## Layout
 
 | Path | Role |

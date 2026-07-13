@@ -6,32 +6,16 @@ sans re-diagnostiquer.
 
 ## Infra / déploiement
 
-### 1. Build CI → GHCR → deploy — PIPELINE EN PLACE (2026-07-13), un secret à poser
-- **Fait (2026-07-13)** : `ci.yml` a désormais un job `image` (build sur
-  Actions → push `ghcr.io/heig-tin-info/heig-classroom:latest` + sha, cache
-  gha) et un job `deploy` (ssh, host key épinglée → `git pull` +
-  `docker compose pull app` + `up -d` + `image prune`). `compose.prod.yml`
-  passe à `image: ghcr.io/...:${IMAGE_TAG:-latest}` (rollback par sha),
-  `deploy.md` §7 réécrit (gotcha du build on-VM inclus). Disque VM prunés le
-  même jour : 95 % → 83 %.
-- **Reste (opérateur, la création de credentials m'est bloquée)** : générer
-  une clé ed25519 dédiée, poser la clé publique dans
-  `/root/.ssh/authorized_keys` de la VM et la clé privée en secret de repo
-  `DEPLOY_SSH_KEY`. Tant que le secret manque, le job `deploy` se skippe
-  proprement (l'image est quand même publiée).
+> Pipeline build CI → GHCR → deploy : **fait et validé end-to-end le
+> 2026-07-13** (voir README §Deployment et `deploy.md` §7). Reste :
 
-  ```bash
-  ssh-keygen -t ed25519 -f /tmp/deploy_key -N "" -C gha-deploy@heig-classroom
-  ssh root@classroom.chevallier.io "cat >> /root/.ssh/authorized_keys" < /tmp/deploy_key.pub
-  gh secret set DEPLOY_SSH_KEY --repo heig-tin-info/heig-classroom < /tmp/deploy_key
-  rm /tmp/deploy_key /tmp/deploy_key.pub
-  ```
-- **Rappel du pourquoi** : un build sur la VM (453 MiB / 1 CPU) fait swapper
-  l'hôte et étrangle Postgres (`Connection terminated`, vécu 2026-07-10) et
-  remplit le disque (~1 G de cache par cycle). Ne plus jamais `--build` sur
-  la VM.
-- **Lié** : la copie off-VM des backups (rclone) n'est toujours pas câblée
-  (voir `compose.prod.yml`, service `backup`, et `deploy.md` §Backups).
+### 1. Copie off-VM des backups (rclone)
+- Le service `backup` du compose fait un `pg_dump -Fc` quotidien dans
+  `./backups/` sur la VM, mais la copie hors droplet n'est **pas câblée** :
+  un disque perdu = backups perdus.
+- **À faire** : `rclone copy backups remote:hgc-backups` en cron (DigitalOcean
+  Spaces, stockage SWITCH…). Voir `compose.prod.yml` service `backup` et
+  `deploy.md` §Sauvegardes.
 
 ## Pipeline de correction
 
