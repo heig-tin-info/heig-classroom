@@ -1,7 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload, UserPlus } from "lucide-react";
 import { useRef, useState } from "react";
-import * as XLSX from "xlsx";
 
 import { HelpIcon } from "./help";
 import { api, ApiError } from "./api";
@@ -14,6 +13,9 @@ async function fileToPayload(
   file: File,
 ): Promise<{ csv: string } | { rows: Cell[][] }> {
   if (/\.(xlsx|xls|ods)$/i.test(file.name)) {
+    // SheetJS weighs ~430 kB minified: load it only when a spreadsheet is
+    // actually dropped, never in the initial bundle.
+    const XLSX = await import("xlsx");
     const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
     const sheet = wb.Sheets[wb.SheetNames[0]!];
     if (!sheet) throw new Error("Empty workbook");

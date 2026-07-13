@@ -1,20 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { ClassroomDetail } from "@hgc/contracts";
 
 import { api, useMe } from "./api";
-import { AssignmentDetail } from "./AssignmentDetail";
 import { Breadcrumb } from "./Breadcrumb";
-import { ClassroomView } from "./ClassroomView";
 import { GithubBanner, Header, Logo } from "./Header";
 import { useI18n, useT } from "./i18n";
 import { useLiveUpdates } from "./live";
 import { useRoute, type Route } from "./router";
-import { SettingsPage } from "./SettingsPage";
-import { StudentHome } from "./StudentHome";
-import { TeacherHome } from "./TeacherHome";
 import { Card } from "./ui";
+
+// One chunk per page: a student never downloads the teacher UI (roster,
+// assignment forms, timeline) and vice versa.
+const TeacherHome = lazy(() => import("./TeacherHome").then((m) => ({ default: m.TeacherHome })));
+const StudentHome = lazy(() => import("./StudentHome").then((m) => ({ default: m.StudentHome })));
+const ClassroomView = lazy(() => import("./ClassroomView").then((m) => ({ default: m.ClassroomView })));
+const SettingsPage = lazy(() => import("./SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const AssignmentDetail = lazy(() =>
+  import("./AssignmentDetail").then((m) => ({ default: m.AssignmentDetail })),
+);
 
 function Landing() {
   const t = useT();
@@ -114,6 +119,7 @@ export default function App() {
       />
       <main className="mx-auto max-w-5xl px-4 py-6">
         <GithubBanner />
+        <Suspense fallback={null}>
         {route.view === "settings" ? (
           <SettingsPage me={me.data} onBack={() => navigate({ view: "home" })} />
         ) : !teacher || inStudentView ? (
@@ -129,6 +135,7 @@ export default function App() {
         ) : (
           <TeacherHome navigate={navigate} />
         )}
+        </Suspense>
       </main>
     </div>
   );

@@ -3,6 +3,8 @@ import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
+import type { Me } from "@hgc/contracts";
+
 import { HelpIcon } from "./help";
 
 /**
@@ -151,6 +153,29 @@ export function IconButton({
           )
         : null}
     </>
+  );
+}
+
+/** User avatar: uploaded/IdP picture, or initials on the accent color. */
+export function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: string }) {
+  if (me.avatarUrl) {
+    return (
+      <img
+        src={me.avatarUrl}
+        alt=""
+        className={`rounded-full object-cover ${className}`}
+        referrerPolicy="no-referrer"
+      />
+    );
+  }
+  const initials =
+    `${me.givenName.charAt(0)}${me.familyName.charAt(0)}`.toUpperCase() || "?";
+  return (
+    <span
+      className={`inline-flex items-center justify-center rounded-full bg-accent font-semibold text-white ${className}`}
+    >
+      {initials}
+    </span>
   );
 }
 

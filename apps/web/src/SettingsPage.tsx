@@ -10,29 +10,7 @@ import { EMAIL_KINDS, type EmailKind, type Me, type NoticeKind } from "@hgc/cont
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
 import { api } from "./api";
-import { Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
-
-function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: string }) {
-  if (me.avatarUrl) {
-    return (
-      <img
-        src={me.avatarUrl}
-        alt=""
-        className={`rounded-full object-cover ${className}`}
-        referrerPolicy="no-referrer"
-      />
-    );
-  }
-  const initials =
-    `${me.givenName.charAt(0)}${me.familyName.charAt(0)}`.toUpperCase() || "?";
-  return (
-    <span
-      className={`inline-flex items-center justify-center rounded-full bg-accent font-semibold text-white ${className}`}
-    >
-      {initials}
-    </span>
-  );
-}
+import { Avatar, Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
 
 /** Per-kind toggles for the real-time toasts; stored in this browser. */
 function NotificationSettings() {
@@ -242,5 +220,3 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
     </div>
   );
 }
-
-export { Avatar };

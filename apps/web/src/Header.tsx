@@ -16,9 +16,8 @@ import type { Me } from "@hgc/contracts";
 
 import { api } from "./api";
 import { useT } from "./i18n";
-import { Avatar } from "./SettingsPage";
 import { applyTheme, initialTheme, type Theme } from "./theme";
-import { Button, GithubIcon } from "./ui";
+import { Avatar, Button, GithubIcon } from "./ui";
 
 export function Logo({ className = "size-6" }: { className?: string }) {
   return (
