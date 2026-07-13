@@ -128,7 +128,7 @@ temporel) sauf mention. Colonnes clés uniquement :
 users            id, oidc_sub UNIQUE NOT NULL, email, email_verified, given_name,
                  family_name, swiss_edu_id NULL, role (student|teacher),
                  github_user_id bigint UNIQUE NULL (AU-10), github_login,
-                 github_linked_at, last_login_at (AU-27), email_opt_in,
+                 github_linked_at, last_login_at (AU-27),
                  anonymized_at NULL (LPD), created_at
 
 sessions         sid_hash char(64) PK,        -- SHA-256 du token de session (jamais en clair)

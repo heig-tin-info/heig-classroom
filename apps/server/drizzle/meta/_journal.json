@@ -120,6 +120,13 @@
       "when": 1783860432722,
       "tag": "0016_grade-run-tests",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1783943052962,
+      "tag": "0017_drop-email-opt-in",
+      "breakpoints": true
     }
   ]
 }

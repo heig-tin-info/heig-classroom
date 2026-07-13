@@ -43,7 +43,6 @@ export const users = pgTable(
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     /** Interface language chosen by the user; null falls back to English. */
     locale: text("locale", { enum: ["en", "fr"] }),
-    emailOptIn: boolean("email_opt_in").notNull().default(false),
     /** Per-kind email opt-outs (mailer.ts EMAIL_KINDS); missing key = default. */
     emailPrefs: jsonb("email_prefs").$type<Record<string, boolean>>(),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
