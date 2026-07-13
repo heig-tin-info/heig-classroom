@@ -45,6 +45,13 @@ export async function api<T>(
   return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
 }
 
+/** Server-provided error message of a failed call, or the fallback. */
+export function apiErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof ApiError
+    ? ((err.body as { message?: string })?.message ?? fallback)
+    : fallback;
+}
+
 /** Current session, or null when signed out (401). */
 export function useMe() {
   return useQuery<Me | null>({

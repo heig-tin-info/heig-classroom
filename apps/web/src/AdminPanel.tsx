@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { ScheduledTasksCard } from "./ScheduledTasks";
 import { Badge, Button, Card, EmptyState, Field, isoDateTime } from "./ui";
 
@@ -84,7 +84,7 @@ export function AdminPanel() {
 
   const grantError =
     grant.isError && grant.error instanceof ApiError
-      ? ((grant.error.body as { message?: string })?.message ?? "Request failed")
+      ? apiErrorMessage(grant.error, "Request failed")
       : null;
 
   function SortHeader({ k, children }: { k: SortKey; children: React.ReactNode }) {

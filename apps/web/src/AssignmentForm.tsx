@@ -13,7 +13,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { Assignment, OrgRepo, RepoTree } from "@hgc/contracts";
 
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { HelpIcon } from "./help";
 import {
   Badge,
@@ -254,7 +254,7 @@ export function AssignmentForm({
   });
   const error =
     save.isError && save.error instanceof ApiError
-      ? ((save.error.body as { message?: string })?.message ?? "Request failed")
+      ? apiErrorMessage(save.error, "Request failed")
       : null;
 
   const select =

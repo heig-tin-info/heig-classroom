@@ -21,7 +21,7 @@ import { useState } from "react";
 
 import type { ClassroomSummary } from "@hgc/contracts";
 
-import { api, ApiError } from "./api";
+import { api, apiErrorMessage } from "./api";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
@@ -472,9 +472,7 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
         </p>
         {create.isError ? (
           <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-            {create.error instanceof ApiError
-              ? ((create.error.body as { message?: string })?.message ?? "Creation failed.")
-              : "Creation failed."}
+            {apiErrorMessage(create.error, "Creation failed.")}
           </p>
         ) : null}
       </Card>

@@ -17,7 +17,7 @@ import { useEffect, useState } from "react";
 
 import type { Me, StudentAssignment, StudentClassroom, StudentRepo } from "@hgc/contracts";
 
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
@@ -101,7 +101,7 @@ function StudentAssignmentRow({
   });
   const acceptError =
     accept.isError && accept.error instanceof ApiError
-      ? ((accept.error.body as { message?: string })?.message ?? "Acceptance failed")
+      ? apiErrorMessage(accept.error, "Acceptance failed")
       : null;
   const locked = a.state === "locked" || a.repo?.lockedAt != null;
   const accepted = a.repo?.provisionStatus === "ok" && a.repo.fullName;

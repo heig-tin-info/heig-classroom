@@ -18,7 +18,7 @@ import { useMemo, useState } from "react";
 
 import type { RosterEntry } from "@hgc/contracts";
 
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime } from "./ui";
 
 const cell = "px-3 py-2";
@@ -72,7 +72,7 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
   if (editing) {
     const err =
       save.isError && save.error instanceof ApiError
-        ? ((save.error.body as { message?: string })?.message ?? "Update failed")
+        ? apiErrorMessage(save.error, "Update failed")
         : null;
     return (
       <tr className="bg-zinc-50 dark:bg-zinc-800/50">
