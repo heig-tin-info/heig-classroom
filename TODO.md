@@ -97,6 +97,21 @@ sans re-diagnostiquer.
 
 ## Fonctionnalités reportées
 
+### 5b. Exploiter la permission « Plan » de l'App (org Free vs Team)
+- L'App `heig-classroom` (heig-tin-info, App ID 4284518) a la permission
+  organisation **Plan: read**. Les secrets d'organisation n'atteignent pas les
+  dépôts privés d'une org **Free** → le tier LLM échouerait silencieusement.
+- **À faire** : au setup_url / à la résolution d'installation, lire
+  `GET /orgs/{org}` (champ `plan.name`) ; si `free`, afficher sur la page
+  classroom un avertissement avec le lien d'upgrade enseignant
+  <https://education.github.com/globalcampus/teacher>.
+
+### 5c. Gérer les webhooks `organization` (rename / suppression)
+- L'App est abonnée à l'événement **Organization**. À câbler dans
+  `webhooks.ts` : `renamed` → mettre à jour `organizations.login` (et les
+  `full_name` des dépôts ?), `deleted` → marquer l'org et ses classrooms,
+  avertir le teacher.
+
 ### 6. Milestones (jalons intermédiaires)
 - Le dispatch LLM ne se déclenche qu'à la deadline (`grade-final`). Les jalons
   intermédiaires (`grade-milestone`) sont conçus mais pas implémentés.

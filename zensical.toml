@@ -12,8 +12,11 @@ nav = [
   { "Home" = "index.md" },
   { "Guide" = [
     { "About" = "guide/about.md" },
-    { "GitHub applications" = "guide/github-apps.md" },
     { "Automatic grading" = "guide/grading.md" },
+  ] },
+  { "Deployment" = [
+    "deployment/index.md",
+    { "GitHub App" = "deployment/github-app.md" },
   ] },
   { "Development" = [
     "development/index.md",
