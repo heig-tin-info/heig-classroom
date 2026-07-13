@@ -14,6 +14,8 @@ import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+import { pushWithRetry } from "./retry.js";
+
 const PROTECT_RULESET = "hgc-protect";
 
 function git(cwd: string, ...args: string[]) {
@@ -98,7 +100,12 @@ export async function provisionStudentRepo(opts: {
     try {
       git(work, "clone", "--quiet", "--bare", auth(squashedRepo), "src.git");
       const refspecs = branches.map((b) => `refs/heads/${b}:refs/heads/${b}`);
-      gitBare(join(work, "src.git"), "push", "--quiet", auth(targetRepo), ...refspecs);
+      // The freshly created repository may still be provisioning on GitHub's
+      // side: retry the push on transient failures instead of surfacing
+      // "provisioning failed" to the student.
+      await pushWithRetry(() =>
+        gitBare(join(work, "src.git"), "push", "--quiet", auth(targetRepo), ...refspecs),
+      );
     } finally {
       rmSync(work, { recursive: true, force: true });
     }

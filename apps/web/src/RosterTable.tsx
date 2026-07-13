@@ -17,26 +17,7 @@ import {
 import { useMemo, useState } from "react";
 
 import { api, ApiError, type RosterEntry } from "./api";
-import { Badge, EmptyState, GithubIcon, isoDateTime } from "./ui";
-
-function IconButton({
-  label,
-  danger,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
-  return (
-    <button
-      {...props}
-      aria-label={label}
-      title={label}
-      className={`rounded-md p-1.5 transition-colors ${
-        danger
-          ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-      }`}
-    />
-  );
-}
+import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime } from "./ui";
 
 const cell = "px-3 py-2";
 

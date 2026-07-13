@@ -10,7 +10,7 @@ import {
 
 import type { ClassroomSummary } from "./api";
 import { HelpIcon } from "./help";
-import { Card, EmptyState, OrgAvatar } from "./ui";
+import { Card, EmptyState, IconButton, OrgAvatar } from "./ui";
 
 /**
  * Assignment occupancy timeline: one row per classroom, and — when expanded —
@@ -239,13 +239,11 @@ export function TimelineView({
           Wheel / drag to pan · ⌘/Ctrl + wheel to zoom
           <HelpIcon topic="timeline" />
         </span>
-        <IconButton label="Zoom out" onClick={() => zoomBy(1.6)} icon={ZoomOut} />
-        <IconButton label="Zoom in" onClick={() => zoomBy(1 / 1.6)} icon={ZoomIn} />
-        <IconButton
-          label="Focus on what's in progress"
-          onClick={() => setView(computeDefault(rooms))}
-          icon={Crosshair}
-        />
+        <IconButton label="Zoom out" onClick={() => zoomBy(1.6)}><ZoomOut className="size-4" /></IconButton>
+        <IconButton label="Zoom in" onClick={() => zoomBy(1 / 1.6)}><ZoomIn className="size-4" /></IconButton>
+        <IconButton label="Focus on what's in progress" onClick={() => setView(computeDefault(rooms))}>
+          <Crosshair className="size-4" />
+        </IconButton>
       </div>
 
       <div className="flex gap-2">
@@ -467,23 +465,3 @@ function AssignmentBar({
   );
 }
 
-function IconButton({
-  label,
-  onClick,
-  icon: Icon,
-}: {
-  label: string;
-  onClick: () => void;
-  icon: typeof Crosshair;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="rounded-md p-1.5 hover:bg-zinc-100 hover:text-accent dark:hover:bg-zinc-800"
-    >
-      <Icon className="size-4" />
-    </button>
-  );
-}

@@ -487,6 +487,7 @@ export async function assignmentsPlugin(
                   id: repo.id,
                   fullName: repo.fullName,
                   provisionStatus: repo.provisionStatus,
+                  provisionError: repo.provisionError,
                   invitationStatus: repo.invitationStatus,
                   acceptedAt: repo.acceptedAt,
                   lockedAt: repo.lockedAt,

@@ -12,6 +12,8 @@ import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+import { pushWithRetry } from "./retry.js";
+
 /** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
 function gitBare(gitDir: string, ...args: string[]) {
   return (
@@ -34,27 +36,6 @@ export interface SquashedResult {
   fullName: string;
   /** Head SHA per branch of the squashed repo (base of future primary_commits). */
   heads: Record<string, string>;
-}
-
-/** Push errors worth retrying: GitHub's git backend provisions the fresh
- *  repository asynchronously and an immediate push can hit a transient 500
- *  ("the remote end hung up unexpectedly"). */
-const TRANSIENT_PUSH =
-  /error:? (500|502|503)|hung up unexpectedly|early EOF|RPC failed|Internal Server Error/i;
-
-async function pushWithRetry(fn: () => void): Promise<void> {
-  const delays = [1000, 2000, 4000];
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      fn();
-      return;
-    } catch (err) {
-      const detail =
-        String((err as { stderr?: Buffer | string }).stderr ?? "") + String(err);
-      if (attempt >= delays.length || !TRANSIENT_PUSH.test(detail)) throw err;
-      await new Promise((r) => setTimeout(r, delays[attempt]));
-    }
-  }
 }
 
 export async function createSquashedRepo(opts: {

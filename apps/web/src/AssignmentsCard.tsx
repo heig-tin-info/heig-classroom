@@ -28,6 +28,7 @@ import {
   EmptyState,
   Field,
   GithubIcon,
+  IconButton,
   isoDateTime,
   localDateTimeInputValue,
   Modal,
@@ -84,25 +85,6 @@ function GhLink({ fullName }: { fullName: string }) {
       <span className="min-w-0 break-all">{fullName.split("/")[1]}</span>
       <ExternalLink className="size-3 shrink-0" />
     </a>
-  );
-}
-
-function IconButton({
-  label,
-  danger,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
-  return (
-    <button
-      {...props}
-      aria-label={label}
-      title={label}
-      className={`rounded-md p-1.5 transition-colors ${
-        danger
-          ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-          : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-      }`}
-    />
   );
 }
 
@@ -552,6 +534,20 @@ function AssignmentForm({
   );
 }
 
+/** Compact duration: "45 min", "1 h 30 min", "3 d 4 h", "26 d". */
+function compactDuration(ms: number): string {
+  const min = Math.round(ms / 60_000);
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60);
+  if (h < 24) {
+    const m = min % 60;
+    return m ? `${h} h ${m} min` : `${h} h`;
+  }
+  const d = Math.floor(h / 24);
+  const hr = h % 24;
+  return hr ? `${d} d ${hr} h` : `${d} d`;
+}
+
 /** "labo-02-quadratic" → "Labo 02 Quadratic" (default assignment name). */
 function humanize(repo: string): string {
   return repo
@@ -619,6 +615,9 @@ function AssignmentRow({
           <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
             <CalendarClock className="size-3.5" />
             {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
+            <span className="text-zinc-400">
+              ({compactDuration(new Date(a.deadlineAt).getTime() - new Date(a.startAt).getTime())})
+            </span>
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">

@@ -1,8 +1,78 @@
 import { Building2, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
 import { HelpIcon } from "./help";
+
+/**
+ * Icon-only button with a real tooltip: a small dark bubble rendered in a
+ * portal on hover/focus (240 ms delay), flipping below the button when there
+ * is no room above and clamped to the viewport — no native `title` lag.
+ */
+export function IconButton({
+  label,
+  danger,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
+  const [tip, setTip] = useState<{ x: number; y: number; below: boolean } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    const below = r.top < 40;
+    setTip({
+      x: Math.min(Math.max(r.left + r.width / 2, 16), window.innerWidth - 16),
+      y: below ? r.bottom + 6 : r.top - 6,
+      below,
+    });
+  };
+  const arm = (el: HTMLElement) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => show(el), 240);
+  };
+  const disarm = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setTip(null);
+  };
+  return (
+    <>
+      <button
+        {...props}
+        aria-label={label}
+        onMouseEnter={(e) => arm(e.currentTarget)}
+        onMouseLeave={disarm}
+        onFocus={(e) => arm(e.currentTarget)}
+        onBlur={disarm}
+        onClick={(e) => {
+          disarm();
+          props.onClick?.(e);
+        }}
+        className={`rounded-md p-1.5 transition-colors ${
+          danger
+            ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        }`}
+      />
+      {tip
+        ? createPortal(
+            <span
+              role="tooltip"
+              className="pointer-events-none fixed z-[90] whitespace-nowrap rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600"
+              style={{
+                left: tip.x,
+                top: tip.y,
+                transform: `translate(-50%, ${tip.below ? "0" : "-100%"})`,
+              }}
+            >
+              {label}
+            </span>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
 
 /** Public GitHub avatar of an organization, with an icon fallback. */
 export function OrgAvatar({ login, className = "size-5" }: { login: string; className?: string }) {

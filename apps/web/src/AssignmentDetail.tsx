@@ -52,6 +52,7 @@ interface DetailStudent {
     id: string;
     fullName: string | null;
     provisionStatus: "pending" | "ok" | "error";
+    provisionError: string | null;
     invitationStatus: "none" | "pending" | "accepted";
     acceptedAt: string;
     lockedAt: string | null;
@@ -748,9 +749,11 @@ function StudentRow({
             ) : null}
           </span>
         ) : r?.provisionStatus === "error" ? (
-          <Badge tone="red" icon={XCircle}>
-            {t("status.provisionError")}
-          </Badge>
+          <span title={r.provisionError ?? undefined} className="cursor-help">
+            <Badge tone="red" icon={XCircle}>
+              {t("status.provisionError")}
+            </Badge>
+          </span>
         ) : s.claimStatus === "claimed" ? (
           <Badge tone="amber" icon={Clock}>
             {t("status.notAccepted")}
