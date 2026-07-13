@@ -177,14 +177,15 @@ export function EmptyState({
 
 export function Field({
   label,
+  className = "",
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
   return (
-    <label className="flex flex-col gap-1 text-sm">
+    <label className={`flex flex-col gap-1 text-sm ${className.includes("w-full") ? "w-full" : ""}`}>
       <span className="font-medium text-zinc-700 dark:text-zinc-300">{label}</span>
       <input
         {...props}
-        className="rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900"
+        className={`rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900 ${className}`}
       />
     </label>
   );

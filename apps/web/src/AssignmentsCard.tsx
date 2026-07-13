@@ -4,6 +4,7 @@ import {
   ArchiveRestore,
   Send,
   CalendarClock,
+  ChevronRight,
   ClipboardList,
   ExternalLink,
   FileText,
@@ -209,8 +210,9 @@ function CreatingOverlay() {
     return () => clearInterval(id);
   }, []);
   return (
+    // Above the modal (z-50): the whole dialog greys out, spinner on top.
     <div
-      className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-xl bg-white/75 backdrop-blur-sm dark:bg-zinc-900/75"
+      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm dark:bg-zinc-950/70"
       role="status"
       aria-live="polite"
     >
@@ -236,6 +238,8 @@ function AssignmentForm({
   const [sourceRepo, setSourceRepo] = useState(
     existing ? existing.sourceFullName.split("/")[1]! : "",
   );
+  const [branch, setBranch] = useState("");
+  const [showFiles, setShowFiles] = useState(false);
   const [startAt, setStartAt] = useState(
     existing ? toLocalInput(existing.startAt) : localDateTimeInputValue(),
   );
@@ -266,7 +270,10 @@ function AssignmentForm({
       const t = await api<RepoTree>(
         `/app/api/classrooms/${classroomId}/org-repos/${sourceRepo}/tree`,
       );
-      if (!existing) setProtectedFiles(new Set(t.suggestedProtected));
+      if (!existing) {
+        setProtectedFiles(new Set(t.suggestedProtected));
+        setBranch(t.defaultBranch);
+      }
       return t;
     },
   });
@@ -294,6 +301,7 @@ function AssignmentForm({
               deadlineAt: toIso(deadlineAt),
               sourceStrategy,
               deadlineStrategy,
+              branches: branch ? [branch] : undefined,
               protectedFiles: [...protectedFiles],
             }),
           }),
@@ -319,27 +327,31 @@ function AssignmentForm({
       }}
     >
       {save.isPending && !existing ? <CreatingOverlay /> : null}
-      <div className="flex flex-wrap items-end gap-3">
-        <Field
-          label="Name"
-          placeholder="Lab 1 — Pointers"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          required
-        />
+      <div className="grid gap-3 sm:grid-cols-2">
         {existing ? (
-          <Badge tone="zinc" icon={GithubIcon}>
-            {existing.sourceFullName.split("/")[1]}
-          </Badge>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+              Source repository
+            </span>
+            <span className="inline-flex items-center gap-1.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
+            </span>
+          </label>
         ) : (
+          // The repository comes first: picking it pre-fills a humanized name
+          // ("labo-02-quadratic" → "Labo 02 Quadratic") that stays editable.
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-zinc-700 dark:text-zinc-300">
               Source repository
             </span>
             <select
-              className={select}
+              className={`${select} w-full`}
               value={sourceRepo}
-              onChange={(e) => setSourceRepo(e.target.value)}
+              onChange={(e) => {
+                const next = e.target.value;
+                setName((n) => (n === "" || n === humanize(sourceRepo) ? humanize(next) : n));
+                setSourceRepo(next);
+              }}
               required
             >
               <option value="" disabled>
@@ -353,14 +365,23 @@ function AssignmentForm({
             </select>
           </label>
         )}
+        <Field
+          label="Name"
+          placeholder="Lab 1 — Pointers"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full"
+          required
+        />
       </div>
 
-      <div className="flex flex-wrap items-end gap-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <Field
           label="Start"
           type="datetime-local"
           value={startAt}
           onChange={(e) => setStartAt(e.target.value)}
+          className="w-full"
           required
         />
         <Field
@@ -368,13 +389,17 @@ function AssignmentForm({
           type="datetime-local"
           value={deadlineAt}
           onChange={(e) => setDeadlineAt(e.target.value)}
+          className="w-full"
           required
         />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-3">
         {!existing ? (
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium text-zinc-700 dark:text-zinc-300">Distributed source</span>
             <select
-              className={select}
+              className={`${select} w-full`}
               value={sourceStrategy}
               onChange={(e) => setSourceStrategy(e.target.value as "squash" | "whole")}
             >
@@ -383,10 +408,26 @@ function AssignmentForm({
             </select>
           </label>
         ) : null}
+        {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium text-zinc-700 dark:text-zinc-300">Branch to squash</span>
+            <select
+              className={`${select} w-full`}
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+            >
+              {tree.data!.branches.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-zinc-700 dark:text-zinc-300">At deadline</span>
           <select
-            className={select}
+            className={`${select} w-full`}
             value={deadlineStrategy}
             onChange={(e) => setDeadlineStrategy(e.target.value as "lock" | "commit")}
             disabled={existing !== undefined && existing.state !== "draft"}
@@ -417,47 +458,73 @@ function AssignmentForm({
       ) : tree.isFetching ? (
         <Progress label={`Exploring ${sourceRepo}…`} />
       ) : tree.data ? (
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2 text-sm">
-            <Badge tone="zinc" icon={GitBranch}>
-              {tree.data.defaultBranch}
-            </Badge>
-            {tree.data.branches.length > 1 ? (
-              <span className="text-zinc-500 dark:text-zinc-400">
-                {tree.data.branches.length} branches
+        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800">
+          {/* Collapsed by default: the suggestion is right in most cases. */}
+          <div className="flex w-full items-center gap-2 px-3 py-2 text-sm">
+            <button
+              type="button"
+              onClick={() => setShowFiles((v) => !v)}
+              className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              aria-expanded={showFiles}
+            >
+              <ChevronRight
+                className={`size-4 shrink-0 text-zinc-400 transition-transform ${showFiles ? "rotate-90" : ""}`}
+              />
+              <Lock className="size-3.5 shrink-0 text-zinc-400" />
+              <span>
+                {protectedFiles.size} file{protectedFiles.size === 1 ? "" : "s"} automatically
+                protected
               </span>
-            ) : null}
-            <Badge tone="zinc" icon={GitCommitHorizontal}>
+            </button>
+            <HelpIcon topic="protected-files" />
+            <span className="hidden items-center gap-2 text-xs text-zinc-400 sm:inline-flex">
+              <GitCommitHorizontal className="size-3.5" />
               {tree.data.headSha.slice(0, 7)}
-            </Badge>
-            {tree.data.headDate ? (
-              <span className="text-zinc-500 dark:text-zinc-400">
-                last commit {isoDateTime(tree.data.headDate)}
-              </span>
-            ) : null}
+              {tree.data.headDate ? ` · ${isoDateTime(tree.data.headDate)}` : ""}
+            </span>
           </div>
-          <div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
-            <TreeView
-              nodes={nodes}
-              checked={protectedFiles}
-              onToggle={(path, value) =>
-                setProtectedFiles((prev) => {
-                  const next = new Set(prev);
-                  if (value) next.add(path);
-                  else next.delete(path);
-                  return next;
-                })
-              }
-            />
-          </div>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Checked files are protected: any student change is automatically reverted.
-            {tree.data.truncated ? " (large repository — tree truncated)" : ""}
-          </p>
+          {showFiles ? (
+            <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <Badge tone="zinc" icon={GitBranch}>
+                  {tree.data.defaultBranch}
+                </Badge>
+                {tree.data.branches.length > 1 ? (
+                  <span className="text-zinc-500 dark:text-zinc-400">
+                    {tree.data.branches.length} branches
+                  </span>
+                ) : null}
+              </div>
+              <div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+                <TreeView
+                  nodes={nodes}
+                  checked={protectedFiles}
+                  onToggle={(path, value) =>
+                    setProtectedFiles((prev) => {
+                      const next = new Set(prev);
+                      if (value) next.add(path);
+                      else next.delete(path);
+                      return next;
+                    })
+                  }
+                />
+              </div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Checked files are protected: any student change is automatically reverted.
+                {tree.data.truncated ? " (large repository — tree truncated)" : ""}
+              </p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center justify-end gap-3">
+        {error ? (
+          <span className="min-w-0 flex-1 text-sm text-red-600 dark:text-red-400">{error}</span>
+        ) : null}
+        <Button type="button" variant="ghost" onClick={onDone}>
+          Cancel
+        </Button>
         <Button disabled={save.isPending || (!existing && !sourceRepo)}>
           {save.isPending ? (
             <>
@@ -472,13 +539,18 @@ function AssignmentForm({
             </>
           )}
         </Button>
-        <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
-        </Button>
-        {error ? <span className="text-sm text-red-600 dark:text-red-400">{error}</span> : null}
       </div>
     </form>
   );
+}
+
+/** "labo-02-quadratic" → "Labo 02 Quadratic" (default assignment name). */
+function humanize(repo: string): string {
+  return repo
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 // --- Card ---

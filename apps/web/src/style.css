@@ -11,6 +11,12 @@
 @layer base {
   html {
     @apply antialiased;
+    /* Native widgets (datetime pickers, scrollbars) follow the theme instead
+       of popping up as a white square over a dark UI. */
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
   }
   body {
     @apply bg-zinc-100 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100;

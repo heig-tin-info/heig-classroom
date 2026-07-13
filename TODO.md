@@ -43,7 +43,14 @@ sans re-diagnostiquer.
 
 ## Pipeline de correction
 
-### 4. Création du dépôt squashé — HTTP 500 au push (bug préexistant)
+### 4. Création du dépôt squashé — HTTP 500 au push — RÉGLÉ (2026-07-13) sauf nettoyage
+- **Corrigé** : retry du push avec backoff (1 s/2 s/4 s) sur erreur transitoire
+  (500/502/503, « hung up », early EOF), et réutilisation d'un dépôt cible déjà
+  existant **et vide** (leftover d'un essai raté) au lieu du 409 — « try
+  again » fonctionne désormais. Reste : supprimer à la main les `*-squashed`
+  vides orphelins dans l'org de test (7-10 juillet).
+
+### 4-archive. Création du dépôt squashé — HTTP 500 au push (bug préexistant)
 - **Problème** : `createSquashedRepo` (`apps/server/src/github/squash.ts`) crée
   le dépôt cible via l'API puis pousse **immédiatement** dedans. GitHub renvoie
   `HTTP 500` / `the remote end hung up unexpectedly` car pousser dans un dépôt
