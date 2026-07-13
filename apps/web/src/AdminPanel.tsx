@@ -1,7 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowDown,
-  ArrowUp,
   ClipboardList,
   Loader2,
   School,
@@ -9,11 +7,11 @@ import {
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { api, ApiError, apiErrorMessage } from "./api";
 import { ScheduledTasksCard } from "./ScheduledTasks";
-import { Badge, Button, Card, EmptyState, Field, isoDateTime } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, isoDateTime, SortHeader, useSortableTable } from "./ui";
 
 interface TeacherRow {
   id: string;
@@ -34,8 +32,6 @@ const cell = "px-3 py-2";
 export function AdminPanel() {
   const qc = useQueryClient();
   const [email, setEmail] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("email");
-  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   const teachers = useQuery<TeacherRow[]>({
     queryKey: ["admin-teachers"],
@@ -56,63 +52,36 @@ export function AdminPanel() {
     onSuccess: invalidate,
   });
 
-  const rows = useMemo(() => {
-    const data = [...(teachers.data ?? [])];
-    const val = (r: TeacherRow) => {
-      switch (sortKey) {
-        case "email":
-          return r.email;
-        case "name":
-          return `${r.familyName ?? ""} ${r.givenName ?? ""}`.trim();
-        case "lastLoginAt":
-          return r.lastLoginAt ?? "";
-        case "classrooms":
-          return r.classrooms;
-        case "assignments":
-          return r.assignments;
-      }
-    };
-    data.sort((a, b) => {
-      const x = val(a);
-      const y = val(b);
-      return (typeof x === "number" && typeof y === "number"
-        ? x - y
-        : String(x).localeCompare(String(y))) * sortDir;
-    });
-    return data;
-  }, [teachers.data, sortKey, sortDir]);
+  const rank = (r: TeacherRow, key: SortKey): string | number => {
+    switch (key) {
+      case "email":
+        return r.email;
+      case "name":
+        return `${r.familyName ?? ""} ${r.givenName ?? ""}`.trim();
+      case "lastLoginAt":
+        return r.lastLoginAt ?? "";
+      case "classrooms":
+        return r.classrooms;
+      case "assignments":
+        return r.assignments;
+    }
+  };
+  const { sorted: rows, sort, toggle } = useSortableTable(
+    teachers.data ?? [],
+    rank,
+    { key: "email", dir: 1 },
+  );
 
   const grantError =
     grant.isError && grant.error instanceof ApiError
       ? apiErrorMessage(grant.error, "Request failed")
       : null;
 
-  function SortHeader({ k, children }: { k: SortKey; children: React.ReactNode }) {
-    const active = sortKey === k;
-    return (
-      <th className={`${cell} font-medium`}>
-        <button
-          className="inline-flex items-center gap-1 uppercase tracking-wide hover:text-zinc-900 dark:hover:text-zinc-100"
-          onClick={() => {
-            if (active) setSortDir((d) => (d === 1 ? -1 : 1));
-            else {
-              setSortKey(k);
-              setSortDir(1);
-            }
-          }}
-        >
-          {children}
-          {active ? (
-            sortDir === 1 ? (
-              <ArrowUp className="size-3" />
-            ) : (
-              <ArrowDown className="size-3" />
-            )
-          ) : null}
-        </button>
-      </th>
-    );
-  }
+  const Th = ({ k, children }: { k: SortKey; children: React.ReactNode }) => (
+    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium`}>
+      {children}
+    </SortHeader>
+  );
 
   return (
     <div className="space-y-6">
@@ -165,11 +134,11 @@ export function AdminPanel() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-                  <SortHeader k="email">E-mail</SortHeader>
-                  <SortHeader k="name">Name</SortHeader>
-                  <SortHeader k="lastLoginAt">Last sign-in</SortHeader>
-                  <SortHeader k="classrooms">Classrooms</SortHeader>
-                  <SortHeader k="assignments">Assignments</SortHeader>
+                  <Th k="email">E-mail</Th>
+                  <Th k="name">Name</Th>
+                  <Th k="lastLoginAt">Last sign-in</Th>
+                  <Th k="classrooms">Classrooms</Th>
+                  <Th k="assignments">Assignments</Th>
                   <th className={cell} aria-label="Actions" />
                 </tr>
               </thead>
