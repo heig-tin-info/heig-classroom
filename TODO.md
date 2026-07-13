@@ -50,28 +50,6 @@ sans re-diagnostiquer.
   again » fonctionne désormais. Reste : supprimer à la main les `*-squashed`
   vides orphelins dans l'org de test (7-10 juillet).
 
-### 4-archive. Création du dépôt squashé — HTTP 500 au push (bug préexistant)
-- **Problème** : `createSquashedRepo` (`apps/server/src/github/squash.ts`) crée
-  le dépôt cible via l'API puis pousse **immédiatement** dedans. GitHub renvoie
-  `HTTP 500` / `the remote end hung up unexpectedly` car pousser dans un dépôt
-  vide fraîchement créé heurte une **course avec le provisioning asynchrone**
-  du backend git. Pas de retry → l'assignment ne se crée pas.
-- **Symptômes** : message UI « Could not create the squashed repository — try
-  again » ; « try again » ne marche pas (au 2e essai le dépôt existe → 409
-  « already exists »). L'org `heig-test-classroom` est jonchée de dépôts
-  `*-squashed` **vides** (taille 0) de tentatives ratées (7, 8, 10 juillet).
-- **Correctif visé** :
-  1. Retry du push avec backoff (3-4 essais, ~1s/2s/4s) sur erreur transitoire
-     (500/502/503, « hung up »).
-  2. Réutiliser un dépôt cible déjà existant et vide au lieu de renvoyer 409,
-     pour que le retry soit idempotent.
-  3. Nettoyer les `*-squashed` vides orphelins dans l'org de test.
-  - Alternative : créer le dépôt avec `auto_init: true` (provisionné de façon
-    synchrone) puis force-push par-dessus.
-- **Vérifié OK** : les installations App `hgc-dev`/`hgc-prod` sur
-  `heig-test-classroom` ont bien `contents: write` **et** `workflows: write`,
-  donc le push du `grading.yml` passera une fois le 500 réglé.
-
 ### 5. Vérifier le secret `ANTHROPIC_API_KEY` avant le test E2E
 - **Confirmé manquant** (E2E du 2026-07-12, run 29186485269 sur
   `quadratic-2-yves-chevallier`) : `ANTHROPIC_API_KEY` vide dans l'env du job
@@ -137,3 +115,132 @@ sans re-diagnostiquer.
   (ajouts/ajustements) → note finale. À dériver des colonnes existantes
   (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
   d'introduire une machine à états.
+
+## Refactoring dette clean-code — brief pour agent
+
+> Document autoportant : un agent peut exécuter cette section sans autre
+> contexte. Objectif : réduire la dette structurelle SANS changer aucun
+> comportement observable.
+
+### Garde-fous (à respecter à chaque étape)
+
+- **Zéro changement fonctionnel** : mêmes routes, mêmes payloads JSON, même
+  rendu. Les refactorings sont des déplacements/factorisations, pas des
+  réécritures.
+- **Vérification** après chaque lot : `pnpm -r typecheck && pnpm -r test &&
+  pnpm --filter @hgc/web build` — tout doit rester vert.
+- **Un commit par lot**, message `refactor(scope): …`, jamais de lot mixte
+  (déplacement + changement de logique dans le même commit).
+- Ne pas toucher : `apps/server/drizzle/**` (migrations figées), les fichiers
+  d'aide `apps/web/src/help/*.md`, la doc `docs/**`.
+- Les invariants métier commentés dans le code (GR-xx, GH-xx, AU-xx, ADR-xxx)
+  doivent suivre le code déplacé — ne jamais perdre ces commentaires.
+
+### P1 — Découpage des fichiers monstres (structure seule)
+
+État mesuré (2026-07-13) : `App.tsx` 1564 lignes, `AssignmentDetail.tsx` 1074,
+`modules/assignments.ts` 996, `AssignmentsCard.tsx` 783.
+
+1. **`apps/web/src/App.tsx` → éclater par page**, sans changer un pixel :
+   `Header.tsx` (Header, UserMenu, ThemeToggle, Logo, GithubBanner),
+   `TeacherHome.tsx` (TeacherHome, ClassroomsList, RosterPopover, vue archives),
+   `ClassroomView.tsx` (ClassroomView, ClassroomSettings, InstallWizard),
+   `StudentHome.tsx` (StudentHome, StudentClassroomCard, StudentAssignmentRow,
+   RepoMetrics, Countdown), `Breadcrumb.tsx`. `App.tsx` ne garde que le
+   routage, `useMe`, `VIEW_AS_KEY` et la composition.
+2. **`apps/web/src/AssignmentDetail.tsx`** : sortir `activity/` (ActivityPanel,
+   ActivityChart, TestsChart, CommitList + buildGraph/LANE_COLORS) et
+   `GradeHistoryModal` ; garder la table et les lignes.
+3. **`apps/web/src/AssignmentsCard.tsx`** : sortir `AssignmentForm.tsx`
+   (form + TreeView/buildTree + CreatingOverlay + humanize/compactDuration).
+4. **`apps/server/src/modules/assignments.ts`** : découper en sous-modules
+   enregistrés par le plugin existant (mêmes URLs) : `assignments/detail.ts`
+   (GET detail + grade history + activity), `assignments/lifecycle.ts`
+   (create/patch/publish/archive/unarchive/delete + reopen),
+   `assignments/actions.ts` (grade-now, sync, lock/unlock, repos).
+
+### P2 — Duplication mesurée à factoriser
+
+1. **`requireTeacher` dupliqué** dans `modules/classrooms.ts:60` et
+   `modules/assignments.ts:66` (+ `requireAdmin` dans `admin.ts`) → un
+   `modules/guards.ts` unique. Même occasion : les helpers `ownedClassroom` /
+   `ownedClassroomWithOrg` / `ownedAssignment` / `ownedStudentRepo` suivent le
+   même motif « charge si teacherId = moi sinon 404 » → factoriser.
+2. **`git()` / `gitBare()` définis 3×** (`github/squash.ts`,
+   `github/provision.ts`, `github/sync.ts`) → `github/git.ts` unique (attention:
+   squash.ts passe `-c user.name/email`, pas les autres — paramètre).
+3. **Types API dupliqués main/serveur** : `GradeView` existe en double
+   (`server/grading.ts` et `web/AssignmentDetail.tsx`) ; `ClassroomSummary`,
+   `RosterEntry`, `Assignment`, `StudentRepo`, `ActivityData`… sont maintenus à
+   la main dans `web/api.ts` et chaque composant. `packages/contracts` n'exporte
+   que 2 fichiers → y déplacer tous les types de payload API et les importer
+   des deux côtés. C'est le lot au meilleur ratio risque/valeur : toute dérive
+   de payload devient une erreur de compilation.
+4. **Extraction du message d'erreur API** répétée 5× côté web
+   (`(err.body as { message?: string })?.message ?? "…"`) → helper
+   `apiErrorMessage(err, fallback)` dans `web/api.ts`.
+5. **Trois tables triables artisanales** (ClassroomsList dans App.tsx,
+   StudentClassroomCard `Th`, RosterTable sort) → un composant/hook
+   `useSortableTable` + `<SortHeader>` partagé.
+
+### P3 — Cohérence
+
+1. **i18n incomplète** : StudentHome/SettingsPage passent par `t()`, mais
+   AssignmentsCard (tout le modal), ClassroomView (« Roster », wizard),
+   RosterTable, AssignmentDetail sont en anglais codé en dur. Décision à
+   inscrire : l'UI teacher reste EN ou passe par i18n — puis appliquer
+   uniformément (les étudiants, eux, ont déjà le FR).
+2. **Échelle de z-index ad hoc** (`z-30/40/50/[60]/[75]/[80]/[90]` semés dans
+   Modal/help/CreatingOverlay/tooltip) → constantes documentées (ex.
+   `Z.modal < Z.overlay < Z.help < Z.tooltip`) dans `ui.tsx`.
+3. **`Field` className hack** (`className.includes("w-full")` dans `ui.tsx`)
+   → props explicites (`fullWidth?: boolean`) ou `labelClassName`.
+4. **Constantes d'événements** : actions d'audit (`"assignment.publish"`, …)
+   et topics SSE (`classroom:`, `user:`, `teacher:`) en chaînes libres partout
+   → module de constantes typées côté serveur.
+
+### P4 — Nettoyage (petits lots indépendants)
+
+1. `users.email_opt_in` (schema.ts:46) : colonne jamais lue ni écrite,
+   remplacée de fait par `email_prefs` → migration de suppression + retrait du
+   schéma (et de docs/03 §users).
+2. Vars legacy `GITHUB_OAUTH_CLIENT_ID/SECRET` (config.ts) : supprimer le
+   fallback **une fois** le client secret de l'App `heig-classroom` posé dans
+   `.env.prod` (vérifier avant : `GITHUB_APP_CLIENT_SECRET` non vide en prod).
+3. Ops (manuel, hors code) : supprimer les dépôts `*-squashed` vides orphelins
+   dans `heig-test-classroom`, le dépôt sonde `heig-test-classroom/secret-probe`,
+   le secret d'org `TEST_SECRET`, l'ancienne app `hgc-prod` et l'ancienne OAuth
+   App (après bascule du client secret), et `/opt/heig-classroom/deploy.old`.
+4. `deploy.md` : le §7 « Mise à jour » ne mentionne pas le gotcha du build
+   on-VM (voir §1 Infra) — croiser les deux.
+
+### P5 — Tests (couverture ciblée, pas de dogme)
+
+Existant : 6 fichiers de tests (domain roster/grade, server dispatch/deadline/
+app/session). **Zéro test web.** Manques les plus rentables, dans l'ordre :
+
+1. `server/grading.ts` : `selectGradeRun` (GR-09 : kind/afterDeadline/
+   parseStatus), `isAfterDeadline` (GR-14.3 conservateur sans receipt),
+   ingestion LLM `conclusion !== success` jamais authoritative (bug réel vécu).
+2. `server/mailer.ts` : `resolvedPrefs`, gate des préférences dans
+   `queueEmail`, `verifyUnsubSignature` (bon/mauvais HMAC).
+3. `modules/roster.ts` : claim en conflit (UNIQUE classroom/user → conflictFlag).
+4. `github/retry.ts` : transitoire vs permanent, épuisement des retries.
+5. Web : au minimum les purs utilitaires (`fuzzyFilter`, `buildGraph` lanes/
+   edges, `compactDuration`, `humanize`, `parsePath`/`routeToPath`) en vitest
+   sans DOM — gros gain pour presque rien.
+
+### P6 — Performance (à instruire avant de coder)
+
+- `GET …/detail` fait un `fetchRepoLiveState` GitHub **par repo étudiant** à
+  chaque affichage (N appels, latence et rate limit) — mesurer, puis cache
+  court (30-60 s) par repo ou rafraîchissement asynchrone (SSE) plutôt que
+  bloquant dans la requête.
+- Bundle web : 730 kB minifié, warning vite ; code-split par page une fois le
+  découpage P1 fait (dynamic import des vues teacher/student).
+
+### Ordre suggéré
+
+P2.3 (contracts) → P1.1/P1.2/P1.3 (découpage web) → P2.1/P2.2/P2.4/P2.5 →
+P1.4 (découpage serveur) → P5 (tests, peut se faire en parallèle) → P3 → P4.
+P6 séparément, mesures d'abord.
