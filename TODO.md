@@ -83,57 +83,22 @@ sans re-diagnostiquer.
   (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
   d'introduire une machine à états.
 
-## Refactoring — plan de finalisation (brief pour agent)
+## Refactoring — reste
 
-> Le brief clean-code P1–P4 a été exécuté le 2026-07-13 (commits
-> `refactor(...)`). Ce plan couvre le reliquat. Mêmes garde-fous : un commit
-> par lot, `pnpm -r typecheck && pnpm -r test && pnpm --filter @hgc/web build`
-> vert après chaque lot, invariants commentés (GR-xx…) conservés. Ordre
-> suggéré : A → B → C ; D et E dès que leurs préconditions tombent.
+> Le brief clean-code P1–P4 (2026-07-13) puis les lots A (harnais PGlite +
+> tests DB : GR-09, GR-14.3, ingestion LLM, claim roster — 45 tests serveur)
+> et B (code-split : bundle initial 838 → ~203 kB minifié, xlsx lazy au drop,
+> une page = un chunk) ont été exécutés. Le fan-out `fetchRepoLiveState` de
+> `GET …/detail` est instrumenté (log `detail: live repo states fetched`,
+> repos + ms). Reste :
 
-### Lot A — Harnais DB de test + tests manquants (le plus rentable)
+### Lot C — Cache du live-state GitHub (mesures d'abord — instrumentation posée)
 
-1. Ajouter `@electric-sql/pglite` en devDependency du serveur et un helper
-   `src/test/db.ts` : PGlite en mémoire + `drizzle-orm/pglite` +
-   `migrate()` sur `apps/server/drizzle/` → retourne un `db` compatible
-   `app.db` (et un stub `app` minimal `{ db, log }`).
-2. `grading.test.ts` (données insérées via drizzle, pas de GitHub) :
-   - `selectGradeRun` (GR-09) : ignore les runs `kind='llm'`, ignore
-     `afterDeadline=true`, ignore `parseStatus` malformed/multiple, prend le
-     plus récent `completedAt` parmi ok|fallback.
-   - `isAfterDeadline` (GR-14.3) : receipt avant/après deadline ; sans
-     receipt → conservateur dès que la deadline est passée. (Fonction privée :
-     l'exporter, ou la couvrir via `ingestCompletedRun`.)
-   - Ingestion LLM : `conclusion !== "success"` ou parse != ok → la ligne
-     gradeRuns existe mais `llmGradeRunId` inchangé (bug réel vécu) ;
-     idempotence sur (workflowRunId, runAttempt) → second ingest = null.
-3. `roster.test.ts` : claim avec UNIQUE(classroom_id, user_id) déjà pris →
-   `conflictFlag` posé (AU-18).
-4. Si PGlite s'avère incompatible (extensions, types), repli : Postgres
-   jetable dans le CI (service container) + `TEST_DATABASE_URL`, tests
-   marqués `describe.skipIf(!process.env.TEST_DATABASE_URL)`.
-
-### Lot B — Code-split du bundle web (mesuré : 838 kB / 261 kB gzip, 1 chunk)
-
-1. Le plus gros poste : `xlsx` (SheetJS) importé statiquement dans
-   `RosterImport.tsx` → `const XLSX = await import("xlsx")` au moment du
-   parse (drop de fichier). À lui seul devrait faire tomber le warning.
-2. `React.lazy` + `<Suspense>` dans `App.tsx` pour les vues par rôle :
-   `TeacherHome`/`ClassroomView`/`AssignmentDetail` (teacher) vs
-   `StudentHome` (student) — un étudiant ne télécharge plus l'UI teacher,
-   et réciproquement. `SettingsPage`/`AdminPanel` lazy aussi.
-3. Vérifier `pnpm --filter @hgc/web build` avant/après et noter les tailles
-   ici. Cible : chunk initial < ~300 kB minifié.
-
-### Lot C — Cache du live-state GitHub (mesurer d'abord)
-
-1. Instrumenter `GET …/detail` : logguer nb de repos et durée totale des
-   `fetchRepoLiveState` (N appels GitHub par affichage → latence + rate
-   limit sur une classe de 30+).
-2. Puis TTL court en mémoire (30-60 s) par `fullName` dans
-   `github/metrics.ts` (Map + timestamp, pas de dépendance), ou
-   rafraîchissement asynchrone poussé par SSE si la mesure montre que le
-   blocage vient de la requête. Décider sur mesures, pas avant.
+- Lire les logs `detail: live repo states fetched` sur quelques classes
+  réelles (30+ repos), puis décider : TTL court en mémoire (30-60 s) par
+  `fullName` dans `github/metrics.ts`, ou rafraîchissement asynchrone poussé
+  par SSE. Décider sur mesures, pas avant. (Attention : un TTL rend le bouton
+  « Refresh » partiellement stale — à trancher.)
 
 ### Lot D — Vars OAuth legacy (précondition NON remplie, vérifié 2026-07-13)
 
