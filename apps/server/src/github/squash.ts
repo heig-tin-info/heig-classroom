@@ -5,31 +5,17 @@
  * - `squash` : each selected branch is reduced to a single initial commit.
  * Git operations use the installation token (GH-03).
  */
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
 
-/** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
-function gitBare(gitDir: string, ...args: string[]) {
-  return (
-    execFileSync("git", ["--git-dir", gitDir, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args], {
-      stdio: "pipe",
-    })?.toString() ?? ""
-  );
-}
-
-function git(cwd: string, ...args: string[]) {
-  return (
-    execFileSync("git", ["-C", cwd, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args], {
-      stdio: "pipe",
-    })?.toString() ?? ""
-  );
-}
+// Squashing creates commits: run git with the bot identity.
+const { git, gitBare } = gitRunner({ identity: true });
 
 export interface SquashedResult {
   repoId: number;
@@ -48,8 +34,7 @@ export async function createSquashedRepo(opts: {
   branches: string[];
 }): Promise<SquashedResult> {
   const { octokit, token, org, sourceRepo, targetRepo, strategy, branches } = opts;
-  const auth = (repo: string) =>
-    `https://x-access-token:${token}@github.com/${org}/${repo}.git`;
+  const auth = (repo: string) => authUrl(token, org, repo);
 
   // Creation of the target repository. A name collision (422) is tolerated
   // when the existing repository is EMPTY: it is the leftover of a previous

@@ -6,34 +6,14 @@
  * ref. That bot-only ref is the single place where a forced update is
  * allowed; the selected branches are never touched directly.
  */
-import { execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-function git(cwd: string, ...args: string[]) {
-  return (
-    execFileSync(
-      "git",
-      ["-C", cwd, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args],
-      { stdio: "pipe" },
-    )?.toString() ?? ""
-  );
-}
+import { authUrl, gitRunner } from "./git.js";
 
-/** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
-function gitBare(gitDir: string, ...args: string[]) {
-  return (
-    execFileSync(
-      "git",
-      ["--git-dir", gitDir, "-c", "user.name=hgc", "-c", "user.email=bot@hgc.local", ...args],
-      { stdio: "pipe" },
-    )?.toString() ?? ""
-  );
-}
-
-const authUrl = (token: string, org: string, repo: string) =>
-  `https://x-access-token:${token}@github.com/${org}/${repo}.git`;
+// Sync creates the per-branch primary commits: bot identity required.
+const { git, gitBare } = gitRunner({ identity: true });
 
 export interface SquashedUpdate {
   /** New squashed head per branch (the content students will receive). */

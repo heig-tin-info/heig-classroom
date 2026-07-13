@@ -7,29 +7,19 @@
  * (409 "Git Repository is empty" that Octokit's retry plugin stretches into
  * ~40 s of backoff), and `retries: 0` everywhere a 4xx carries meaning.
  */
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
 
 const PROTECT_RULESET = "hgc-protect";
 
-function git(cwd: string, ...args: string[]) {
-  return (
-    execFileSync("git", ["-C", cwd, ...args], { stdio: "pipe" })?.toString() ?? ""
-  );
-}
-
-/** Bare repository: explicit `--git-dir` (compatible with `safe.bareRepository=explicit`). */
-function gitBare(gitDir: string, ...args: string[]) {
-  return (
-    execFileSync("git", ["--git-dir", gitDir, ...args], { stdio: "pipe" })?.toString() ?? ""
-  );
-}
+// Provisioning only clones and pushes existing refs: no bot identity needed.
+const { git, gitBare } = gitRunner();
 
 export interface ProvisionResult {
   repoId: number;
@@ -51,8 +41,7 @@ export async function provisionStudentRepo(opts: {
   studentLogin: string;
 }): Promise<ProvisionResult> {
   const { octokit, token, org, squashedRepo, targetRepo, branches, studentLogin } = opts;
-  const auth = (repo: string) =>
-    `https://x-access-token:${token}@github.com/${org}/${repo}.git`;
+  const auth = (repo: string) => authUrl(token, org, repo);
 
   // 1. Creation (idempotent: 422 name already exists = step already done).
   let created = true;
