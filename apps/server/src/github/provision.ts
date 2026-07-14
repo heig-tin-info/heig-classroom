@@ -100,6 +100,27 @@ export async function provisionStudentRepo(opts: {
     }
   }
 
+  // 2b. Align the default branch with the assignment's first selected
+  // branch. GitHub keeps the account-level default (`main`) on an empty
+  // repo even when only `master` gets pushed; review commits then target a
+  // branch that does not exist and fall to the backup branch (seen live
+  // 2026-07-14: GRADING parked on `grading` for a main/master mismatch).
+  try {
+    const { data: meta } = await octokit.request("GET /repos/{owner}/{repo}", {
+      owner: org,
+      repo: targetRepo,
+    });
+    if (meta.default_branch !== opts.defaultBranch) {
+      await octokit.request("PATCH /repos/{owner}/{repo}", {
+        owner: org,
+        repo: targetRepo,
+        default_branch: opts.defaultBranch,
+      });
+    }
+  } catch {
+    // Best effort: a failed alignment must not fail the provisioning.
+  }
+
   // 3. Ruleset against force-push / deletion (GH-21..23).
   const { data: rulesets } = await octokit.request("GET /repos/{owner}/{repo}/rulesets", {
     owner: org,
