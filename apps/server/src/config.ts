@@ -78,9 +78,6 @@ const EnvSchema = z.object({
   // callback URLs and its user tokens serve GET /user without any scope.
   GITHUB_APP_CLIENT_ID: z.string().default(""),
   GITHUB_APP_CLIENT_SECRET: z.string().default(""),
-  /** Legacy names (pre single-app); read as fallback, remove eventually. */
-  GITHUB_OAUTH_CLIENT_ID: z.string().default(""),
-  GITHUB_OAUTH_CLIENT_SECRET: z.string().default(""),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;
@@ -106,11 +103,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     ...parsed.data,
     SUPER_ADMIN_EMAIL: parsed.data.SUPER_ADMIN_EMAIL.trim().toLowerCase(),
-    // Single-app migration: the old OAuth App variables keep working until
-    // the environment is updated to the App's own client.
-    GITHUB_APP_CLIENT_ID: parsed.data.GITHUB_APP_CLIENT_ID || parsed.data.GITHUB_OAUTH_CLIENT_ID,
-    GITHUB_APP_CLIENT_SECRET:
-      parsed.data.GITHUB_APP_CLIENT_SECRET || parsed.data.GITHUB_OAUTH_CLIENT_SECRET,
     // PEM path made absolute at load time: the process no longer depends on
     // its launch directory (ADR-010, secret in a file).
     GITHUB_APP_PRIVATE_KEY_PATH: parsed.data.GITHUB_APP_PRIVATE_KEY_PATH

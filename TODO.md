@@ -17,6 +17,8 @@ sans re-diagnostiquer.
   Spaces, stockage SWITCH…). Voir `compose.prod.yml` service `backup` et
   `deploy.md` §Sauvegardes.
 
+> YCR Note: Backup is automatically done in digital ocean.
+
 ## Pipeline de correction
 
 ### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
@@ -72,19 +74,16 @@ sans re-diagnostiquer.
   par SSE. Décider sur mesures, pas avant. (Attention : un TTL rend le bouton
   « Refresh » partiellement stale — à trancher.)
 
-### Lot D — Vars OAuth legacy (précondition NON remplie, vérifié 2026-07-13)
+### Lot D — Vars OAuth legacy (SOLDÉ le 2026-07-14, reste un clic owner)
 
-- `.env.prod` sur la VM utilise toujours `GITHUB_OAUTH_CLIENT_ID/SECRET` ;
-  `GITHUB_APP_CLIENT_SECRET` n'y est pas posé.
-- **Étape ops d'abord** : poser `GITHUB_APP_CLIENT_ID/SECRET` (client secret
-  de l'App `heig-classroom`) dans `.env.prod`, redéployer, vérifier le login
-  GitHub. **Ensuite seulement** : supprimer les deux vars legacy et le
-  fallback `config.ts:111-113`, et les retirer de `.env.example`.
+- Fait : client secret de l'App `heig-classroom` généré (owner), callback
+  `https://classroom.chevallier.io/app/auth/github/callback` posé,
+  `GITHUB_APP_CLIENT_ID=Iv23liMUKbpSHj7l4jpc` + secret dans `.env.prod`
+  (vars `GITHUB_OAUTH_*` retirées), fallback `config.ts` et champs legacy
+  supprimés du schéma. Le linking GitHub passe par l'OAuth user-to-server de
+  l'App elle-même.
+- **Reste** : un unlink/relink de contrôle dans le portail (audit
+  `github.link`), puis supprimer l'ancienne OAuth App `Ov23li…` sur GitHub
+  (UI owner ; révoque aussi les vieux grants — les utilisateurs concernés
+  relient simplement leur compte).
 
-### Lot E — Ops (manuel, hors code)
-
-- Supprimer les dépôts `*-squashed` vides orphelins dans
-  `heig-test-classroom` (essais des 7-10 juillet), le dépôt sonde
-  `heig-test-classroom/secret-probe`, le secret d'org `TEST_SECRET`,
-  l'ancienne app `hgc-prod` et l'ancienne OAuth App (après le lot D), et
-  `/opt/heig-classroom/deploy.old` sur la VM.
