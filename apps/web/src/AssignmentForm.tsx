@@ -20,6 +20,7 @@ import {
   Button,
   Field,
   GithubIcon,
+  humanize,
   isoDateTime,
   localDateTimeInputValue,
   Progress,
@@ -159,15 +160,6 @@ export function compactDuration(ms: number): string {
   return hr ? `${d} d ${hr} h` : `${d} d`;
 }
 
-/** "labo-02-quadratic" → "Labo 02 Quadratic" (default assignment name). */
-export function humanize(repo: string): string {
-  return repo
-    .split(/[-_]+/)
-    .filter(Boolean)
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
 export function AssignmentForm({
   classroomId,
   existing,
@@ -195,6 +187,9 @@ export function AssignmentForm({
   );
   const [deadlineStrategy, setDeadlineStrategy] = useState<"lock" | "commit">(
     existing?.deadlineStrategy ?? "lock",
+  );
+  const [gradingMode, setGradingMode] = useState<"none" | "auto">(
+    existing?.gradingMode ?? "auto",
   );
   const [protectedFiles, setProtectedFiles] = useState<Set<string>>(
     new Set(existing?.protectedFiles ?? []),
@@ -233,6 +228,7 @@ export function AssignmentForm({
               startAt: toIso(startAt),
               deadlineAt: toIso(deadlineAt),
               deadlineStrategy,
+              gradingMode,
               protectedFiles: [...protectedFiles],
             }),
           })
@@ -245,6 +241,7 @@ export function AssignmentForm({
               deadlineAt: toIso(deadlineAt),
               sourceStrategy,
               deadlineStrategy,
+              gradingMode,
               branches: branch ? [branch] : undefined,
               protectedFiles: [...protectedFiles],
             }),
@@ -374,6 +371,19 @@ export function AssignmentForm({
             </select>
           </label>
         ) : null}
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+            Grading
+          </span>
+          <select
+            className={`${select} w-full`}
+            value={gradingMode}
+            onChange={(e) => setGradingMode(e.target.value as "none" | "auto")}
+          >
+            <option value="auto">Automatic (points & review)</option>
+            <option value="none">None (no grades shown)</option>
+          </select>
+        </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
             At deadline <HelpIcon topic="deadline-strategy" />

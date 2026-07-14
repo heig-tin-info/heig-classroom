@@ -4,7 +4,7 @@ import { AlertTriangle, CheckCircle2, Snowflake, XCircle } from "lucide-react";
 import type { GradeRunHistory, GradeView } from "@hgc/contracts";
 
 import { api } from "./api";
-import { Badge, isoDateTime, Modal } from "./ui";
+import { Badge, isoDateTime, Modal, Spinner } from "./ui";
 
 const cell = "px-3 py-1.5 whitespace-nowrap align-middle";
 
@@ -59,7 +59,7 @@ export function GradeHistoryModal({
   return (
     <Modal title={`Grade history — ${student}`} onClose={onClose}>
       {history.isLoading ? (
-        <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">Loading…</p>
+        <Spinner className="py-6" />
       ) : !d || d.runs.length === 0 ? (
         <p className="py-6 text-center text-sm text-zinc-500 dark:text-zinc-400">
           No CI run captured yet.

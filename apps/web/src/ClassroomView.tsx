@@ -23,7 +23,7 @@ import { useT } from "./i18n";
 import type { Route } from "./router";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
-import { Badge, Button, Card, Field, GithubIcon, Modal, OrgAvatar, Tip } from "./ui";
+import { Badge, Button, Card, Field, GithubIcon, Modal, OrgAvatar, Spinner, Tip } from "./ui";
 
 function ClassroomSettings({
   room,
@@ -297,7 +297,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
     },
   });
 
-  if (detail.isLoading) return null;
+  if (detail.isLoading) return <Spinner className="py-16" />;
   if (!detail.data) return <p>Classroom not found.</p>;
   const room = detail.data;
   // The teacher can take a (staff) seat to walk the student flow themselves.
@@ -320,9 +320,21 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       <div className="flex flex-wrap items-center gap-3">
         {room.org ? <OrgAvatar login={room.org.login} className="size-8" /> : null}
         <h1 className="text-2xl font-semibold tracking-tight">{room.name}</h1>
-        <Badge tone="zinc" icon={Building2}>
-          {room.org?.login}
-        </Badge>
+        <span className="flex-1" />
+        {room.org ? (
+          <Tip label={`Open ${room.org.login} on GitHub`}>
+            <a
+              href={`https://github.com/${room.org.login}`}
+              target="_blank"
+              rel="noreferrer"
+              className="transition-opacity hover:opacity-75"
+            >
+              <Badge tone="zinc" icon={Building2}>
+                {room.org.login}
+              </Badge>
+            </a>
+          </Tip>
+        ) : null}
         {room.org?.installationId ? (
           <Badge tone="green" icon={CheckCircle2}>
             GitHub App installed
@@ -336,7 +348,6 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             GitHub App not installed
           </Badge>
         )}
-        <span className="flex-1" />
         <Tip label="Classroom settings">
           <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
             <SettingsIcon className="size-4" />

@@ -45,6 +45,7 @@ import {
   GithubIcon,
   isoDateTime,
   SortHeader,
+  Spinner,
   Tip,
   useNow,
   useSortableTable,
@@ -137,12 +138,15 @@ function StudentRow({
   classroomId,
   assignmentId,
   frozen,
+  showGrades,
   s,
 }: {
   classroomId: string;
   assignmentId: string;
   /** Deadline enforced (state locked): the displayed grade is the frozen one. */
   frozen: boolean;
+  /** Grading mode `none` hides the grade column and the grade-now action. */
+  showGrades: boolean;
   s: AssignmentDetailStudent;
 }) {
   const t = useT();
@@ -272,6 +276,7 @@ function StudentRow({
       <td className={cell}>
         <CiBadge s={r} tests={frozen ? (r?.frozenGrade ?? r?.grade) : r?.grade} />
       </td>
+      {showGrades ? (
       <td className={`${cell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1">
           {/* GR-16: the authoritative LLM review, once landed, IS the grade;
@@ -323,9 +328,11 @@ function StudentRow({
           />
         ) : null}
       </td>
+      ) : null}
       <td className={`${cell} text-right whitespace-nowrap`}>
         {r?.provisionStatus === "ok" && r.fullName ? (
           <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            {showGrades ? (
             <Tip
               label={
                 gradeNowError
@@ -358,6 +365,7 @@ function StudentRow({
                 )}
               </button>
             </Tip>
+            ) : null}
             {/* Padlock shows the STATE: closed red when locked, open otherwise. */}
             <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
               <button
@@ -385,7 +393,7 @@ function StudentRow({
     </tr>
     {expanded && r ? (
       <tr className="bg-zinc-50/60 dark:bg-zinc-800/30">
-        <td colSpan={9} className="p-0">
+        <td colSpan={showGrades ? 9 : 8} className="p-0">
           <ActivityPanel
             classroomId={classroomId}
             assignmentId={assignmentId}
@@ -700,15 +708,13 @@ export function AssignmentDetail({
   const { sorted, sort, toggle } = useSortableTable(shown, rank, { key: "name", dir: 1 });
 
   if (detail.isLoading) {
-    return (
-      <p className="py-8 text-center text-sm text-zinc-500 dark:text-zinc-400">
-        Fetching repository states from GitHub…
-      </p>
-    );
+    return <Spinner className="py-16" label="Fetching repository states from GitHub…" />;
   }
   if (!detail.data) return null;
   const a = detail.data.assignment;
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
+  // Grading mode `none`: no grades, no review countdown, no milestones.
+  const showGrades = a.gradingMode !== "none";
 
   // La recherche trie déjà par pertinence.
   const rows = query.trim() !== "" ? shown : sorted;
@@ -727,7 +733,7 @@ export function AssignmentDetail({
         <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "red" : "zinc"}>
           {t(`state.${a.state}` as Parameters<typeof t>[0])}
         </Badge>
-        <ReviewChip a={a} students={students} />
+        {showGrades ? <ReviewChip a={a} students={students} /> : null}
         <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
           <CalendarClock className="size-3.5" />
           {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
@@ -736,17 +742,6 @@ export function AssignmentDetail({
           {t("assignment.accepted", { n: accepted, total: students.length })}
         </Badge>
         <span className="flex-1" />
-        <label className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
-          <input
-            type="search"
-            placeholder={t("assignment.searchStudents")}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-44 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-            aria-label={t("assignment.searchStudents")}
-          />
-        </label>
         <Button variant="ghost" onClick={() => detail.refetch()} disabled={detail.isFetching}>
           <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> {t("common.refresh")}
         </Button>
@@ -754,11 +749,26 @@ export function AssignmentDetail({
 
       <SyncBanner classroomId={classroomId} a={a} />
 
-      <MilestonesSection
-        classroomId={classroomId}
-        assignmentId={assignmentId}
-        deadlineAt={a.deadlineAt}
-      />
+      {showGrades ? (
+        <MilestonesSection
+          classroomId={classroomId}
+          assignmentId={assignmentId}
+          deadlineAt={a.deadlineAt}
+        />
+      ) : null}
+
+      {/* The search lives with what it filters: right above the student table. */}
+      <label className="relative block w-fit">
+        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
+        <input
+          type="search"
+          placeholder={t("assignment.searchStudents")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-56 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+          aria-label={t("assignment.searchStudents")}
+        />
+      </label>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
@@ -773,7 +783,7 @@ export function AssignmentDetail({
                 {t("assignment.col.commits")}
               </Th>
               <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.checks")}</th>
-              <Th k="grade">{t("assignment.col.grade")}</Th>
+              {showGrades ? <Th k="grade">{t("assignment.col.grade")}</Th> : null}
               <th className={cell} aria-label="Actions" />
             </tr>
           </thead>
@@ -784,6 +794,7 @@ export function AssignmentDetail({
                 classroomId={classroomId}
                 assignmentId={assignmentId}
                 frozen={a.state === "locked"}
+                showGrades={showGrades}
                 s={s}
               />
             ))}

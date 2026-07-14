@@ -25,7 +25,7 @@ import { HelpIcon } from "./help";
 import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
-import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, Tip, useSortableTable, Z } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, humanize, OrgAvatar, SortHeader, Spinner, Tip, useSortableTable, Z } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
 
@@ -268,6 +268,13 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
         // The archive: read-only cards, one click to restore. The active
         // views below stay untouched while browsing here.
         (() => {
+          if (archivedRooms.isLoading) {
+            return (
+              <Card>
+                <Spinner label={t("common.loading")} />
+              </Card>
+            );
+          }
           const archived = fuzzyFilter(
             query,
             archivedRooms.data ?? [],
@@ -309,6 +316,10 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
             </Card>
           );
         })()
+      ) : rooms.isLoading ? (
+        <Card>
+          <Spinner label={t("common.loading")} />
+        </Card>
       ) : rooms.data?.length ? (
         mode === "timeline" ? (
           <TimelineView
@@ -405,7 +416,11 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                     setCustomOrg(true);
                     setOrg("");
                   } else {
-                    setOrg(e.target.value);
+                    const next = e.target.value;
+                    // Picking an org pre-fills a humanized classroom name
+                    // ("prg1-2026" → "Prg1 2026") that stays editable.
+                    setName((n) => (n === "" || n === humanize(org) ? humanize(next) : n));
+                    setOrg(next);
                   }
                 }}
                 required

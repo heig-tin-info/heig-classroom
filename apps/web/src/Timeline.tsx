@@ -345,6 +345,7 @@ export function TimelineView({
                         pct={pct}
                         now={now}
                         compact
+                        dragging={dragging}
                         onClick={() => onOpenAssignment(room.id, a.id)}
                       />
                     ))}
@@ -358,6 +359,7 @@ export function TimelineView({
                           a={a}
                           pct={pct}
                           now={now}
+                          dragging={dragging}
                           onClick={() => onOpenAssignment(room.id, a.id)}
                         />
                       </div>
@@ -427,12 +429,16 @@ function AssignmentBar({
   now,
   onClick,
   compact,
+  dragging,
 }: {
   a: Assignment;
   pct: (t: number) => number;
   now: number;
   onClick: () => void;
   compact?: boolean;
+  /** While panning, left/width change every frame: transitions would ease
+      toward each intermediate position and the bars would trail the pointer. */
+  dragging?: boolean;
 }) {
   const s = new Date(a.startAt).getTime();
   const d = new Date(a.deadlineAt).getTime();
@@ -449,7 +455,7 @@ function AssignmentBar({
     <button
       onClick={onClick}
       title={`${a.name} — ${a.startAt.slice(0, 10)} → ${a.deadlineAt.slice(0, 10)} (${a.state})`}
-      className={`absolute ${compact ? "top-1 h-6 leading-6" : "top-1.5 h-6 leading-6"} truncate rounded-md px-2 text-left text-xs font-medium transition-all hover:-translate-y-px hover:shadow-md ${
+      className={`absolute ${compact ? "top-1 h-6 leading-6" : "top-1.5 h-6 leading-6"} truncate rounded-md px-2 text-left text-xs font-medium ${dragging ? "" : "transition-all hover:-translate-y-px hover:shadow-md"} ${
         a.state === "draft"
           ? "border border-dashed border-zinc-400 bg-white/60 text-zinc-500 dark:border-zinc-500 dark:bg-zinc-900/40 dark:text-zinc-400"
           : a.state === "locked" || past

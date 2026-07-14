@@ -9,7 +9,7 @@ import { GithubLinkToast, Header, Logo } from "./Header";
 import { useI18n, useT } from "./i18n";
 import { useLiveUpdates } from "./live";
 import { useRoute, type Route } from "./router";
-import { Card } from "./ui";
+import { Card, setDateFormat } from "./ui";
 
 // One chunk per page: a student never downloads the teacher UI (roster,
 // assignment forms, timeline) and vice versa.
@@ -93,6 +93,9 @@ export default function App() {
   useEffect(() => {
     if (serverLocale) setLocale(serverLocale, false);
   }, [serverLocale, setLocale]);
+  // Same for the date format, but synchronously: it must be set before the
+  // first view renders a date (module-level store in ui.tsx, idempotent).
+  setDateFormat(me.data?.dateFormat);
   if (me.isLoading) return null;
   if (!me.data) return <Landing />;
   const role = me.data.role;

@@ -52,11 +52,88 @@
   animation: tip-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Modal (ui.tsx): the backdrop fades in while the panel pops from 96%,
+   anchored at its top since the dialog sits near the top of the screen. */
+@keyframes modal-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes modal-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.modal-backdrop {
+  animation: modal-backdrop-in 0.15s ease-out;
+}
+.modal-panel {
+  transform-origin: top center;
+  animation: modal-panel-in 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast-enter,
   .toast-leave,
-  .tip-bubble {
+  .tip-bubble,
+  .modal-backdrop,
+  .modal-panel {
     animation-duration: 0.01ms;
+  }
+}
+
+/* --- Revamped UI theme (html.ui-v2, picked in Settings › Appearance) ---
+   Thin borders instead of layered shadows, larger radii (squircle corners
+   where the browser supports corner-shape), slightly springier presses.
+   Unlayered rules: they win over Tailwind utilities without !important. */
+html.ui-v2 .hgc-card {
+  border-radius: 1.25rem;
+  border: 1px solid rgb(228 228 231 / 0.8); /* zinc-200 */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+}
+html.ui-v2.dark .hgc-card {
+  border-color: rgb(39 39 42 / 0.9); /* zinc-800 */
+  box-shadow: none;
+}
+html.ui-v2 .modal-panel {
+  border-radius: 1.5rem;
+  border: 1px solid rgb(228 228 231 / 0.8);
+  box-shadow: 0 24px 48px -12px rgb(0 0 0 / 0.18);
+}
+html.ui-v2.dark .modal-panel {
+  border-color: rgb(63 63 70 / 0.6); /* zinc-700 */
+}
+html.ui-v2 .hgc-btn {
+  border-radius: 0.75rem;
+}
+html.ui-v2 .hgc-btn:active {
+  transform: scale(0.96);
+}
+html.ui-v2
+  :is(
+    input[type="text"],
+    input[type="search"],
+    input[type="email"],
+    input[type="datetime-local"],
+    input:not([type]),
+    select,
+    textarea
+  ) {
+  border-radius: 0.75rem;
+}
+@supports (corner-shape: squircle) {
+  html.ui-v2 .hgc-card,
+  html.ui-v2 .modal-panel,
+  html.ui-v2 .hgc-btn {
+    corner-shape: squircle;
   }
 }
 

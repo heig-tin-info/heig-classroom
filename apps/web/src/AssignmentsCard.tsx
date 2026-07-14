@@ -27,6 +27,7 @@ import {
   IconButton,
   isoDateTime,
   Modal,
+  Spinner,
   Tip,
 } from "./ui";
 
@@ -234,7 +235,9 @@ export function AssignmentsCard({
         </p>
       ) : null}
 
-      {list.data?.length ? (
+      {list.isLoading ? (
+        <Spinner className="py-8" />
+      ) : list.data?.length ? (
         <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
           {list.data.map((a) => (
             <AssignmentRow

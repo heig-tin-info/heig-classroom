@@ -6,10 +6,11 @@ import App from "./App";
 import { HelpProvider } from "./help";
 import { I18nProvider } from "./i18n";
 import { ToastProvider } from "./notify";
-import { applyTheme, initialTheme } from "./theme";
+import { applyTheme, applyUiTheme, initialTheme, initialUiTheme } from "./theme";
 import "./style.css";
 
 applyTheme(initialTheme());
+applyUiTheme(initialUiTheme());
 
 const queryClient = new QueryClient();
 

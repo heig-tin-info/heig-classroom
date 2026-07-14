@@ -21,7 +21,7 @@ import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
-import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, Tip, useNow, useSortableTable } from "./ui";
+import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, Spinner, Tip, useNow, useSortableTable } from "./ui";
 
 /** Live countdown to (or since) the deadline, refreshed every 30 s. */
 function Countdown({ deadline }: { deadline: string }) {
@@ -41,7 +41,16 @@ function Countdown({ deadline }: { deadline: string }) {
 }
 
 /** Metrics row for an accepted repository: commits, CI donut, grade scale. */
-function RepoMetrics({ repo, reviewAt }: { repo: StudentRepo; reviewAt: number }) {
+function RepoMetrics({
+  repo,
+  reviewAt,
+  showGrades,
+}: {
+  repo: StudentRepo;
+  reviewAt: number;
+  /** Grading mode `none`: commits and CI feedback stay, points/review go. */
+  showGrades: boolean;
+}) {
   const t = useT();
   const now = useNow(15_000);
   return (
@@ -70,7 +79,7 @@ function RepoMetrics({ repo, reviewAt }: { repo: StudentRepo; reviewAt: number }
           {t("student.ciRunning")}
         </Badge>
       ) : null}
-      {repo.llmGrade && repo.llmGrade.parseStatus === "ok" ? (
+      {!showGrades ? null : repo.llmGrade && repo.llmGrade.parseStatus === "ok" ? (
         // GR-16: the authoritative LLM review replaces the indicative grade.
         <Tip label={t("student.reviewedTip")}>
           <span className="inline-flex items-center gap-1.5">
@@ -178,6 +187,7 @@ function StudentAssignmentRow({
           <RepoMetrics
             repo={a.repo!}
             reviewAt={new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000}
+            showGrades={a.gradingMode !== "none"}
           />
         ) : (
           <span className="text-zinc-400">—</span>
@@ -325,7 +335,7 @@ export function StudentHome({ me }: { me: Me }) {
     queryFn: () => api("/app/api/student/classrooms"),
   });
 
-  if (rooms.isLoading) return null;
+  if (rooms.isLoading) return <Spinner className="py-16" />;
   const linked = me.githubLogin != null;
 
   // Flat, searchable list of (classroom, assignment) pairs.
@@ -443,7 +453,9 @@ export function StudentHome({ me }: { me: Me }) {
                         )}
                       </td>
                       <td className={cell}>
-                        {a.repo?.llmGrade && a.repo.llmGrade.parseStatus === "ok" ? (
+                        {a.gradingMode === "none" ? (
+                          <span className="text-zinc-400">—</span>
+                        ) : a.repo?.llmGrade && a.repo.llmGrade.parseStatus === "ok" ? (
                           <span className="inline-flex items-center gap-1">
                             <Bot className="size-3.5 text-accent" />
                             <GradeScale points={a.repo.llmGrade.points!} max={a.repo.llmGrade.max!} />

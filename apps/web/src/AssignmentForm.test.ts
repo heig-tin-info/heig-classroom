@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { compactDuration, humanize } from "./AssignmentForm";
+import { compactDuration } from "./AssignmentForm";
+import { humanize } from "./ui";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

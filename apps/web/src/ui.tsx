@@ -1,9 +1,9 @@
-import { ArrowDown, ArrowUp, Building2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Building2, Loader2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
-import type { Me } from "@hgc/contracts";
+import type { DateFormat, Me } from "@hgc/contracts";
 
 import { HelpIcon } from "./help";
 
@@ -234,11 +234,44 @@ export function OrgAvatar({ login, className = "size-5" }: { login: string; clas
   );
 }
 
-/** Local ISO date-time: `2026-09-01 08:00`. */
-export function isoDateTime(iso: string): string {
+/** Account preference adopted in App.tsx; module-level on purpose — date
+    formatting is plain string work, every view re-renders through the `me`
+    query when the preference changes. */
+let dateFormat: DateFormat = "iso";
+export function setDateFormat(f: DateFormat | null | undefined) {
+  dateFormat = f ?? "iso";
+}
+
+/** A date-time in an explicit format (used by the settings preview). */
+export function formatDateTimeAs(iso: string, f: DateFormat): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  const [Y, M, D] = [d.getFullYear(), p(d.getMonth() + 1), p(d.getDate())];
+  const hm = `${p(d.getHours())}:${p(d.getMinutes())}`;
+  switch (f) {
+    case "eu":
+      return `${D}.${M}.${Y} ${hm}`;
+    case "uk":
+      return `${D}/${M}/${Y} ${hm}`;
+    case "us":
+      return `${M}/${D}/${Y} ${d.getHours() % 12 || 12}:${p(d.getMinutes())} ${d.getHours() < 12 ? "AM" : "PM"}`;
+    default:
+      return `${Y}-${M}-${D} ${hm}`;
+  }
+}
+
+/** Local date-time in the user's preferred format; ISO `2026-09-01 08:00` by default. */
+export function isoDateTime(iso: string): string {
+  return formatDateTimeAs(iso, dateFormat);
+}
+
+/** "labo-02-quadratic" → "Labo 02 Quadratic" (default assignment/classroom name). */
+export function humanize(slug: string): string {
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }
 
 /** Current local time formatted for a datetime-local input. */
@@ -257,18 +290,16 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
 }) {
+  // Deliberately no close-on-backdrop-click: modals hold forms, and a stray
+  // click outside must not discard them. Closing is the X or an explicit button.
   return (
     <div
-      className={`fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm`}
-      onClick={onClose}
+      className={`modal-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm`}
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
-      <div
-        className="mt-10 w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="modal-panel mt-10 w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900">
         <div className="mb-4 flex items-center gap-2">
           <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
           <span className="flex-1" />
@@ -282,6 +313,21 @@ export function Modal({
         </div>
         {children}
       </div>
+    </div>
+  );
+}
+
+/** Centered spinner for a panel whose data is still loading. */
+export function Spinner({ label, className = "py-12" }: { label?: string; className?: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={label ?? "Loading"}
+      className={`flex flex-col items-center justify-center gap-2 ${className}`}
+    >
+      <Loader2 className="size-6 animate-spin text-accent" />
+      {label ? <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p> : null}
     </div>
   );
 }
@@ -328,7 +374,7 @@ export function Button({
       {...props}
       // disabled:pointer-events-none: hovering a disabled button must hit the
       // wrapping Tip span (disabled controls swallow mouse events).
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none ${styles} ${props.className ?? ""}`}
+      className={`hgc-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none ${styles} ${props.className ?? ""}`}
     >
       {children}
     </button>
@@ -338,7 +384,7 @@ export function Button({
 export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`rounded-xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.05),0_4px_16px_rgb(0_0_0/0.04)] transition-all duration-200 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgb(0_0_0/0.3)] ${className}`}
+      className={`hgc-card rounded-xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.05),0_4px_16px_rgb(0_0_0/0.04)] transition-all duration-200 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgb(0_0_0/0.3)] ${className}`}
     >
       {children}
     </div>

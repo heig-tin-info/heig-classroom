@@ -75,6 +75,7 @@ export async function studentPlugin(
               startAt: assignments.startAt,
               deadlineAt: assignments.deadlineAt,
               graceMinutes: assignments.graceMinutes,
+              gradingMode: assignments.gradingMode,
             })
             .from(assignments)
             .where(

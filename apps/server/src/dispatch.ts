@@ -158,7 +158,8 @@ export function makeGradeDispatchHandler(app: FastifyInstance, config: AppConfig
     if (!row || row.assignment.archivedAt) return;
     const a = row.assignment;
     // Re-read the condition (ADR-006): dispatch only after the definitive
-    // freeze, exactly once per assignment.
+    // freeze, exactly once per assignment. `none` never reviews.
+    if (a.gradingMode === "none") return;
     if (!a.frozenAt || a.llmDispatchedAt) return;
     if (row.installationId === null) return;
 
@@ -285,6 +286,7 @@ async function dispatchMilestone(
     .limit(1);
   if (!row || row.assignment.archivedAt) return;
   const a = row.assignment;
+  if (a.gradingMode === "none") return;
   const [milestone] = await app.db
     .select()
     .from(assignmentMilestones)

@@ -34,6 +34,7 @@ const AssignmentCreate = z
     graceMinutes: z.number().int().min(0).max(1440).default(30),
     sourceStrategy: z.enum(["whole", "squash"]).default("squash"),
     deadlineStrategy: z.enum(["lock", "commit"]).default("lock"),
+    gradingMode: z.enum(["none", "auto"]).default("auto"),
     branches: z.array(z.string().min(1)).min(1).max(10).optional(),
     protectedFiles: z.array(z.string().min(1).max(300)).max(50).default([]),
   })
@@ -87,6 +88,7 @@ export async function assignmentLifecycleRoutes(
       deadlineAt: z.coerce.date().optional(),
       graceMinutes: z.number().int().min(0).max(1440).optional(),
       deadlineStrategy: z.enum(["lock", "commit"]).optional(),
+      gradingMode: z.enum(["none", "auto"]).optional(),
       protectedFiles: z.array(z.string().min(1).max(300)).max(100).optional(),
     })
     .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update" });
@@ -458,6 +460,7 @@ export async function assignmentLifecycleRoutes(
             squashedFullName: squashed.fullName,
             sourceStrategy: body.data.sourceStrategy,
             deadlineStrategy: body.data.deadlineStrategy,
+            gradingMode: body.data.gradingMode,
             branches,
             protectedFiles: body.data.protectedFiles,
           })

@@ -89,7 +89,8 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
 
       // 2b. Authoritative LLM review (GR-16): frozen, not yet dispatched.
       //     The handler re-reads the condition and claims per-repo rows, so
-      //     enqueueing the same assignment twice is harmless.
+      //     enqueueing the same assignment twice is harmless. Assignments
+      //     graded `none` never dispatch a review.
       const reviewDue = await app.db
         .select({ id: assignments.id })
         .from(assignments)
@@ -98,6 +99,7 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
             isNotNull(assignments.frozenAt),
             isNull(assignments.llmDispatchedAt),
             isNull(assignments.archivedAt),
+            ne(assignments.gradingMode, "none"),
           ),
         );
       for (const { id } of reviewDue) {
@@ -122,6 +124,7 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
             lte(assignmentMilestones.dueAt, sql`now()`),
             ne(assignments.state, "draft"),
             isNull(assignments.archivedAt),
+            ne(assignments.gradingMode, "none"),
           ),
         );
       for (const m of milestonesDue) {

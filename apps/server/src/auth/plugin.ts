@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { avatars, teacherGrants, users } from "../db/schema.js";
-import { isEmailKind } from "@hgc/contracts";
+import { isDateFormat, isEmailKind, type DateFormat } from "@hgc/contracts";
 
 import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
@@ -241,6 +241,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
         avatarUrl,
         hasUploadedAvatar: Boolean(uploaded),
         locale: u.locale,
+        dateFormat: u.dateFormat,
         emailPrefs: resolvedPrefs(u.emailPrefs),
       };
     },
@@ -252,15 +253,25 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     "/app/api/me",
     { preHandler: (req, reply) => app.requireSession(req, reply) },
     async (req, reply) => {
-      const body = req.body as { locale?: unknown; emailPrefs?: unknown };
-      const patch: Partial<{ locale: "en" | "fr" | null; emailPrefs: Record<string, boolean> }> =
-        {};
+      const body = req.body as { locale?: unknown; dateFormat?: unknown; emailPrefs?: unknown };
+      const patch: Partial<{
+        locale: "en" | "fr" | null;
+        dateFormat: DateFormat | null;
+        emailPrefs: Record<string, boolean>;
+      }> = {};
       if ("locale" in (body ?? {})) {
         const locale = body.locale;
         if (locale !== "en" && locale !== "fr" && locale !== null) {
           return reply.code(400).send({ error: "validation", message: "Unsupported locale" });
         }
         patch.locale = locale;
+      }
+      if ("dateFormat" in (body ?? {})) {
+        const dateFormat = body.dateFormat;
+        if (dateFormat !== null && !isDateFormat(dateFormat)) {
+          return reply.code(400).send({ error: "validation", message: "Unsupported date format" });
+        }
+        patch.dateFormat = dateFormat;
       }
       if ("emailPrefs" in (body ?? {})) {
         const prefs = body.emailPrefs;
@@ -283,6 +294,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
       await app.db.update(users).set(patch).where(eq(users.id, req.user!.id));
       return {
         locale: patch.locale ?? req.user!.locale,
+        dateFormat: patch.dateFormat ?? req.user!.dateFormat,
         emailPrefs: resolvedPrefs(patch.emailPrefs ?? req.user!.emailPrefs),
       };
     },

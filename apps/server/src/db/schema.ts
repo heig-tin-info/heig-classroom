@@ -43,6 +43,8 @@ export const users = pgTable(
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
     /** Interface language chosen by the user; null falls back to English. */
     locale: text("locale", { enum: ["en", "fr"] }),
+    /** Date-time display format; null falls back to ISO (YYYY-MM-DD HH:mm). */
+    dateFormat: text("date_format", { enum: ["iso", "eu", "uk", "us"] }),
     /** Per-kind email opt-outs (mailer.ts EMAIL_KINDS); missing key = default. */
     emailPrefs: jsonb("email_prefs").$type<Record<string, boolean>>(),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
@@ -183,6 +185,10 @@ export const assignments = pgTable(
     deadlineStrategy: text("deadline_strategy", { enum: ["lock", "commit"] })
       .notNull()
       .default("lock"),
+    /** `none` = no grades/points shown and no review (LLM/milestone) dispatch. */
+    gradingMode: text("grading_mode", { enum: ["none", "auto"] })
+      .notNull()
+      .default("auto"),
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),

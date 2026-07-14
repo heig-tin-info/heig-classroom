@@ -4,6 +4,14 @@
  * becomes a compile error on the side that diverges.
  */
 
+/** Display format for date-times; null falls back to ISO (`2026-09-01 08:00`). */
+export const DATE_FORMATS = ["iso", "eu", "uk", "us"] as const;
+export type DateFormat = (typeof DATE_FORMATS)[number];
+
+export function isDateFormat(v: unknown): v is DateFormat {
+  return typeof v === "string" && (DATE_FORMATS as readonly string[]).includes(v);
+}
+
 export interface Me {
   id: string;
   email: string;
@@ -15,10 +23,13 @@ export interface Me {
   avatarUrl: string | null;
   hasUploadedAvatar: boolean;
   locale: "en" | "fr" | null;
+  dateFormat: DateFormat | null;
   emailPrefs: Record<string, boolean>;
 }
 
 export type AssignmentState = "draft" | "published" | "locked";
+/** `none` = no grades/points anywhere and no review dispatch; `auto` = current behaviour. */
+export type GradingMode = "none" | "auto";
 export type ProvisionStatus = "pending" | "ok" | "error";
 export type InvitationStatus = "none" | "pending" | "accepted";
 export type CiStatus = "none" | "pending" | "pass" | "fail";
@@ -94,6 +105,7 @@ export interface Assignment {
   squashedFullName: string | null;
   sourceStrategy: "whole" | "squash";
   deadlineStrategy: "lock" | "commit";
+  gradingMode: GradingMode;
   branches: string[];
   protectedFiles: string[];
 }
@@ -187,6 +199,7 @@ export interface AssignmentDetailPayload {
     deadlineAt: string;
     /** Review countdown: the LLM dispatch fires at deadline + grace. */
     graceMinutes: number;
+    gradingMode: GradingMode;
     frozenAt: string | null;
     llmDispatchedAt: string | null;
     sourceAheadSha: string | null;
@@ -248,6 +261,7 @@ export interface StudentAssignment {
   deadlineAt: string;
   /** Review countdown: the LLM review fires at deadline + grace. */
   graceMinutes: number;
+  gradingMode: GradingMode;
   repo: StudentRepo | null;
 }
 

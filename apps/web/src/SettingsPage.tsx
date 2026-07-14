@@ -1,16 +1,91 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, BellRing, GraduationCap, Languages, Mail, School, ShieldCheck, Unlink } from "lucide-react";
+import { ArrowLeft, BellRing, CalendarClock, GraduationCap, Languages, Mail, Palette, School, ShieldCheck, Unlink } from "lucide-react";
 
 import { AdminPanel } from "./AdminPanel";
 import { HelpIcon } from "./help";
 import { useI18n, LOCALES } from "./i18n";
-import { EMAIL_KINDS, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
+import { DATE_FORMATS, EMAIL_KINDS, type DateFormat, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
 
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
 import { api } from "./api";
-import { Avatar, Badge, Button, Card, GithubIcon, isoDateTime, Tip } from "./ui";
+import { applyUiTheme, initialUiTheme, type UiTheme } from "./theme";
+import { Avatar, Badge, Button, Card, formatDateTimeAs, GithubIcon, isoDateTime, setDateFormat, Tip } from "./ui";
+
+/** Shared look of the small pick-one buttons (language, date format, theme). */
+const pickBtn = (active: boolean) =>
+  `rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
+    active
+      ? "border-accent bg-accent/10 text-accent"
+      : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+  }`;
+
+/** Date-time display format, persisted on the account (server-side). */
+function DateFormatSettings({ me }: { me: Me }) {
+  const { t } = useI18n();
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (dateFormat: DateFormat) =>
+      api("/app/api/me", { method: "PATCH", body: JSON.stringify({ dateFormat }) }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
+  });
+  const current = me.dateFormat ?? "iso";
+  const sample = new Date().toISOString();
+  return (
+    <Card className="p-5">
+      <h2 className="mb-1 flex items-center gap-2 font-medium">
+        <CalendarClock className="size-4 text-zinc-400" /> {t("settings.dateFormat")}
+      </h2>
+      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+        {t("settings.dateFormatHint")}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {DATE_FORMATS.map((f) => (
+          <button
+            key={f}
+            onClick={() => {
+              setDateFormat(f);
+              save.mutate(f);
+            }}
+            disabled={save.isPending}
+            className={`tabular-nums ${pickBtn(current === f)}`}
+          >
+            {formatDateTimeAs(sample, f)}
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+/** UI style (classic / revamped), stored in this browser like light/dark. */
+function AppearanceSettings() {
+  const { t } = useI18n();
+  const [ui, setUi] = useState<UiTheme>(initialUiTheme);
+  const pick = (v: UiTheme) => {
+    setUi(v);
+    applyUiTheme(v);
+  };
+  return (
+    <Card className="p-5">
+      <h2 className="mb-1 flex items-center gap-2 font-medium">
+        <Palette className="size-4 text-zinc-400" /> {t("settings.appearance")}
+      </h2>
+      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+        {t("settings.appearanceHint")}
+      </p>
+      <div className="flex gap-2">
+        <button onClick={() => pick("classic")} className={pickBtn(ui === "classic")}>
+          {t("settings.theme.classic")}
+        </button>
+        <button onClick={() => pick("v2")} className={pickBtn(ui === "v2")}>
+          {t("settings.theme.v2")}
+        </button>
+      </div>
+    </Card>
+  );
+}
 
 /** Per-kind toggles for the real-time toasts; stored in this browser. */
 function NotificationSettings() {
@@ -118,20 +193,16 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
         </p>
         <div className="flex gap-2">
           {LOCALES.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => setLocale(l.code)}
-              className={`rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-                locale === l.code
-                  ? "border-accent bg-accent/10 text-accent"
-                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-              }`}
-            >
+            <button key={l.code} onClick={() => setLocale(l.code)} className={pickBtn(locale === l.code)}>
               {l.label}
             </button>
           ))}
         </div>
       </Card>
+
+      <AppearanceSettings />
+
+      <DateFormatSettings me={me} />
 
       <Card className="flex flex-wrap items-center gap-4 p-5">
         <Tip label="Change profile picture">
