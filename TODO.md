@@ -42,14 +42,16 @@ sans re-diagnostiquer.
 > ticker/dispatch `grade-milestone` + section UI). Migration
 > `0018_milestones-org-plan.sql`.
 
-### 6b. Milestones — volet score (repo heig-tin-info/score)
-- La plateforme émet `grade-milestone` avec `client_payload.milestone`
-  (nom du jalon) ; reste côté score : tag `milestone:` par critère dans
-  `criteria.yml` + filtre `score grade --milestone <name>` (StudentScore),
-  et le shim `grading.yml` doit écouter `repository_dispatch:
-  types: [grade-final, grade-milestone]`.
-- Note ingestion : une review de milestone reste « trace-only » côté
-  plateforme (le slot `llm_grade_run_id` n'est réclamé qu'après `frozen_at`).
+### 6b. Milestones — volet score : FAIT (0.7.3/0.7.4, 2026-07-14)
+- score 0.7.3 : tag `milestone:` par critère + `score grade --milestone` ;
+  0.7.4 : la review finale écrit awarded_points + rationale EN PLACE dans
+  criteria.yml (commit « grading: <mark>/6 ») ; les milestones gardent
+  `GRADING-<name>.yml` (leur filtre élague le barème). Shims bumped @0.7.4 :
+  canonique heig-tin-info/labo-02-quadratic + source heig-test-classroom2.
+- Reste : taguer des critères `milestone:` dans les labos qui en veulent, et
+  E2E d'un jalon via l'UI. Note ingestion : une review de milestone reste
+  « trace-only » (le slot `llm_grade_run_id` n'est réclamé qu'après
+  `frozen_at`).
 
 ### 7. Flow de validation des notes (phases)
 - Note indicative (CI) → note LLM (deadline) → **note validée par le prof**
