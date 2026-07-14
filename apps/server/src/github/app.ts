@@ -109,6 +109,32 @@ export async function fetchOrgPlan(
   }
 }
 
+/**
+ * Presence of the ANTHROPIC_API_KEY organization secret: without it the LLM
+ * review tier dies at every deadline/milestone ("Could not resolve
+ * authentication method", seen live 2026-07-14). Requires the App's org
+ * Secrets read permission; null = indeterminate (permission not granted
+ * yet, API error) — never warn on it. Presence only: the value's validity
+ * still shows up at the first review run.
+ */
+export async function fetchOrgLlmSecret(
+  config: AppConfig,
+  installationId: number,
+  orgLogin: string,
+): Promise<"ok" | "missing" | null> {
+  try {
+    const { octokit } = await installationClient(config, installationId);
+    await octokit.request("GET /orgs/{org}/actions/secrets/{secret_name}", {
+      org: orgLogin,
+      secret_name: "ANTHROPIC_API_KEY",
+      request: { retries: 0 },
+    });
+    return "ok";
+  } catch (err) {
+    return (err as { status?: number }).status === 404 ? "missing" : null;
+  }
+}
+
 /** GET /orgs/{org}/installation; null if the App is not installed there. */
 export async function resolveOrgInstallation(
   config: AppConfig,

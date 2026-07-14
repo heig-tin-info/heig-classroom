@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bot,
   Building2,
   CheckCircle2,
   ClipboardList,
@@ -20,7 +21,7 @@ import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
-import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, Tip, useSortableTable } from "./ui";
+import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, Tip, useNow, useSortableTable } from "./ui";
 
 /** Live countdown to (or since) the deadline, refreshed every 30 s. */
 function Countdown({ deadline }: { deadline: string }) {
@@ -40,8 +41,9 @@ function Countdown({ deadline }: { deadline: string }) {
 }
 
 /** Metrics row for an accepted repository: commits, CI donut, grade scale. */
-function RepoMetrics({ repo }: { repo: StudentRepo }) {
+function RepoMetrics({ repo, reviewAt }: { repo: StudentRepo; reviewAt: number }) {
   const t = useT();
+  const now = useNow(15_000);
   return (
     <div className="flex flex-wrap items-center gap-3">
       {repo.commitCount !== null ? (
@@ -68,11 +70,32 @@ function RepoMetrics({ repo }: { repo: StudentRepo }) {
           {t("student.ciRunning")}
         </Badge>
       ) : null}
-      {repo.grade && repo.grade.parseStatus === "ok" ? (
+      {repo.llmGrade && repo.llmGrade.parseStatus === "ok" ? (
+        // GR-16: the authoritative LLM review replaces the indicative grade.
+        <Tip label={t("student.reviewedTip")}>
+          <span className="inline-flex items-center gap-1.5">
+            <Bot className="size-3.5 text-accent" />
+            <GradeScale points={repo.llmGrade.points!} max={repo.llmGrade.max!} />
+            <span className="text-xs text-zinc-400">{t("student.reviewed")}</span>
+          </span>
+        </Tip>
+      ) : repo.grade && repo.grade.parseStatus === "ok" ? (
         <span className="inline-flex items-center gap-1.5">
           {repo.gradeFrozen ? <Lock className="size-3.5 text-zinc-400" /> : null}
           <GradeScale points={repo.grade.points!} max={repo.grade.max!} />
           <span className="text-xs text-zinc-400">{t("student.indicative")}</span>
+          {repo.gradeFrozen ? (
+            // Countdown to deadline + grace, then "running" until the
+            // authoritative review lands (llmGrade above takes over).
+            <Tip label={t("student.reviewPendingTip")}>
+              <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                <Bot className={`size-3.5 ${now >= reviewAt ? "animate-pulse" : ""}`} />
+                {now < reviewAt
+                  ? t("student.reviewIn", { t: formatDuration(reviewAt - now, t) })
+                  : t("student.reviewRunning")}
+              </span>
+            </Tip>
+          ) : null}
         </span>
       ) : repo.ciStatus === "pass" ? (
         <Badge tone="green">{t("student.ciPass")}</Badge>
@@ -151,7 +174,14 @@ function StudentAssignmentRow({
         ) : null}
       </td>
       <td className={cell}>
-        {accepted ? <RepoMetrics repo={a.repo!} /> : <span className="text-zinc-400">—</span>}
+        {accepted ? (
+          <RepoMetrics
+            repo={a.repo!}
+            reviewAt={new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000}
+          />
+        ) : (
+          <span className="text-zinc-400">—</span>
+        )}
       </td>
       <td className={`${cell} text-right`}>
         {accepted ? (
@@ -413,7 +443,12 @@ export function StudentHome({ me }: { me: Me }) {
                         )}
                       </td>
                       <td className={cell}>
-                        {a.repo?.grade && a.repo.grade.parseStatus === "ok" ? (
+                        {a.repo?.llmGrade && a.repo.llmGrade.parseStatus === "ok" ? (
+                          <span className="inline-flex items-center gap-1">
+                            <Bot className="size-3.5 text-accent" />
+                            <GradeScale points={a.repo.llmGrade.points!} max={a.repo.llmGrade.max!} />
+                          </span>
+                        ) : a.repo?.grade && a.repo.grade.parseStatus === "ok" ? (
                           <GradeScale points={a.repo.grade.points!} max={a.repo.grade.max!} />
                         ) : (
                           <span className="text-zinc-400">—</span>

@@ -1,5 +1,5 @@
 import { ArrowDown, ArrowUp, Building2, X } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
@@ -23,6 +23,16 @@ export const Z = {
   help: "z-[80]",
   tooltip: "z-[90]",
 } as const;
+
+/** Ticking clock for countdowns; re-renders every `intervalMs`. */
+export function useNow(intervalMs = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  return now;
+}
 
 // --- Sortable tables (one motif for every hand-rolled table) ---
 

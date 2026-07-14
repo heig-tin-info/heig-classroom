@@ -70,6 +70,11 @@ export interface ClassroomDetail {
     status: "active" | "degraded";
     /** Fresh existence check when uninstalled; null = indeterminate. */
     exists: boolean | null;
+    /**
+     * ANTHROPIC_API_KEY org secret presence (LLM reviews die without it).
+     * Null = indeterminate: the App lacks the org Secrets read permission.
+     */
+    llmSecret: "ok" | "missing" | null;
   } | null;
   roster: RosterEntry[];
   appSlug: string | null;
@@ -180,6 +185,10 @@ export interface AssignmentDetailPayload {
     state: AssignmentState;
     startAt: string;
     deadlineAt: string;
+    /** Review countdown: the LLM dispatch fires at deadline + grace. */
+    graceMinutes: number;
+    frozenAt: string | null;
+    llmDispatchedAt: string | null;
     sourceAheadSha: string | null;
     sourcePushedAt: string | null;
     syncedAt: string | null;
@@ -237,6 +246,8 @@ export interface StudentAssignment {
   state: "published" | "locked";
   startAt: string;
   deadlineAt: string;
+  /** Review countdown: the LLM review fires at deadline + grace. */
+  graceMinutes: number;
   repo: StudentRepo | null;
 }
 

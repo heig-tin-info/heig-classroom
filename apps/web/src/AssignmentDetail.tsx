@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  Bot,
   CalendarClock,
   CheckCircle2,
   ChevronDown,
@@ -35,7 +36,7 @@ import { api, ApiError } from "./api";
 import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
-import { useT } from "./i18n";
+import { formatDuration, useT } from "./i18n";
 import {
   Badge,
   Button,
@@ -45,6 +46,7 @@ import {
   isoDateTime,
   SortHeader,
   Tip,
+  useNow,
   useSortableTable,
   Z,
 } from "./ui";
@@ -272,7 +274,29 @@ function StudentRow({
       </td>
       <td className={`${cell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1">
-          <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
+          {/* GR-16: the authoritative LLM review, once landed, IS the grade;
+              until then the frozen CI grade shows with a pending marker. */}
+          {r?.llmGrade && r.llmGrade.parseStatus === "ok" ? (
+            <Tip
+              label={`LLM review — CI grade was ${
+                r.frozenGrade?.points != null ? r.frozenGrade.points.toFixed(1) : "—"
+              }`}
+            >
+              <span className="inline-flex items-center gap-1 font-medium tabular-nums">
+                <Bot className="size-3.5 text-accent" />
+                {r.llmGrade.points!.toFixed(1)}
+              </span>
+            </Tip>
+          ) : (
+            <>
+              <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
+              {frozen && r?.frozenGrade ? (
+                <Tip label="LLM review pending">
+                  <Bot className="size-3.5 animate-pulse text-amber-500" />
+                </Tip>
+              ) : null}
+            </>
+          )}
           {r?.provisionStatus === "ok" ? (
             <Tip label="Grade history">
               <button
@@ -591,6 +615,51 @@ function MilestonesSection({
   );
 }
 
+/**
+ * Where the authoritative LLM review stands, for the header: counting down
+ * to deadline + grace, then "running" until every provisioned repo carries
+ * its llm grade, then "reviewed". Nothing before the deadline is enforced.
+ */
+function ReviewChip({
+  a,
+  students,
+}: {
+  a: AssignmentDetailPayload["assignment"];
+  students: AssignmentDetailStudent[];
+}) {
+  const t = useT();
+  const now = useNow(15_000);
+  if (a.state !== "locked") return null;
+  const repos = students.filter((s) => s.repo?.provisionStatus === "ok");
+  if (repos.length === 0) return null;
+  const reviewAt = new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000;
+  if (repos.every((s) => s.repo!.llmGrade)) {
+    return (
+      <Badge tone="green" icon={Bot}>
+        LLM reviewed
+      </Badge>
+    );
+  }
+  if (now < reviewAt) {
+    return (
+      <Tip label="The full LLM review fires once the grace period ends">
+        <Badge tone="amber" icon={Bot}>
+          LLM review in {formatDuration(reviewAt - now, t)}
+        </Badge>
+      </Tip>
+    );
+  }
+  return (
+    <Tip label="Reviews are dispatched to every repository; grades land as the runs complete">
+      <span className="animate-pulse">
+        <Badge tone="amber" icon={Bot}>
+          LLM review running…
+        </Badge>
+      </span>
+    </Tip>
+  );
+}
+
 type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
 
 export function AssignmentDetail({
@@ -658,6 +727,7 @@ export function AssignmentDetail({
         <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "red" : "zinc"}>
           {t(`state.${a.state}` as Parameters<typeof t>[0])}
         </Badge>
+        <ReviewChip a={a} students={students} />
         <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
           <CalendarClock className="size-3.5" />
           {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}

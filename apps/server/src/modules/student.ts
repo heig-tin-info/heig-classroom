@@ -74,6 +74,7 @@ export async function studentPlugin(
               state: assignments.state,
               startAt: assignments.startAt,
               deadlineAt: assignments.deadlineAt,
+              graceMinutes: assignments.graceMinutes,
             })
             .from(assignments)
             .where(

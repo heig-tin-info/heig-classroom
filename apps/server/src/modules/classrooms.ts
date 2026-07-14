@@ -11,6 +11,7 @@ import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
 import {
+  fetchOrgLlmSecret,
   fetchOrgPlan,
   githubApp,
   listInstalledOrgs,
@@ -326,10 +327,17 @@ export async function classroomsPlugin(
         req.log.warn({ err, org: org.login }, "org id resolution failed");
       }
     }
+    // LLM reviews need the ANTHROPIC_API_KEY org secret (the reusable
+    // workflow maps it explicitly): warn the teacher on the classroom page
+    // rather than at the first failed review after a deadline.
+    const llmSecret =
+      org && org.installationId !== null
+        ? await fetchOrgLlmSecret(config, org.installationId, org.login)
+        : null;
     const roster = await rosterView(app.db, room.id);
     return {
       ...room,
-      org: org ? { ...org, exists: orgExists } : org,
+      org: org ? { ...org, exists: orgExists, llmSecret } : org,
       roster,
       appSlug: config.GITHUB_APP_SLUG || null,
     };

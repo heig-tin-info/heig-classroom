@@ -225,6 +225,34 @@ function OrgMissing({ orgLogin }: { orgLogin: string }) {
 }
 
 /**
+ * The ANTHROPIC_API_KEY organization secret is missing: every LLM review
+ * (deadline grade-final, milestones) will fail on this org until the teacher
+ * creates it. Detected live through the App's org Secrets read permission.
+ */
+function LlmKeyWarning({ orgLogin }: { orgLogin: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <AlertTriangle className="size-4 shrink-0" />
+      <span>
+        The organization secret <span className="font-mono font-medium">ANTHROPIC_API_KEY</span>{" "}
+        is missing on <span className="font-medium">{orgLogin}</span>: the automatic LLM reviews
+        (deadline and milestones) will fail. Add it under Organization settings → Secrets and
+        variables → Actions, with access to private repositories.
+      </span>
+      <span className="flex-1" />
+      <a
+        href={`https://github.com/organizations/${orgLogin}/settings/secrets/actions`}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
+      >
+        Open the org secrets
+      </a>
+    </div>
+  );
+}
+
+/**
  * Organization secrets never reach the private repositories of a Free
  * organization: the LLM review tier fails silently (empty ANTHROPIC_API_KEY).
  * Teachers get GitHub Team at no cost through GitHub Education.
@@ -328,6 +356,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
 
       {room.org?.installationId && room.org.plan === "free" ? (
         <FreePlanWarning orgLogin={room.org.login} />
+      ) : null}
+
+      {room.org?.installationId && room.org.llmSecret === "missing" ? (
+        <LlmKeyWarning orgLogin={room.org.login} />
       ) : null}
 
       <AssignmentsCard
