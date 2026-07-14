@@ -16,7 +16,7 @@ import { api } from "./api";
 import { useT } from "./i18n";
 import { useToast } from "./notify";
 import { applyTheme, initialTheme, type Theme } from "./theme";
-import { Avatar, Button, GithubIcon } from "./ui";
+import { Avatar, Button, GithubIcon, Tip } from "./ui";
 
 export function Logo({ className = "size-6" }: { className?: string }) {
   return (
@@ -30,17 +30,19 @@ function ThemeToggle() {
   const t = useT();
   const [theme, setTheme] = useState<Theme>(initialTheme);
   return (
-    <Button
-      variant="ghost"
-      aria-label={t("menu.toggleTheme")}
-      onClick={() => {
-        const next = theme === "dark" ? "light" : "dark";
-        setTheme(next);
-        applyTheme(next);
-      }}
-    >
-      {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
+    <Tip label={t("menu.toggleTheme")}>
+      <Button
+        variant="ghost"
+        aria-label={t("menu.toggleTheme")}
+        onClick={() => {
+          const next = theme === "dark" ? "light" : "dark";
+          setTheme(next);
+          applyTheme(next);
+        }}
+      >
+        {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      </Button>
+    </Tip>
   );
 }
 
@@ -129,48 +131,50 @@ export function Header({
         <button
           onClick={onHome}
           className="flex items-center gap-3 rounded-lg transition-opacity hover:opacity-80"
-          title="Home"
         >
           <Logo className="size-5" />
           <span className="font-semibold tracking-tight">HEIG Classroom</span>
         </button>
         <span className="flex-1" />
-        <a
-          href="https://github.com/heig-tin-info/heig-classroom"
-          target="_blank"
-          rel="noreferrer"
-          aria-label={t("header.sources")}
-          title={t("header.sources")}
-          className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-        >
-          <GithubIcon className="size-4" />
-        </a>
-        <a
-          href="https://heig-tin-info.github.io/heig-classroom/"
-          target="_blank"
-          rel="noreferrer"
-          aria-label={t("header.docs")}
-          title={t("header.docs")}
-          className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-        >
-          <BookOpen className="size-4" />
-        </a>
+        <Tip label={t("header.sources")}>
+          <a
+            href="https://github.com/heig-tin-info/heig-classroom"
+            target="_blank"
+            rel="noreferrer"
+            aria-label={t("header.sources")}
+            className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <GithubIcon className="size-4" />
+          </a>
+        </Tip>
+        <Tip label={t("header.docs")}>
+          <a
+            href="https://heig-tin-info.github.io/heig-classroom/"
+            target="_blank"
+            rel="noreferrer"
+            aria-label={t("header.docs")}
+            className="rounded-lg p-2 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            <BookOpen className="size-4" />
+          </a>
+        </Tip>
         {onToggleStudentView ? (
           // Teacher/admin only: flip between the teacher UI and the student
           // UI (the seat is taken via "Join as student" on the classroom).
-          <button
-            onClick={onToggleStudentView}
-            aria-label={studentView ? t("menu.teacherView") : t("menu.studentView")}
-            title={studentView ? t("menu.teacherView") : t("menu.studentView")}
-            aria-pressed={studentView}
-            className={`rounded-lg p-2 transition-colors ${
-              studentView
-                ? "bg-accent/10 text-accent hover:bg-accent/20"
-                : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-            }`}
-          >
-            <GraduationCap className="size-4" />
-          </button>
+          <Tip label={studentView ? t("menu.teacherView") : t("menu.studentView")}>
+            <button
+              onClick={onToggleStudentView}
+              aria-label={studentView ? t("menu.teacherView") : t("menu.studentView")}
+              aria-pressed={studentView}
+              className={`rounded-lg p-2 transition-colors ${
+                studentView
+                  ? "bg-accent/10 text-accent hover:bg-accent/20"
+                  : "text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+              }`}
+            >
+              <GraduationCap className="size-4" />
+            </button>
+          </Tip>
         ) : null}
         <ThemeToggle />
         <UserMenu me={me} onOpenSettings={onOpenSettings} />

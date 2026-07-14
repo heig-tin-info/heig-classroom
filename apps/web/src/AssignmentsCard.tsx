@@ -27,6 +27,7 @@ import {
   IconButton,
   isoDateTime,
   Modal,
+  Tip,
 } from "./ui";
 
 function StateBadge({ state }: { state: Assignment["state"] }) {
@@ -90,13 +91,11 @@ function AssignmentRow({
     <li className="flex items-start gap-2 py-3">
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-          <button
-            onClick={onOpen}
-            className="font-medium hover:text-accent hover:underline"
-            title="Open assignment detail"
-          >
-            {a.name}
-          </button>
+          <Tip label="Open assignment detail">
+            <button onClick={onOpen} className="font-medium hover:text-accent hover:underline">
+              {a.name}
+            </button>
+          </Tip>
           <StateBadge state={a.state} />
           {archived ? (
             <Badge tone="zinc" icon={Archive}>
@@ -208,19 +207,20 @@ export function AssignmentsCard({
         <h2 className="font-medium">Assignments</h2>
         <HelpIcon topic="assignments" />
         <span className="flex-1" />
-        <button
-          aria-label="Archives"
-          title="Archives"
-          aria-pressed={showArchived}
-          onClick={() => setShowArchived((v) => !v)}
-          className={`rounded-lg p-2 transition-colors ${
-            showArchived
-              ? "bg-accent/10 text-accent hover:bg-accent/20"
-              : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Archive className="size-4" />
-        </button>
+        <Tip label="Archives">
+          <button
+            aria-label="Archives"
+            aria-pressed={showArchived}
+            onClick={() => setShowArchived((v) => !v)}
+            className={`rounded-lg p-2 transition-colors ${
+              showArchived
+                ? "bg-accent/10 text-accent hover:bg-accent/20"
+                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Archive className="size-4" />
+          </button>
+        </Tip>
         {appInstalled ? (
           <Button onClick={() => setModal("create")}>
             <Plus className="size-4" /> New assignment

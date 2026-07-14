@@ -88,29 +88,36 @@ export function SortHeader<K extends string>({
 }
 
 /**
- * Icon-only button with a real tooltip: a small dark bubble rendered in a
- * portal on hover/focus (240 ms delay), flipping below the button when there
- * is no room above and clamped to the viewport — no native `title` lag.
+ * Instant tooltip (replaces the laggy native `title`): dark bubble with an
+ * arrow, rendered in a portal on hover/focus after 120 ms, tippy-like pop
+ * animation (`tip-in` in style.css), flipped below the anchor near the top
+ * edge and clamped to the viewport. Wraps any element; keep the accessible
+ * name (`aria-label`) on the control itself — the bubble is aria-hidden.
+ * A nullish label renders the child untouched (conditional tooltips).
  */
-export function IconButton({
+export function Tip({
   label,
-  danger,
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
+  children,
+  className = "inline-flex",
+}: {
+  label: string | null | undefined;
+  children: ReactNode;
+  className?: string;
+}) {
   const [tip, setTip] = useState<{ x: number; y: number; below: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const show = (el: HTMLElement) => {
-    const r = el.getBoundingClientRect();
-    const below = r.top < 40;
-    setTip({
-      x: Math.min(Math.max(r.left + r.width / 2, 16), window.innerWidth - 16),
-      y: below ? r.bottom + 6 : r.top - 6,
-      below,
-    });
-  };
+  if (!label) return <>{children}</>;
   const arm = (el: HTMLElement) => {
     if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => show(el), 240);
+    timer.current = setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      const below = r.top < 44;
+      setTip({
+        x: Math.min(Math.max(r.left + r.width / 2, 16), window.innerWidth - 16),
+        y: below ? r.bottom + 7 : r.top - 7,
+        below,
+      });
+    }, 120);
   };
   const disarm = () => {
     if (timer.current) clearTimeout(timer.current);
@@ -118,41 +125,64 @@ export function IconButton({
     setTip(null);
   };
   return (
-    <>
-      <button
-        {...props}
-        aria-label={label}
-        onMouseEnter={(e) => arm(e.currentTarget)}
-        onMouseLeave={disarm}
-        onFocus={(e) => arm(e.currentTarget)}
-        onBlur={disarm}
-        onClick={(e) => {
-          disarm();
-          props.onClick?.(e);
-        }}
-        className={`rounded-md p-1.5 transition-colors ${
-          danger
-            ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-        }`}
-      />
+    <span
+      className={className}
+      onMouseEnter={(e) => arm(e.currentTarget)}
+      onMouseLeave={disarm}
+      onFocus={(e) => arm(e.currentTarget)}
+      onBlur={disarm}
+      onClick={disarm}
+    >
+      {children}
       {tip
         ? createPortal(
             <span
-              role="tooltip"
-              className={`pointer-events-none fixed ${Z.tooltip} whitespace-nowrap rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600`}
+              aria-hidden
+              className={`pointer-events-none fixed ${Z.tooltip}`}
               style={{
                 left: tip.x,
                 top: tip.y,
                 transform: `translate(-50%, ${tip.below ? "0" : "-100%"})`,
               }}
             >
-              {label}
+              <span
+                className={`tip-bubble relative block rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600 ${
+                  tip.below ? "origin-top" : "origin-bottom"
+                } ${label.length > 60 ? "max-w-xs whitespace-normal" : "whitespace-nowrap"}`}
+              >
+                {label}
+                <span
+                  className={`absolute left-1/2 size-2 -translate-x-1/2 rotate-45 bg-zinc-800 dark:bg-zinc-600 ${
+                    tip.below ? "-top-1" : "-bottom-1"
+                  }`}
+                />
+              </span>
             </span>,
             document.body,
           )
         : null}
-    </>
+    </span>
+  );
+}
+
+/** Icon-only button on the shared Tip tooltip (label = accessible name too). */
+export function IconButton({
+  label,
+  danger,
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
+  return (
+    <Tip label={label}>
+      <button
+        {...props}
+        aria-label={label}
+        className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+          danger
+            ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+        }`}
+      />
+    </Tip>
   );
 }
 
@@ -286,7 +316,9 @@ export function Button({
   return (
     <button
       {...props}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${styles} ${props.className ?? ""}`}
+      // disabled:pointer-events-none: hovering a disabled button must hit the
+      // wrapping Tip span (disabled controls swallow mouse events).
+      className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none ${styles} ${props.className ?? ""}`}
     >
       {children}
     </button>

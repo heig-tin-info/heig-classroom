@@ -23,7 +23,7 @@ import { useT } from "./i18n";
 import type { Route } from "./router";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
-import { Badge, Button, Card, Field, GithubIcon, Modal, OrgAvatar } from "./ui";
+import { Badge, Button, Card, Field, GithubIcon, Modal, OrgAvatar, Tip } from "./ui";
 
 function ClassroomSettings({
   room,
@@ -309,9 +309,11 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           </Badge>
         )}
         <span className="flex-1" />
-        <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
-          <SettingsIcon className="size-4" />
-        </Button>
+        <Tip label="Classroom settings">
+          <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
+            <SettingsIcon className="size-4" />
+          </Button>
+        </Tip>
       </div>
 
       {showSettings ? (
@@ -343,12 +345,11 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           <HelpIcon topic="roster" />
           <span className="flex-1" />
           {joined ? (
-            <span
-              className="inline-flex items-center gap-1.5 text-xs text-zinc-400"
-              title={t("roster.joined")}
-            >
-              <GraduationCap className="size-3.5" /> {t("roster.staff")}
-            </span>
+            <Tip label={t("roster.joined")}>
+              <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                <GraduationCap className="size-3.5" /> {t("roster.staff")}
+              </span>
+            </Tip>
           ) : (
             <Button variant="subtle" onClick={() => join.mutate()} disabled={join.isPending}>
               <GraduationCap className="size-4" /> {t("roster.join")}

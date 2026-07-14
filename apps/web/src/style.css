@@ -37,9 +37,25 @@
 .toast-leave {
   animation: toast-out 0.2s ease-in forwards;
 }
+/* Tooltips (ui.tsx Tip): tippy-like pop, scaling from the anchor side. */
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.tip-bubble {
+  animation: tip-in 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast-enter,
-  .toast-leave {
+  .toast-leave,
+  .tip-bubble {
     animation-duration: 0.01ms;
   }
 }

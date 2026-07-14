@@ -11,7 +11,7 @@ import { useState } from "react";
 
 import { api, ApiError, apiErrorMessage } from "./api";
 import { ScheduledTasksCard } from "./ScheduledTasks";
-import { Badge, Button, Card, EmptyState, Field, isoDateTime, SortHeader, useSortableTable } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, IconButton, isoDateTime, SortHeader, useSortableTable } from "./ui";
 
 interface TeacherRow {
   id: string;
@@ -167,9 +167,9 @@ export function AdminPanel() {
                       </span>
                     </td>
                     <td className={`${cell} text-right`}>
-                      <button
-                        aria-label="Revoke teacher role"
-                        title="Revoke teacher role"
+                      <IconButton
+                        danger
+                        label="Revoke teacher role"
                         onClick={() => {
                           const warning =
                             r.classrooms > 0
@@ -178,10 +178,9 @@ export function AdminPanel() {
                           if (window.confirm(warning)) revoke.mutate(r.id);
                         }}
                         disabled={revoke.isPending}
-                        className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
                       >
                         <Trash2 className="size-4" />
-                      </button>
+                      </IconButton>
                     </td>
                   </tr>
                 ))}

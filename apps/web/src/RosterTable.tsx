@@ -17,7 +17,7 @@ import { useState } from "react";
 import type { RosterEntry } from "@hgc/contracts";
 
 import { api, ApiError, apiErrorMessage } from "./api";
-import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime, SortHeader, useSortableTable } from "./ui";
+import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime, SortHeader, Tip, useSortableTable } from "./ui";
 
 const cell = "px-3 py-2";
 
@@ -133,14 +133,15 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
       </td>
       <td className={cell}>{entry.prenom}</td>
       <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
-        <a
-          href={`mailto:${entry.email}`}
-          title={`Write to ${entry.prenom} ${entry.nom}`}
-          className="inline-flex items-center gap-1.5 hover:text-accent hover:underline"
-        >
-          <Mail className="size-3.5 text-zinc-300 dark:text-zinc-600" />
-          {entry.email}
-        </a>
+        <Tip label={`Write to ${entry.prenom} ${entry.nom}`}>
+          <a
+            href={`mailto:${entry.email}`}
+            className="inline-flex items-center gap-1.5 hover:text-accent hover:underline"
+          >
+            <Mail className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+            {entry.email}
+          </a>
+        </Tip>
       </td>
       <td className={cell}>
         <span className="inline-flex items-center gap-1">

@@ -44,6 +44,7 @@ import {
   GithubIcon,
   isoDateTime,
   SortHeader,
+  Tip,
   useSortableTable,
   Z,
 } from "./ui";
@@ -207,11 +208,12 @@ function StudentRow({
               {t("status.accepted")}
             </Badge>
             {r.syncPr && r.fullName ? (
+              <Tip label={`Sync pull request #${r.syncPr.number}`}>
               <a
                 href={`https://github.com/${r.fullName}/pull/${r.syncPr.number}`}
                 target="_blank"
                 rel="noreferrer"
-                title={`Sync pull request #${r.syncPr.number}`}
+                aria-label={`Sync pull request #${r.syncPr.number}`}
               >
                 <Badge
                   tone={
@@ -230,6 +232,7 @@ function StudentRow({
                       : "sync PR closed"}
                 </Badge>
               </a>
+              </Tip>
             ) : null}
             {r.missing ? (
               <Badge tone="red" icon={XCircle}>
@@ -238,11 +241,11 @@ function StudentRow({
             ) : null}
           </span>
         ) : r?.provisionStatus === "error" ? (
-          <span title={r.provisionError ?? undefined} className="cursor-help">
+          <Tip label={r.provisionError} className="inline-flex cursor-help">
             <Badge tone="red" icon={XCircle}>
               {t("status.provisionError")}
             </Badge>
-          </span>
+          </Tip>
         ) : s.claimStatus === "claimed" ? (
           <Badge tone="amber" icon={Clock}>
             {t("status.notAccepted")}
@@ -253,7 +256,9 @@ function StudentRow({
       </td>
       <td className={`${cell} font-mono text-xs`}>
         {r?.lastCommitSha ? (
-          <span title={r.lastCommitSha}>{r.lastCommitSha.slice(0, 7)}</span>
+          <Tip label={r.lastCommitSha}>
+            <span>{r.lastCommitSha.slice(0, 7)}</span>
+          </Tip>
         ) : (
           <span className="text-zinc-400">—</span>
         )}
@@ -269,17 +274,18 @@ function StudentRow({
         <span className="inline-flex items-center gap-1">
           <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
           {r?.provisionStatus === "ok" ? (
-            <button
-              aria-label="Grade history"
-              title="Grade history"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowHistory(true);
-              }}
-              className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-            >
-              <History className="size-3.5" />
-            </button>
+            <Tip label="Grade history">
+              <button
+                aria-label="Grade history"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowHistory(true);
+                }}
+                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                <History className="size-3.5" />
+              </button>
+            </Tip>
           ) : null}
         </span>
         {showHistory && r ? (
@@ -296,55 +302,59 @@ function StudentRow({
       <td className={`${cell} text-right whitespace-nowrap`}>
         {r?.provisionStatus === "ok" && r.fullName ? (
           <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            <button
-              aria-label={t("assignment.gradeNow")}
-              title={
+            <Tip
+              label={
                 gradeNowError
                   ? t("assignment.gradeNowUnsupported")
                   : gradeNow.isSuccess
                     ? t("assignment.gradeNowStarted")
                     : t("assignment.gradeNow")
               }
-              onClick={() => gradeNow.mutate()}
-              disabled={gradeNow.isPending || locked}
-              className={`rounded-md p-1.5 transition-colors disabled:opacity-40 ${
-                gradeNowError
-                  ? "text-amber-500"
-                  : gradeNow.isSuccess
-                    ? "text-emerald-500"
-                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              }`}
             >
-              {gradeNow.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : gradeNowError ? (
-                <AlertTriangle className="size-4" />
-              ) : gradeNow.isSuccess ? (
-                <CheckCircle2 className="size-4" />
-              ) : (
-                <Play className="size-4" />
-              )}
-            </button>
+              <button
+                aria-label={t("assignment.gradeNow")}
+                onClick={() => gradeNow.mutate()}
+                disabled={gradeNow.isPending || locked}
+                className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-40 ${
+                  gradeNowError
+                    ? "text-amber-500"
+                    : gradeNow.isSuccess
+                      ? "text-emerald-500"
+                      : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                {gradeNow.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : gradeNowError ? (
+                  <AlertTriangle className="size-4" />
+                ) : gradeNow.isSuccess ? (
+                  <CheckCircle2 className="size-4" />
+                ) : (
+                  <Play className="size-4" />
+                )}
+              </button>
+            </Tip>
             {/* Padlock shows the STATE: closed red when locked, open otherwise. */}
-            <button
-              aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
-              title={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
-              onClick={() => toggleLock.mutate(locked ? "unlock" : "lock")}
-              disabled={toggleLock.isPending}
-              className={`rounded-md p-1.5 transition-colors ${
-                locked
-                  ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                  : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              }`}
-            >
-              {toggleLock.isPending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : locked ? (
-                <Lock className="size-4" />
-              ) : (
-                <LockOpen className="size-4" />
-              )}
-            </button>
+            <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
+              <button
+                aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
+                onClick={() => toggleLock.mutate(locked ? "unlock" : "lock")}
+                disabled={toggleLock.isPending}
+                className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none ${
+                  locked
+                    ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
+                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                {toggleLock.isPending ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : locked ? (
+                  <Lock className="size-4" />
+                ) : (
+                  <LockOpen className="size-4" />
+                )}
+              </button>
+            </Tip>
           </span>
         ) : null}
       </td>
@@ -503,15 +513,16 @@ function MilestonesSection({
                 </Badge>
               )}
               <span className="flex-1" />
-              <button
-                aria-label={`Delete milestone ${m.name}`}
-                title="Delete milestone"
-                onClick={() => remove.mutate(m.id)}
-                disabled={remove.isPending}
-                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-              >
-                <Trash2 className="size-4" />
-              </button>
+              <Tip label="Delete milestone">
+                <button
+                  aria-label={`Delete milestone ${m.name}`}
+                  onClick={() => remove.mutate(m.id)}
+                  disabled={remove.isPending}
+                  className="rounded-md p-1 text-zinc-400 transition-colors disabled:pointer-events-none hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </Tip>
             </li>
           ))}
         </ul>

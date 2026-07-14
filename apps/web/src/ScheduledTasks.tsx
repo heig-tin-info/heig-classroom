@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api } from "./api";
 import { HelpIcon } from "./help";
-import { Badge, Card, isoDateTime } from "./ui";
+import { Badge, Card, IconButton, isoDateTime, Tip } from "./ui";
 
 interface TaskRow {
   key: string;
@@ -129,12 +129,11 @@ export function ScheduledTasksCard() {
                   <div className="flex items-center gap-2 font-mono text-xs font-medium">
                     {t.key}
                     {t.webhookWoken ? (
-                      <span
-                        className="inline-flex items-center gap-0.5 text-[10px] font-sans text-zinc-400"
-                        title="Webhooks also trigger this work immediately; the schedule is only the fallback."
-                      >
-                        <Zap className="size-3" /> webhook-woken
-                      </span>
+                      <Tip label="Webhooks also trigger this work immediately; the schedule is only the fallback.">
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-sans text-zinc-400">
+                          <Zap className="size-3" /> webhook-woken
+                        </span>
+                      </Tip>
                     ) : null}
                   </div>
                   <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t.description}</p>
@@ -159,41 +158,41 @@ export function ScheduledTasksCard() {
                 <td className={cell}>
                   <StatusBadge t={t} />
                   {t.lastError ? (
-                    <p
-                      className={`mt-0.5 max-w-xs truncate text-xs ${
-                        t.lastStatus === "error"
-                          ? "text-red-600 dark:text-red-400"
-                          : "text-zinc-400"
-                      }`}
-                      title={t.lastError}
-                    >
-                      {t.lastError}
-                    </p>
+                    <Tip label={t.lastError} className="block">
+                      <p
+                        className={`mt-0.5 max-w-xs truncate text-xs ${
+                          t.lastStatus === "error"
+                            ? "text-red-600 dark:text-red-400"
+                            : "text-zinc-400"
+                        }`}
+                      >
+                        {t.lastError}
+                      </p>
+                    </Tip>
                   ) : null}
                 </td>
                 <td className={`${cell} whitespace-nowrap text-right`}>
-                  <button
-                    aria-label={t.enabled ? "Disable task" : "Enable task"}
-                    title={t.enabled ? "Disable task" : "Enable task"}
+                  <IconButton
+                    label={t.enabled ? "Disable task" : "Enable task"}
                     onClick={() => patch.mutate({ key: t.key, body: { enabled: !t.enabled } })}
                     disabled={patch.isPending}
-                    className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
                   >
                     {t.enabled ? <Pause className="size-4" /> : <Play className="size-4" />}
-                  </button>
-                  <button
-                    aria-label="Run now"
-                    title="Run now"
-                    onClick={() => runNow.mutate(t.key)}
-                    disabled={runNow.isPending || t.lastStatus === "running"}
-                    className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-accent/10 hover:text-accent disabled:opacity-40"
-                  >
-                    {runNow.isPending && runNow.variables === t.key ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : (
-                      <Zap className="size-4" />
-                    )}
-                  </button>
+                  </IconButton>
+                  <Tip label="Run now">
+                    <button
+                      aria-label="Run now"
+                      onClick={() => runNow.mutate(t.key)}
+                      disabled={runNow.isPending || t.lastStatus === "running"}
+                      className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-accent/10 hover:text-accent disabled:pointer-events-none disabled:opacity-40"
+                    >
+                      {runNow.isPending && runNow.variables === t.key ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Zap className="size-4" />
+                      )}
+                    </button>
+                  </Tip>
                 </td>
               </tr>
             ))}

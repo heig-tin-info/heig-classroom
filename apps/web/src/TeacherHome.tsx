@@ -25,7 +25,7 @@ import { HelpIcon } from "./help";
 import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
-import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, useSortableTable, Z } from "./ui";
+import { Badge, Button, Card, EmptyState, Field, OrgAvatar, SortHeader, Tip, useSortableTable, Z } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
 
@@ -63,17 +63,18 @@ function RosterPopover({ room, children }: { room: ClassroomSummary; children: R
 
 function OrgLink({ login }: { login: string }) {
   return (
-    <a
-      href={`https://github.com/${login}`}
-      target="_blank"
-      rel="noreferrer"
-      onClick={(e) => e.stopPropagation()}
-      title={`Open ${login} on GitHub`}
-      className="inline-flex items-center gap-1 hover:text-accent hover:underline"
-    >
-      <Building2 className="size-3.5" /> {login}
-      <ExternalLink className="size-3" />
-    </a>
+    <Tip label={`Open ${login} on GitHub`}>
+      <a
+        href={`https://github.com/${login}`}
+        target="_blank"
+        rel="noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex items-center gap-1 hover:text-accent hover:underline"
+      >
+        <Building2 className="size-3.5" /> {login}
+        <ExternalLink className="size-3" />
+      </a>
+    </Tip>
   );
 }
 
@@ -210,18 +211,19 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
   const open = (id: string) => navigate({ view: "classroom", id });
 
   const toggle = (m: ClassroomsViewMode, Icon: typeof LayoutGrid, label: string) => (
-    <button
-      aria-label={label}
-      title={label}
-      onClick={() => setViewMode(m)}
-      className={`rounded-md p-1.5 transition-colors ${
-        mode === m
-          ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
-          : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-      }`}
-    >
-      <Icon className="size-4" />
-    </button>
+    <Tip label={label}>
+      <button
+        aria-label={label}
+        onClick={() => setViewMode(m)}
+        className={`rounded-md p-1.5 transition-colors ${
+          mode === m
+            ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100"
+            : "text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        }`}
+      >
+        <Icon className="size-4" />
+      </button>
+    </Tip>
   );
 
   return (
@@ -246,19 +248,20 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
           {toggle("list", List, t("view.list"))}
           {toggle("timeline", CalendarRange, t("view.timeline"))}
         </span>
-        <button
-          aria-label={t("classrooms.archives")}
-          title={t("classrooms.archives")}
-          aria-pressed={showArchives}
-          onClick={() => setShowArchives((v) => !v)}
-          className={`rounded-lg p-2 transition-colors ${
-            showArchives
-              ? "bg-accent/10 text-accent hover:bg-accent/20"
-              : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Archive className="size-4" />
-        </button>
+        <Tip label={t("classrooms.archives")}>
+          <button
+            aria-label={t("classrooms.archives")}
+            aria-pressed={showArchives}
+            onClick={() => setShowArchives((v) => !v)}
+            className={`rounded-lg p-2 transition-colors ${
+              showArchives
+                ? "bg-accent/10 text-accent hover:bg-accent/20"
+                : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Archive className="size-4" />
+          </button>
+        </Tip>
       </div>
 
       {showArchives ? (

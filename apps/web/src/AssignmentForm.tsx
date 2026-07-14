@@ -23,6 +23,7 @@ import {
   isoDateTime,
   localDateTimeInputValue,
   Progress,
+  Tip,
   Z,
 } from "./ui";
 
@@ -377,20 +378,24 @@ export function AssignmentForm({
           <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
             At deadline <HelpIcon topic="deadline-strategy" />
           </span>
-          <select
-            className={`${select} w-full`}
-            value={deadlineStrategy}
-            onChange={(e) => setDeadlineStrategy(e.target.value as "lock" | "commit")}
-            disabled={existing !== undefined && existing.state !== "draft"}
-            title={
+          <Tip
+            label={
               existing !== undefined && existing.state !== "draft"
                 ? "The deadline strategy is fixed at publication"
-                : undefined
+                : null
             }
+            className="flex w-full"
           >
-            <option value="lock">Lock the repository</option>
-            <option value="commit">Deadline commit</option>
-          </select>
+            <select
+              className={`${select} w-full disabled:pointer-events-none`}
+              value={deadlineStrategy}
+              onChange={(e) => setDeadlineStrategy(e.target.value as "lock" | "commit")}
+              disabled={existing !== undefined && existing.state !== "draft"}
+            >
+              <option value="lock">Lock the repository</option>
+              <option value="commit">Deadline commit</option>
+            </select>
+          </Tip>
         </label>
       </div>
 

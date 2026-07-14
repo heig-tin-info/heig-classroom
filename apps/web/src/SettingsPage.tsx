@@ -10,7 +10,7 @@ import { EMAIL_KINDS, type EmailKind, type Me, type NoticeKind } from "@hgc/cont
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
 import { AvatarEditor } from "./AvatarEditor";
 import { api } from "./api";
-import { Avatar, Badge, Button, Card, GithubIcon, isoDateTime } from "./ui";
+import { Avatar, Badge, Button, Card, GithubIcon, isoDateTime, Tip } from "./ui";
 
 /** Per-kind toggles for the real-time toasts; stored in this browser. */
 function NotificationSettings() {
@@ -134,10 +134,10 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
       </Card>
 
       <Card className="flex flex-wrap items-center gap-4 p-5">
+        <Tip label="Change profile picture">
         <button
           onClick={() => setEditingAvatar(true)}
           aria-label="Change profile picture"
-          title="Change profile picture"
           className="group relative rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <Avatar me={me} />
@@ -145,6 +145,7 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
             Edit
           </span>
         </button>
+        </Tip>
         <div className="min-w-0">
           <p className="text-lg font-medium">
             {me.givenName} {me.familyName}

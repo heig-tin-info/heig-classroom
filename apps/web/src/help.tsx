@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 
 import { useI18n } from "./i18n";
 import { Markdown } from "./markdown";
-import { Z } from "./ui";
+import { Tip, Z } from "./ui";
 
 /**
  * Contextual help: small "?" icons on the main components open a collapsible
@@ -29,17 +29,18 @@ const HelpContext = createContext<{ open: (key: string) => void }>({ open: () =>
 export function HelpIcon({ topic, className = "" }: { topic: string; className?: string }) {
   const { open } = useContext(HelpContext);
   return (
-    <button
-      aria-label="Help"
-      title="Help"
-      onClick={(e) => {
-        e.stopPropagation();
-        open(topic);
-      }}
-      className={`rounded-full p-0.5 text-zinc-300 transition-colors hover:text-accent dark:text-zinc-600 dark:hover:text-accent ${className}`}
-    >
-      <CircleHelp className="size-3.5" />
-    </button>
+    <Tip label="Help">
+      <button
+        aria-label="Help"
+        onClick={(e) => {
+          e.stopPropagation();
+          open(topic);
+        }}
+        className={`rounded-full p-0.5 text-zinc-300 transition-colors hover:text-accent dark:text-zinc-600 dark:hover:text-accent ${className}`}
+      >
+        <CircleHelp className="size-3.5" />
+      </button>
+    </Tip>
   );
 }
 

@@ -20,7 +20,7 @@ import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
-import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, useSortableTable } from "./ui";
+import { Badge, Button, Card, EmptyState, GithubIcon, isoDateTime, OrgAvatar, SortHeader, Tip, useSortableTable } from "./ui";
 
 /** Live countdown to (or since) the deadline, refreshed every 30 s. */
 function Countdown({ deadline }: { deadline: string }) {
@@ -165,10 +165,10 @@ function StudentAssignmentRow({
           </a>
         ) : (
           <>
+            <Tip label={githubLinked ? null : t("student.linkPrompt")}>
             <Button
               onClick={() => accept.mutate()}
               disabled={accept.isPending || !githubLinked || locked}
-              title={githubLinked ? undefined : t("student.linkPrompt")}
             >
               {accept.isPending ? (
                 <>
@@ -180,6 +180,7 @@ function StudentAssignmentRow({
                 t("student.accept")
               )}
             </Button>
+            </Tip>
             {acceptError ? (
               <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{acceptError}</p>
             ) : null}
@@ -305,9 +306,9 @@ export function StudentHome({ me }: { me: Me }) {
   const cell = "px-3 py-2";
 
   const toggle = (v: StudentView, Icon: typeof LayoutGrid, label: string) => (
+    <Tip label={label}>
     <button
       aria-label={label}
-      title={label}
       onClick={() => setStudentView(v)}
       className={`rounded-md p-1.5 transition-colors ${
         view === v
@@ -317,6 +318,7 @@ export function StudentHome({ me }: { me: Me }) {
     >
       <Icon className="size-4" />
     </button>
+    </Tip>
   );
 
   return (
