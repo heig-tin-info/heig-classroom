@@ -66,6 +66,10 @@ export interface ClassroomDetail {
     githubOrgId: number | null;
     /** GitHub billing plan (`free`, `team`, …); null = unknown. */
     plan: string | null;
+    /** `degraded` = the organization vanished from GitHub (deleted/renamed). */
+    status: "active" | "degraded";
+    /** Fresh existence check when uninstalled; null = indeterminate. */
+    exists: boolean | null;
   } | null;
   roster: RosterEntry[];
   appSlug: string | null;

@@ -243,6 +243,7 @@ export async function classroomsPlugin(
         installationId: organizations.installationId,
         githubOrgId: organizations.githubOrgId,
         plan: organizations.plan,
+        status: organizations.status,
       })
       .from(organizations)
       .where(eq(organizations.id, room.orgId))
@@ -273,6 +274,26 @@ export async function classroomsPlugin(
       } catch (err) {
         req.log.warn({ err, org: org.login }, "installation resolution failed");
       }
+    }
+    // The organization itself may have vanished (deleted, or renamed away):
+    // with no installation GitHub has nowhere to deliver the org events, so
+    // no webhook ever tells us. Re-check existence while uninstalled and
+    // persist the verdict — the page shows the wizard or the red state from
+    // it, and an org recreated under the same login heals on the next open.
+    let orgExists: boolean | null = org ? true : null;
+    if (org && org.installationId === null) {
+      orgExists = await orgExistsOnGithub(org.login, config);
+      const verdict =
+        orgExists === false ? ("degraded" as const) : orgExists === true ? ("active" as const) : null;
+      if (verdict && verdict !== org.status) {
+        await app.db
+          .update(organizations)
+          .set({ status: verdict })
+          .where(eq(organizations.id, room.orgId));
+        org = { ...org, status: verdict };
+      }
+      // Indeterminate lookup (rate limit): keep the stored status.
+      if (orgExists === null && org.status === "degraded") orgExists = false;
     }
     // Billing plan check (org secrets vs private repos): re-read while the
     // plan is unknown or `free`, so the warning appears on install and
@@ -306,7 +327,12 @@ export async function classroomsPlugin(
       }
     }
     const roster = await rosterView(app.db, room.id);
-    return { ...room, org, roster, appSlug: config.GITHUB_APP_SLUG || null };
+    return {
+      ...room,
+      org: org ? { ...org, exists: orgExists } : org,
+      roster,
+      appSlug: config.GITHUB_APP_SLUG || null,
+    };
   });
 
   app.post(

@@ -9,6 +9,7 @@ import {
   Settings as SettingsIcon,
   Trash2,
   Users,
+  XCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -197,6 +198,33 @@ function InstallWizard({ room }: { room: ClassroomDetail }) {
 }
 
 /**
+ * The classroom's GitHub organization no longer exists (deleted or renamed):
+ * detected by the live existence check on open — with no installation left,
+ * GitHub sends no webhook for it. Grades and roster stay readable; anything
+ * touching GitHub is dead until the org is recreated or the classroom moves.
+ */
+function OrgMissing({ orgLogin }: { orgLogin: string }) {
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <XCircle className="size-4 text-red-500" />
+        <h2 className="font-medium text-red-700 dark:text-red-400">Organization not found</h2>
+      </div>
+      <p className="text-sm text-zinc-600 dark:text-zinc-300">
+        The GitHub organization <span className="font-mono font-medium">{orgLogin}</span> no
+        longer exists — it was deleted or renamed on GitHub. Grades and the roster remain
+        available here, but repositories, assignments and grading are unreachable.
+      </p>
+      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
+        Recreate the organization under the same name and reinstall the GitHub App, or create a
+        new classroom on another organization. If the organization was only renamed while the
+        App was uninstalled, recreate the link by reinstalling the App on the new name.
+      </p>
+    </Card>
+  );
+}
+
+/**
  * Organization secrets never reach the private repositories of a Free
  * organization: the LLM review tier fails silently (empty ANTHROPIC_API_KEY).
  * Teachers get GitHub Team at no cost through GitHub Education.
@@ -247,6 +275,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
   // The teacher can take a (staff) seat to walk the student flow themselves.
   const myEmail = me.data?.email.toLowerCase();
   const joined = myEmail != null && room.roster.some((e) => e.email.toLowerCase() === myEmail);
+  const orgMissing =
+    room.org != null &&
+    room.org.installationId === null &&
+    (room.org.exists === false || room.org.status === "degraded");
 
   return (
     <div className="space-y-4">
@@ -267,6 +299,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           <Badge tone="green" icon={CheckCircle2}>
             GitHub App installed
           </Badge>
+        ) : orgMissing ? (
+          <Badge tone="red" icon={XCircle}>
+            Organization not found on GitHub
+          </Badge>
         ) : (
           <Badge tone="amber" icon={Clock}>
             GitHub App not installed
@@ -282,7 +318,11 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
         <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={() => navigate({ view: "home" })} />
       ) : null}
 
-      {!room.org?.installationId ? <InstallWizard room={room} /> : null}
+      {orgMissing ? (
+        <OrgMissing orgLogin={room.org!.login} />
+      ) : !room.org?.installationId ? (
+        <InstallWizard room={room} />
+      ) : null}
 
       {room.org?.installationId && room.org.plan === "free" ? (
         <FreePlanWarning orgLogin={room.org.login} />

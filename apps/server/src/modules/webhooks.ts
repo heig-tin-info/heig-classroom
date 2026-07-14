@@ -110,6 +110,8 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
         await handleMember(app, delivery.payload as MemberPayload);
       } else if (delivery.event === "organization") {
         await handleOrganization(app, config, delivery.payload as OrganizationPayload);
+      } else if (delivery.event === "installation") {
+        await handleInstallation(app, delivery.payload as InstallationPayload);
       }
       await app.db
         .update(webhookDeliveries)
@@ -289,6 +291,42 @@ async function handleMember(app: FastifyInstance, p: MemberPayload) {
     .set({ invitationStatus: "accepted" })
     .where(eq(studentRepos.id, ctx.repo.id));
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+}
+
+interface InstallationPayload {
+  action?: string;
+  installation?: { id?: number; account?: { id?: number; login?: string } };
+}
+
+/**
+ * App uninstalled (or its org deleted while installed — the installation
+ * dies with it and this event is the only signal that still reaches us):
+ * forget the installation so the classroom page falls back to the install
+ * wizard, which re-checks the org's existence on open. Exported for tests.
+ */
+export async function handleInstallation(app: FastifyInstance, p: InstallationPayload) {
+  if (p.action !== "deleted" || !p.installation?.id) return;
+  const [org] = await app.db
+    .update(organizations)
+    .set({ installationId: null })
+    .where(eq(organizations.installationId, p.installation.id))
+    .returning({ id: organizations.id, login: organizations.login });
+  if (!org) return; // installation unknown to the platform
+  await audit(app.db, {
+    actorType: "system",
+    action: "org.installation_deleted",
+    subjectType: "organization",
+    subjectId: org.id,
+    payload: { installationId: p.installation.id, login: org.login },
+  });
+  const rooms = await app.db
+    .select({ id: classrooms.id, teacherId: classrooms.teacherId })
+    .from(classrooms)
+    .where(eq(classrooms.orgId, org.id));
+  publish(
+    "orgs",
+    rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+  );
 }
 
 interface OrganizationPayload {

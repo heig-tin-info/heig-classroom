@@ -12,7 +12,7 @@ import {
   users,
 } from "../db/schema.js";
 import { testApp, type TestDb } from "../test/db.js";
-import { handleOrganization } from "./webhooks.js";
+import { handleInstallation, handleOrganization } from "./webhooks.js";
 
 const config = { PUBLIC_URL: "https://classroom.test", COOKIE_SECRET: "s" } as AppConfig;
 
@@ -110,5 +110,29 @@ describe("handleOrganization (webhook `organization`)", () => {
         organization: { id: 999999, login: "someone-else" },
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("handleInstallation (webhook `installation`)", () => {
+  it("deleted: forgets the installation so the wizard reappears", async () => {
+    const app = await testApp();
+    const { orgId } = await seed(app.db);
+    await handleInstallation(app, {
+      action: "deleted",
+      installation: { id: 99, account: { id: 4242, login: "heig-prg1" } },
+    });
+    const [org] = await app.db.select().from(organizations).where(eq(organizations.id, orgId));
+    expect(org!.installationId).toBeNull();
+    // The org itself still exists: not degraded, just uninstalled.
+    expect(org!.status).toBe("active");
+  });
+
+  it("ignores other actions and unknown installations", async () => {
+    const app = await testApp();
+    const { orgId } = await seed(app.db);
+    await handleInstallation(app, { action: "created", installation: { id: 99 } });
+    await handleInstallation(app, { action: "deleted", installation: { id: 12345 } });
+    const [org] = await app.db.select().from(organizations).where(eq(organizations.id, orgId));
+    expect(org!.installationId).toBe(99);
   });
 });

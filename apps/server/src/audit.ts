@@ -37,6 +37,7 @@ export type AuditAction =
   | "milestone.create"
   | "milestone.delete"
   | "org.deleted"
+  | "org.installation_deleted"
   | "org.installation_resolved"
   | "org.renamed"
   | "repo.deadline_archived"
