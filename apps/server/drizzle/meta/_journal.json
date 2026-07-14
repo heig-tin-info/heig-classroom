@@ -141,6 +141,13 @@
       "when": 1784049007336,
       "tag": "0019_date-format-grading-mode",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1784053527897,
+      "tag": "0020_publish-mode",
+      "breakpoints": true
     }
   ]
 }

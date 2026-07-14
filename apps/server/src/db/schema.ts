@@ -189,6 +189,13 @@ export const assignments = pgTable(
     gradingMode: text("grading_mode", { enum: ["none", "auto"] })
       .notNull()
       .default("auto"),
+    /** `scheduled` = ticker auto-publishes at start_at; `manual` = Publish button
+        sets start_at = now (deadline = stored date, or now + duration_minutes). */
+    publishMode: text("publish_mode", { enum: ["scheduled", "manual"] })
+      .notNull()
+      .default("manual"),
+    /** Manual mode: deadline offset from publication; null = absolute deadline. */
+    durationMinutes: integer("duration_minutes"),
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),
@@ -219,6 +226,10 @@ export const assignments = pgTable(
     index("assignments_llm_dispatch_pending_idx")
       .on(t.frozenAt)
       .where(sql`${t.frozenAt} IS NOT NULL AND ${t.llmDispatchedAt} IS NULL`),
+    // Ticker scan: scheduled drafts waiting for their start date.
+    index("assignments_scheduled_publish_idx")
+      .on(t.startAt)
+      .where(sql`${t.state} = 'draft' AND ${t.publishMode} = 'scheduled' AND ${t.archivedAt} IS NULL`),
   ],
 );
 

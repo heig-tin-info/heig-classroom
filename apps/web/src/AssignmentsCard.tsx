@@ -103,13 +103,26 @@ function AssignmentRow({
               archived
             </Badge>
           ) : null}
-          <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-            <CalendarClock className="size-3.5" />
-            {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
-            <span className="text-zinc-400">
-              ({compactDuration(new Date(a.deadlineAt).getTime() - new Date(a.startAt).getTime())})
+          {a.state === "draft" && a.durationMinutes != null ? (
+            // Manual + duration: dates are provisional until Publish stamps them.
+            <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+              <CalendarClock className="size-3.5" />
+              {compactDuration(a.durationMinutes * 60_000)} after publication
             </span>
-          </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
+              <CalendarClock className="size-3.5" />
+              {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
+              <span className="text-zinc-400">
+                ({compactDuration(new Date(a.deadlineAt).getTime() - new Date(a.startAt).getTime())})
+              </span>
+              {a.state === "draft" && a.publishMode === "scheduled" ? (
+                <Tip label="Auto-publishes at the start date">
+                  <span className="text-accent">· auto</span>
+                </Tip>
+              ) : null}
+            </span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
           <GhLink fullName={a.sourceFullName} />
@@ -132,7 +145,9 @@ function AssignmentRow({
             onClick={() => {
               if (
                 window.confirm(
-                  `Publish “${a.name}”? Students will see it and can accept it.`,
+                  a.durationMinutes != null
+                    ? `Publish “${a.name}”? The deadline will be ${compactDuration(a.durationMinutes * 60_000)} from now.`
+                    : `Publish “${a.name}”? Students will see it and can accept it.`,
                 )
               ) {
                 publish.mutate();

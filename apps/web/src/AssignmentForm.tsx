@@ -182,6 +182,27 @@ export function AssignmentForm({
   const [deadlineAt, setDeadlineAt] = useState(
     existing ? toLocalInput(existing.deadlineAt) : "",
   );
+  // Publication: scheduled (auto at start) or manual (Publish button, with an
+  // absolute deadline or a duration counted from the publication instant).
+  const [publishMode, setPublishMode] = useState<"scheduled" | "manual">(
+    existing?.publishMode ?? "manual",
+  );
+  const [deadlineKind, setDeadlineKind] = useState<"date" | "duration">(
+    existing?.durationMinutes != null ? "duration" : "date",
+  );
+  const [durationDays, setDurationDays] = useState(
+    existing?.durationMinutes != null ? String(Math.floor(existing.durationMinutes / 1440)) : "7",
+  );
+  const [durationHours, setDurationHours] = useState(
+    existing?.durationMinutes != null
+      ? String(Math.round((existing.durationMinutes % 1440) / 60))
+      : "0",
+  );
+  const durationMinutes =
+    (Number.parseInt(durationDays, 10) || 0) * 1440 + (Number.parseInt(durationHours, 10) || 0) * 60;
+  const durationPicked = publishMode === "manual" && deadlineKind === "duration";
+  // Published/locked: the mode is frozen, only the absolute dates move (GH-43 reopen).
+  const livePublished = existing !== undefined && existing.state !== "draft";
   const [sourceStrategy, setSourceStrategy] = useState<"squash" | "whole">(
     existing?.sourceStrategy ?? "squash",
   );
@@ -218,6 +239,26 @@ export function AssignmentForm({
   });
   const nodes = useMemo(() => (tree.data ? buildTree(tree.data.tree) : []), [tree.data]);
 
+  // Dates/duration per mode. Create omits unused keys; edit clears the
+  // duration explicitly (null) when switching back to absolute dates.
+  const whenFields = (clearDuration: boolean) =>
+    livePublished
+      ? { startAt: toIso(startAt), deadlineAt: toIso(deadlineAt) }
+      : publishMode === "scheduled"
+        ? {
+            publishMode,
+            startAt: toIso(startAt),
+            deadlineAt: toIso(deadlineAt),
+            ...(clearDuration ? { durationMinutes: null } : {}),
+          }
+        : deadlineKind === "duration"
+          ? { publishMode, durationMinutes }
+          : {
+              publishMode,
+              deadlineAt: toIso(deadlineAt),
+              ...(clearDuration ? { durationMinutes: null } : {}),
+            };
+
   const save = useMutation({
     mutationFn: () =>
       existing
@@ -225,8 +266,7 @@ export function AssignmentForm({
             method: "PATCH",
             body: JSON.stringify({
               name,
-              startAt: toIso(startAt),
-              deadlineAt: toIso(deadlineAt),
+              ...whenFields(true),
               deadlineStrategy,
               gradingMode,
               protectedFiles: [...protectedFiles],
@@ -237,8 +277,7 @@ export function AssignmentForm({
             body: JSON.stringify({
               name,
               sourceRepo,
-              startAt: toIso(startAt),
-              deadlineAt: toIso(deadlineAt),
+              ...whenFields(false),
               sourceStrategy,
               deadlineStrategy,
               gradingMode,
@@ -316,26 +355,111 @@ export function AssignmentForm({
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field
-          label="Start"
-          help="assignment-dates"
-          type="datetime-local"
-          value={startAt}
-          onChange={(e) => setStartAt(e.target.value)}
-          fullWidth
-          required
-        />
-        <Field
-          label="Deadline"
-          help="assignment-dates"
-          type="datetime-local"
-          value={deadlineAt}
-          onChange={(e) => setDeadlineAt(e.target.value)}
-          fullWidth
-          required
-        />
-      </div>
+      {livePublished ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Start"
+            help="assignment-dates"
+            type="datetime-local"
+            value={startAt}
+            onChange={(e) => setStartAt(e.target.value)}
+            fullWidth
+            required
+          />
+          <Field
+            label="Deadline"
+            help="assignment-dates"
+            type="datetime-local"
+            value={deadlineAt}
+            onChange={(e) => setDeadlineAt(e.target.value)}
+            fullWidth
+            required
+          />
+        </div>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+                Publication <HelpIcon topic="assignment-dates" />
+              </span>
+              <select
+                className={`${select} w-full`}
+                value={publishMode}
+                onChange={(e) => setPublishMode(e.target.value as "scheduled" | "manual")}
+              >
+                <option value="manual">Manual — Publish button</option>
+                <option value="scheduled">Scheduled — goes live at start date</option>
+              </select>
+            </label>
+            {publishMode === "manual" ? (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium text-zinc-700 dark:text-zinc-300">Deadline</span>
+                <select
+                  className={`${select} w-full`}
+                  value={deadlineKind}
+                  onChange={(e) => setDeadlineKind(e.target.value as "date" | "duration")}
+                >
+                  <option value="date">Fixed date</option>
+                  <option value="duration">Duration after publication</option>
+                </select>
+              </label>
+            ) : null}
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {publishMode === "scheduled" ? (
+              <Field
+                label="Start (auto-publish)"
+                help="assignment-dates"
+                type="datetime-local"
+                value={startAt}
+                onChange={(e) => setStartAt(e.target.value)}
+                fullWidth
+                required
+              />
+            ) : null}
+            {durationPicked ? (
+              <div className="grid grid-cols-2 gap-3">
+                <Field
+                  label="Days"
+                  type="number"
+                  min={0}
+                  max={400}
+                  value={durationDays}
+                  onChange={(e) => setDurationDays(e.target.value)}
+                  fullWidth
+                  required
+                />
+                <Field
+                  label="Hours"
+                  type="number"
+                  min={0}
+                  max={23}
+                  value={durationHours}
+                  onChange={(e) => setDurationHours(e.target.value)}
+                  fullWidth
+                  required
+                />
+              </div>
+            ) : (
+              <Field
+                label="Deadline"
+                help="assignment-dates"
+                type="datetime-local"
+                value={deadlineAt}
+                onChange={(e) => setDeadlineAt(e.target.value)}
+                fullWidth
+                required
+              />
+            )}
+          </div>
+          {durationPicked && durationMinutes < 15 ? (
+            <p className="text-sm text-amber-600 dark:text-amber-400">
+              The duration must be at least 15 minutes.
+            </p>
+          ) : null}
+        </>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-3">
         {!existing ? (
@@ -491,7 +615,11 @@ export function AssignmentForm({
         <Button type="button" variant="ghost" onClick={onDone}>
           Cancel
         </Button>
-        <Button disabled={save.isPending || (!existing && !sourceRepo)}>
+        <Button
+          disabled={
+            save.isPending || (!existing && !sourceRepo) || (durationPicked && durationMinutes < 15)
+          }
+        >
           {save.isPending ? (
             <>
               <Loader2 className="size-4 animate-spin" />

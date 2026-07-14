@@ -1,0 +1,3 @@
+ALTER TABLE "assignments" ADD COLUMN "publish_mode" text DEFAULT 'manual' NOT NULL;--> statement-breakpoint
+ALTER TABLE "assignments" ADD COLUMN "duration_minutes" integer;--> statement-breakpoint
+CREATE INDEX "assignments_scheduled_publish_idx" ON "assignments" USING btree ("start_at") WHERE "assignments"."state" = 'draft' AND "assignments"."publish_mode" = 'scheduled' AND "assignments"."archived_at" IS NULL;

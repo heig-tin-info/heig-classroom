@@ -9,9 +9,11 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 
+import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { assignmentMilestones, assignments, classrooms, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
+import { publish } from "./events.js";
 import { zurichIso } from "./github/commit.js";
 import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
 import { classroomRecipients, queueEmail } from "./mailer.js";
@@ -26,6 +28,50 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
     if (running || !app.boss) return; // no overlap, no queue
     running = true;
     try {
+      // 0. Scheduled publications: drafts go live when their start date
+      //    arrives (atomic claim via the conditional UPDATE). A scheduled
+      //    draft whose deadline already passed stays a draft.
+      const wentLive = await app.db
+        .update(assignments)
+        .set({ state: "published" })
+        .where(
+          and(
+            eq(assignments.state, "draft"),
+            eq(assignments.publishMode, "scheduled"),
+            isNull(assignments.archivedAt),
+            lte(assignments.startAt, sql`now()`),
+            sql`${assignments.deadlineAt} > now()`,
+          ),
+        )
+        .returning({
+          id: assignments.id,
+          name: assignments.name,
+          deadlineAt: assignments.deadlineAt,
+          classroomId: assignments.classroomId,
+        });
+      for (const a of wentLive) {
+        await audit(app.db, {
+          actorUserId: null,
+          actorType: "system",
+          action: "assignment.auto_publish",
+          subjectType: "assignment",
+          subjectId: a.id,
+        });
+        const [room] = await app.db
+          .select({ name: classrooms.name })
+          .from(classrooms)
+          .where(eq(classrooms.id, a.classroomId))
+          .limit(1);
+        for (const student of await classroomRecipients(app, a.classroomId)) {
+          await queueEmail(app, config, student, "assignment.published", {
+            assignmentName: a.name,
+            classroomName: room?.name ?? "",
+            deadlineAt: zurichIso(a.deadlineAt),
+          });
+        }
+        publish("assignments", [`classroom:${a.classroomId}`]);
+      }
+
       // 1. Elapsed deadlines (GH-43): published, past due, not yet applied.
       const due = await app.db
         .select({ id: assignments.id })

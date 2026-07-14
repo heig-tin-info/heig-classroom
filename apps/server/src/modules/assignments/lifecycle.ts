@@ -25,12 +25,17 @@ import { ownedAssignment, ownedClassroomWithOrg, teacherGuard } from "../guards.
 import { resolveOffset } from "./milestones.js";
 import { clientFor } from "./shared.js";
 
+/** Manual mode: 15 min to 400 days after publication. */
+const Duration = z.number().int().min(15).max(400 * 1440);
+
 const AssignmentCreate = z
   .object({
     name: z.string().min(1).max(200),
     sourceRepo: z.string().min(1).max(200),
-    startAt: z.coerce.date(),
-    deadlineAt: z.coerce.date(),
+    publishMode: z.enum(["scheduled", "manual"]).default("manual"),
+    startAt: z.coerce.date().optional(),
+    deadlineAt: z.coerce.date().optional(),
+    durationMinutes: Duration.optional(),
     graceMinutes: z.number().int().min(0).max(1440).default(30),
     sourceStrategy: z.enum(["whole", "squash"]).default("squash"),
     deadlineStrategy: z.enum(["lock", "commit"]).default("lock"),
@@ -38,9 +43,47 @@ const AssignmentCreate = z
     branches: z.array(z.string().min(1)).min(1).max(10).optional(),
     protectedFiles: z.array(z.string().min(1).max(300)).max(50).default([]),
   })
-  .refine((b) => b.deadlineAt > b.startAt, {
-    message: "Deadline must be after the start date",
+  .superRefine((b, ctx) => {
+    if (b.publishMode === "scheduled") {
+      // Auto-publication at startAt: both dates are absolute and required.
+      if (!b.startAt || !b.deadlineAt) {
+        ctx.addIssue({ code: "custom", message: "Scheduled publication needs a start and a deadline" });
+      } else if (b.deadlineAt <= b.startAt) {
+        ctx.addIssue({ code: "custom", message: "Deadline must be after the start date" });
+      }
+      if (b.durationMinutes !== undefined) {
+        ctx.addIssue({ code: "custom", message: "A duration only applies to manual publication" });
+      }
+    } else if ((b.deadlineAt == null) === (b.durationMinutes == null)) {
+      // Manual: the deadline is either an absolute date or a duration, not both.
+      ctx.addIssue({ code: "custom", message: "Manual publication needs a deadline date or a duration" });
+    }
   });
+
+/** Milestones authored as J±n follow the deadline: re-resolve the ones not
+    dispatched yet (a fired milestone is history, its date stays). */
+async function retargetOffsetMilestones(
+  app: FastifyInstance,
+  assignmentId: string,
+  deadlineAt: Date,
+) {
+  const offsets = await app.db
+    .select()
+    .from(assignmentMilestones)
+    .where(
+      and(
+        eq(assignmentMilestones.assignmentId, assignmentId),
+        isNotNull(assignmentMilestones.offsetDays),
+        isNull(assignmentMilestones.dispatchedAt),
+      ),
+    );
+  for (const m of offsets) {
+    await app.db
+      .update(assignmentMilestones)
+      .set({ dueAt: resolveOffset(deadlineAt, m.offsetDays!) })
+      .where(eq(assignmentMilestones.id, m.id));
+  }
+}
 
 function slugify(name: string): string {
   return name
@@ -84,8 +127,10 @@ export async function assignmentLifecycleRoutes(
   const AssignmentPatch = z
     .object({
       name: z.string().min(1).max(200).optional(),
+      publishMode: z.enum(["scheduled", "manual"]).optional(),
       startAt: z.coerce.date().optional(),
       deadlineAt: z.coerce.date().optional(),
+      durationMinutes: Duration.nullable().optional(),
       graceMinutes: z.number().int().min(0).max(1440).optional(),
       deadlineStrategy: z.enum(["lock", "commit"]).optional(),
       gradingMode: z.enum(["none", "auto"]).optional(),
@@ -115,8 +160,26 @@ export async function assignmentLifecycleRoutes(
           message: "The deadline strategy cannot be changed after publication",
         });
       }
-      const nextStart = body.data.startAt ?? owned.assignment.startAt;
-      const nextDeadline = body.data.deadlineAt ?? owned.assignment.deadlineAt;
+      // Publication mode only matters before going live; freeze it after.
+      if (
+        owned.assignment.state !== "draft" &&
+        ((body.data.publishMode && body.data.publishMode !== owned.assignment.publishMode) ||
+          (body.data.durationMinutes !== undefined &&
+            body.data.durationMinutes !== owned.assignment.durationMinutes))
+      ) {
+        return reply.code(409).send({
+          error: "publish_mode_frozen",
+          message: "The publication mode cannot be changed after publication",
+        });
+      }
+      const patch = { ...body.data };
+      // A duration on a draft keeps a provisional deadline (now + duration)
+      // so lists and the timeline stay meaningful; Publish recomputes it.
+      if (patch.durationMinutes != null && owned.assignment.state === "draft") {
+        patch.deadlineAt = new Date(Date.now() + patch.durationMinutes * 60_000);
+      }
+      const nextStart = patch.startAt ?? owned.assignment.startAt;
+      const nextDeadline = patch.deadlineAt ?? owned.assignment.deadlineAt;
       if (nextDeadline <= nextStart) {
         return reply
           .code(400)
@@ -124,7 +187,7 @@ export async function assignmentLifecycleRoutes(
       }
       const [updated] = await app.db
         .update(assignments)
-        .set(body.data)
+        .set(patch)
         .where(eq(assignments.id, owned.assignment.id))
         .returning();
       await audit(app.db, {
@@ -136,25 +199,8 @@ export async function assignmentLifecycleRoutes(
         payload: body.data,
       });
 
-      // Milestones authored as J±n follow the deadline: re-resolve the ones
-      // not dispatched yet (a fired milestone is history, its date stays).
-      if (updated && body.data.deadlineAt) {
-        const offsets = await app.db
-          .select()
-          .from(assignmentMilestones)
-          .where(
-            and(
-              eq(assignmentMilestones.assignmentId, updated.id),
-              isNotNull(assignmentMilestones.offsetDays),
-              isNull(assignmentMilestones.dispatchedAt),
-            ),
-          );
-        for (const m of offsets) {
-          await app.db
-            .update(assignmentMilestones)
-            .set({ dueAt: resolveOffset(updated.deadlineAt, m.offsetDays!) })
-            .where(eq(assignmentMilestones.id, m.id));
-        }
+      if (updated && patch.deadlineAt) {
+        await retargetOffsetMilestones(app, updated.id, updated.deadlineAt);
       }
 
       // Rescheduling (US-08, GH-43): pushing back the deadline of an already
@@ -274,29 +320,43 @@ export async function assignmentLifecycleRoutes(
           .code(409)
           .send({ error: "not_draft", message: "Only draft assignments can be published" });
       }
-      if (owned.assignment.deadlineAt <= new Date()) {
+      // Manual mode: the countdown starts NOW — start = publication instant,
+      // deadline = stored absolute date or now + duration. Scheduled drafts
+      // published early keep their absolute dates.
+      const now = new Date();
+      const a = owned.assignment;
+      const startAt = a.publishMode === "manual" ? now : a.startAt;
+      const deadlineAt =
+        a.publishMode === "manual" && a.durationMinutes != null
+          ? new Date(now.getTime() + a.durationMinutes * 60_000)
+          : a.deadlineAt;
+      if (deadlineAt <= now) {
         return reply
           .code(400)
           .send({ error: "deadline_past", message: "Deadline is in the past" });
       }
       const [updated] = await app.db
         .update(assignments)
-        .set({ state: "published" })
-        .where(eq(assignments.id, owned.assignment.id))
+        .set({ state: "published", startAt, deadlineAt })
+        .where(eq(assignments.id, a.id))
         .returning();
+      if (deadlineAt.getTime() !== a.deadlineAt.getTime()) {
+        await retargetOffsetMilestones(app, a.id, deadlineAt);
+      }
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.publish",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: a.id,
+        payload: { startAt, deadlineAt },
       });
       // Announce to every claimed student (their preference filters).
-      for (const student of await classroomRecipients(app, owned.assignment.classroomId)) {
+      for (const student of await classroomRecipients(app, a.classroomId)) {
         await queueEmail(app, config, student, "assignment.published", {
-          assignmentName: owned.assignment.name,
+          assignmentName: a.name,
           classroomName: owned.classroomName,
-          deadlineAt: zurichIso(owned.assignment.deadlineAt),
+          deadlineAt: zurichIso(deadlineAt),
         });
       }
       return updated;
@@ -443,6 +503,16 @@ export async function assignmentLifecycleRoutes(
         });
       }
 
+      // Manual drafts store provisional dates (start = creation, deadline =
+      // stored date or creation + duration): the Publish action recomputes
+      // them so the countdown starts at publication.
+      const createdAt = new Date();
+      const startAt = body.data.publishMode === "scheduled" ? body.data.startAt! : createdAt;
+      const deadlineAt =
+        body.data.durationMinutes != null
+          ? new Date(createdAt.getTime() + body.data.durationMinutes * 60_000)
+          : body.data.deadlineAt!;
+
       try {
         const [row] = await app.db
           .insert(assignments)
@@ -451,8 +521,10 @@ export async function assignmentLifecycleRoutes(
             classroomId: owned.room.id,
             name: body.data.name,
             slug,
-            startAt: body.data.startAt,
-            deadlineAt: body.data.deadlineAt,
+            publishMode: body.data.publishMode,
+            durationMinutes: body.data.durationMinutes ?? null,
+            startAt,
+            deadlineAt,
             graceMinutes: body.data.graceMinutes,
             sourceRepoId: source.id,
             sourceFullName: source.full_name,

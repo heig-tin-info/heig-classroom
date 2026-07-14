@@ -9,6 +9,7 @@ export type AuditAction =
   | "assignment.accept"
   | "assignment.accept_failed"
   | "assignment.archive"
+  | "assignment.auto_publish"
   | "assignment.create"
   | "assignment.deadline_applied"
   | "assignment.deadline_reopened"

@@ -30,6 +30,12 @@ export interface Me {
 export type AssignmentState = "draft" | "published" | "locked";
 /** `none` = no grades/points anywhere and no review dispatch; `auto` = current behaviour. */
 export type GradingMode = "none" | "auto";
+/**
+ * How a draft goes live. `scheduled`: the ticker auto-publishes at startAt
+ * (absolute dates). `manual`: the Publish button sets startAt = now and the
+ * deadline is either the stored absolute date or now + durationMinutes.
+ */
+export type PublishMode = "scheduled" | "manual";
 export type ProvisionStatus = "pending" | "ok" | "error";
 export type InvitationStatus = "none" | "pending" | "accepted";
 export type CiStatus = "none" | "pending" | "pass" | "fail";
@@ -106,6 +112,9 @@ export interface Assignment {
   sourceStrategy: "whole" | "squash";
   deadlineStrategy: "lock" | "commit";
   gradingMode: GradingMode;
+  publishMode: PublishMode;
+  /** Manual mode only: deadline = publication + duration; null = absolute deadline. */
+  durationMinutes: number | null;
   branches: string[];
   protectedFiles: string[];
 }
