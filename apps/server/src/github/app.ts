@@ -88,6 +88,27 @@ export async function orgExistsOnGithub(
   }
 }
 
+/**
+ * Billing plan of an installed organization (`free`, `team`, …). GitHub only
+ * serves the `plan` field of GET /orgs/{org} to callers holding the App's
+ * org Plan permission — i.e. the installation client, not the App JWT.
+ * Null = indeterminate (permission not granted, API error): never warn on it.
+ */
+export async function fetchOrgPlan(
+  config: AppConfig,
+  installationId: number,
+  orgLogin: string,
+): Promise<string | null> {
+  try {
+    const { octokit } = await installationClient(config, installationId);
+    const { data } = await octokit.request("GET /orgs/{org}", { org: orgLogin });
+    const plan = (data as { plan?: { name?: string } }).plan?.name;
+    return plan ? plan.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 /** GET /orgs/{org}/installation; null if the App is not installed there. */
 export async function resolveOrgInstallation(
   config: AppConfig,

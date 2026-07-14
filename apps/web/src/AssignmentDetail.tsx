@@ -12,10 +12,13 @@ import {
   Lock,
   LockOpen,
   Loader2,
+  Milestone as MilestoneIcon,
   Play,
+  Plus,
   RefreshCw,
   Search as SearchIcon,
   Snowflake,
+  Trash2,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -23,6 +26,7 @@ import { useState } from "react";
 import type {
   AssignmentDetailPayload,
   AssignmentDetailStudent,
+  AssignmentMilestone,
   GradeView,
 } from "@hgc/contracts";
 
@@ -32,7 +36,17 @@ import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { useT } from "./i18n";
-import { Badge, Button, GithubIcon, isoDateTime, SortHeader, useSortableTable, Z } from "./ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  GithubIcon,
+  isoDateTime,
+  SortHeader,
+  useSortableTable,
+  Z,
+} from "./ui";
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
@@ -397,6 +411,175 @@ function SyncBanner({
   );
 }
 
+/**
+ * Intermediate review checkpoints: at each milestone's date the platform
+ * fires one `grade-milestone` review per repository; the criteria tagged
+ * `milestone: <name>` in criteria.yml are the graded subset (the barème
+ * stays out of the platform). Dates show absolute and J±n side by side,
+ * counted from the deadline.
+ */
+function MilestonesSection({
+  classroomId,
+  assignmentId,
+  deadlineAt,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  deadlineAt: string;
+}) {
+  const qc = useQueryClient();
+  const base = `/app/api/classrooms/${classroomId}/assignments/${assignmentId}/milestones`;
+  const milestones = useQuery<AssignmentMilestone[]>({
+    queryKey: ["milestones", assignmentId],
+    queryFn: () => api(base),
+  });
+  const [name, setName] = useState("");
+  const [mode, setMode] = useState<"offset" | "date">("offset");
+  // Authored as "n days before the deadline" (J−n), sent as offsetDays = -n.
+  const [offset, setOffset] = useState("7");
+  const [date, setDate] = useState("");
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["milestones", assignmentId] });
+  const create = useMutation({
+    mutationFn: () =>
+      api(base, {
+        method: "POST",
+        body: JSON.stringify(
+          mode === "offset"
+            ? { name: name.trim(), offsetDays: -Math.abs(Number(offset)) }
+            : { name: name.trim(), dueAt: new Date(date).toISOString() },
+        ),
+      }),
+    onSuccess: () => {
+      setName("");
+      void invalidate();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (mid: string) => api(`${base}/${mid}`, { method: "DELETE" }),
+    onSuccess: () => void invalidate(),
+  });
+  const jLabel = (dueAt: string) => {
+    const days = Math.round(
+      (new Date(dueAt).getTime() - new Date(deadlineAt).getTime()) / 86_400_000,
+    );
+    return days === 0 ? "J" : days < 0 ? `J−${-days}` : `J+${days}`;
+  };
+  const rows = milestones.data ?? [];
+  const canSubmit =
+    name.trim() !== "" && (mode === "offset" ? offset.trim() !== "" : date !== "");
+
+  return (
+    <Card className="p-4">
+      <div className="mb-2 flex items-center gap-2">
+        <MilestoneIcon className="size-4 text-zinc-400" />
+        <h2 className="font-medium">Milestones</h2>
+        <span className="text-xs text-zinc-400">
+          Intermediate LLM reviews of the criteria tagged{" "}
+          <code className="font-mono">milestone:&nbsp;&lt;name&gt;</code> in criteria.yml
+        </span>
+      </div>
+
+      {rows.length === 0 ? (
+        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+          No milestones — the only review happens at the deadline.
+        </p>
+      ) : (
+        <ul className="mb-3 divide-y divide-zinc-100 dark:divide-zinc-800">
+          {rows.map((m) => (
+            <li key={m.id} className="flex flex-wrap items-center gap-3 py-1.5 text-sm">
+              <span className="font-mono font-medium">{m.name}</span>
+              <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
+                <CalendarClock className="size-3.5" />
+                {isoDateTime(m.dueAt)}
+              </span>
+              <Badge tone="zinc">{jLabel(m.dueAt)}</Badge>
+              {m.dispatchedAt ? (
+                <Badge tone="green" icon={CheckCircle2}>
+                  review sent
+                </Badge>
+              ) : (
+                <Badge tone="amber" icon={Clock}>
+                  scheduled
+                </Badge>
+              )}
+              <span className="flex-1" />
+              <button
+                aria-label={`Delete milestone ${m.name}`}
+                title="Delete milestone"
+                onClick={() => remove.mutate(m.id)}
+                disabled={remove.isPending}
+                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
+              >
+                <Trash2 className="size-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form
+        className="flex flex-wrap items-end gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (canSubmit) create.mutate();
+        }}
+      >
+        <Field
+          label="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="mid-review"
+          pattern="[a-z0-9][a-z0-9_-]*"
+          title="lowercase letters, digits, - and _"
+          required
+        />
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">When</span>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "offset" | "date")}
+            className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+          >
+            <option value="offset">J−n before deadline</option>
+            <option value="date">Exact date</option>
+          </select>
+        </label>
+        {mode === "offset" ? (
+          <Field
+            label="Days before deadline"
+            type="number"
+            min={1}
+            max={365}
+            value={offset}
+            onChange={(e) => setOffset(e.target.value)}
+            required
+          />
+        ) : (
+          <Field
+            label="Date"
+            type="datetime-local"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            required
+          />
+        )}
+        <Button disabled={!canSubmit || create.isPending}>
+          {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+          Add milestone
+        </Button>
+        {create.isError ? (
+          <span className="text-sm text-red-600 dark:text-red-400">
+            {create.error instanceof ApiError &&
+            typeof (create.error.body as { message?: unknown })?.message === "string"
+              ? ((create.error.body as { message: string }).message)
+              : "Could not add the milestone"}
+          </span>
+        ) : null}
+      </form>
+    </Card>
+  );
+}
+
 type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
 
 export function AssignmentDetail({
@@ -489,6 +672,12 @@ export function AssignmentDetail({
       </div>
 
       <SyncBanner classroomId={classroomId} a={a} />
+
+      <MilestonesSection
+        classroomId={classroomId}
+        assignmentId={assignmentId}
+        deadlineAt={a.deadlineAt}
+      />
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">

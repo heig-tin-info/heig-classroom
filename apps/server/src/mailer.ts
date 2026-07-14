@@ -65,6 +65,7 @@ export interface EmailParams {
   repoFullName?: string;
   grade?: string;
   detail?: string;
+  orgLogin?: string;
   [key: string]: string | undefined;
 }
 
@@ -108,6 +109,12 @@ function content(kind: EmailKind, locale: "en" | "fr", p: EmailParams, portal: s
           intro: `L'échéance de « ${p.assignmentName} » (${p.classroomName}) est passée${p.detail ? ` — ${p.detail}` : ""}.`,
           cta: { label: "Voir les rendus", url: portal },
         };
+      case "org.deleted":
+        return {
+          subject: `Organisation GitHub supprimée : ${p.orgLogin}`,
+          intro: `L'organisation GitHub « ${p.orgLogin} » a été supprimée. Vos classrooms qui s'y rattachent (${p.detail}) ne peuvent plus créer ni corriger de dépôts.`,
+          cta: { label: "Ouvrir le portail", url: portal },
+        };
     }
   }
   switch (kind) {
@@ -146,6 +153,12 @@ function content(kind: EmailKind, locale: "en" | "fr", p: EmailParams, portal: s
         subject: `Deadline enforced: ${p.assignmentName}`,
         intro: `The deadline of “${p.assignmentName}” (${p.classroomName}) has passed${p.detail ? ` — ${p.detail}` : ""}.`,
         cta: { label: "See the submissions", url: portal },
+      };
+    case "org.deleted":
+      return {
+        subject: `GitHub organization deleted: ${p.orgLogin}`,
+        intro: `The GitHub organization “${p.orgLogin}” was deleted. Your classrooms attached to it (${p.detail}) can no longer provision or grade repositories.`,
+        cta: { label: "Open the portal", url: portal },
       };
   }
 }

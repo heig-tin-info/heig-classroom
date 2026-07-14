@@ -33,33 +33,21 @@ sans re-diagnostiquer.
 
 ## Fonctionnalités reportées
 
-### 5b. Exploiter la permission « Plan » de l'App (org Free vs Team)
-- L'App `heig-classroom` (heig-tin-info, App ID 4284518) a la permission
-  organisation **Plan: read**. Les secrets d'organisation n'atteignent pas les
-  dépôts privés d'une org **Free** → le tier LLM échouerait silencieusement.
-- **À faire** : au setup_url / à la résolution d'installation, lire
-  `GET /orgs/{org}` (champ `plan.name`) ; si `free`, afficher sur la page
-  classroom un avertissement avec le lien d'upgrade enseignant
-  <https://education.github.com/globalcampus/teacher>.
+> 5b (avertissement plan Free), 5c (webhooks `organization` renamed/deleted)
+> et le volet plateforme des milestones (6) : **faits le 2026-07-13**
+> (colonne `organizations.plan` + bandeau classroom, `handleOrganization`
+> dans webhooks.ts + e-mail `org.deleted`, table `assignment_milestones` +
+> ticker/dispatch `grade-milestone` + section UI). Migration
+> `0018_milestones-org-plan.sql`.
 
-### 5c. Gérer les webhooks `organization` (rename / suppression)
-- L'App est abonnée à l'événement **Organization**. À câbler dans
-  `webhooks.ts` : `renamed` → mettre à jour `organizations.login` (et les
-  `full_name` des dépôts ?), `deleted` → marquer l'org et ses classrooms,
-  avertir le teacher.
-
-### 6. Milestones (jalons intermédiaires)
-- Le dispatch LLM ne se déclenche qu'à la deadline (`grade-final`). Les jalons
-  intermédiaires (`grade-milestone`) sont conçus mais pas implémentés.
-- **Socle déjà en place** : la table `grade_dispatches` a une colonne
-  `milestone_id` nullable et un index unique coalescé (repo, trigger,
-  milestone) — prêt pour les jalons.
-- **À faire** : table `assignment_milestones` (id, assignment_id, name, due_at
-  résolu, offset_days nullable pour la saisie J+/J-, dispatched_at) ; job
-  planifié qui émet `grade-milestone` ; filtre `score grade --milestone <name>`
-  côté StudentScore + tag `milestone:` par critère dans `criteria.yml` (la
-  plateforme reste ignorante du barème) ; section « Milestones » dans la vue
-  assignment (affichage date + J-n côte à côte).
+### 6b. Milestones — volet score (repo heig-tin-info/score)
+- La plateforme émet `grade-milestone` avec `client_payload.milestone`
+  (nom du jalon) ; reste côté score : tag `milestone:` par critère dans
+  `criteria.yml` + filtre `score grade --milestone <name>` (StudentScore),
+  et le shim `grading.yml` doit écouter `repository_dispatch:
+  types: [grade-final, grade-milestone]`.
+- Note ingestion : une review de milestone reste « trace-only » côté
+  plateforme (le slot `llm_grade_run_id` n'est réclamé qu'après `frozen_at`).
 
 ### 7. Flow de validation des notes (phases)
 - Note indicative (CI) → note LLM (deadline) → **note validée par le prof**

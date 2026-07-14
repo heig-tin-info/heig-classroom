@@ -27,6 +27,7 @@ export const EMAIL_KINDS = {
   "repo.invitation": { audience: "student", default: true },
   "provision.error": { audience: "teacher", default: true },
   "deadline.applied": { audience: "teacher", default: true },
+  "org.deleted": { audience: "teacher", default: true },
 } as const;
 
 export type EmailKind = keyof typeof EMAIL_KINDS;

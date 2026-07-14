@@ -108,6 +108,13 @@ export const organizations = pgTable("organizations", {
   status: text("status", { enum: ["active", "degraded"] })
     .notNull()
     .default("active"),
+  /**
+   * GitHub billing plan (`free`, `team`, …), read through the App's org
+   * Plan permission. Organization secrets never reach the private repos of a
+   * Free org, so the LLM review tier would fail silently: the classroom page
+   * warns the teacher while the plan is `free`.
+   */
+  plan: text("plan"),
 });
 
 export const classrooms = pgTable("classrooms", {
@@ -206,6 +213,40 @@ export const assignments = pgTable(
     index("assignments_llm_dispatch_pending_idx")
       .on(t.frozenAt)
       .where(sql`${t.frozenAt} IS NOT NULL AND ${t.llmDispatchedAt} IS NULL`),
+  ],
+);
+
+/**
+ * Intermediate grading milestones: at `due_at` the ticker fires ONE
+ * `grade-milestone` repository_dispatch per student repository (same ledger
+ * as grade-final, trigger `milestone`). Both the resolved date (jobs use it)
+ * and the J±n offset relative to the deadline (reusable across semesters,
+ * re-resolved when the deadline moves) are stored. The platform stays
+ * ignorant of the barème: the per-criterion `milestone:` tag lives in
+ * criteria.yml and `score grade --milestone <name>` filters on it.
+ */
+export const assignmentMilestones = pgTable(
+  "assignment_milestones",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => assignments.id, { onDelete: "cascade" }),
+    /** Kebab-case tag matched by the `milestone:` entries of criteria.yml. */
+    name: text("name").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    /** J±n authoring, in days relative to the deadline (J-3 → -3); null = absolute date. */
+    offsetDays: integer("offset_days"),
+    /** Review dispatched to every repo (mirror of `llm_dispatched_at`). */
+    dispatchedAt: timestamp("dispatched_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("assignment_milestones_assignment_name_uq").on(t.assignmentId, t.name),
+    // Ticker scan: milestones due, not yet dispatched.
+    index("assignment_milestones_due_pending_idx")
+      .on(t.dueAt)
+      .where(sql`${t.dispatchedAt} IS NULL`),
   ],
 );
 

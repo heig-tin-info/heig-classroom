@@ -7,7 +7,13 @@ import { z } from "zod";
 
 import { audit } from "../../audit.js";
 import type { AppConfig } from "../../config.js";
-import { assignments, gradeDispatches, gradeRuns, studentRepos } from "../../db/schema.js";
+import {
+  assignmentMilestones,
+  assignments,
+  gradeDispatches,
+  gradeRuns,
+  studentRepos,
+} from "../../db/schema.js";
 import { publish } from "../../events.js";
 import { installationClient } from "../../github/app.js";
 import { unlockStudentRepo } from "../../github/lock.js";
@@ -16,6 +22,7 @@ import { createSquashedRepo } from "../../github/squash.js";
 import { selectGradeRun } from "../../grading.js";
 import { classroomRecipients, queueEmail } from "../../mailer.js";
 import { ownedAssignment, ownedClassroomWithOrg, teacherGuard } from "../guards.js";
+import { resolveOffset } from "./milestones.js";
 import { clientFor } from "./shared.js";
 
 const AssignmentCreate = z
@@ -126,6 +133,27 @@ export async function assignmentLifecycleRoutes(
         subjectId: owned.assignment.id,
         payload: body.data,
       });
+
+      // Milestones authored as J±n follow the deadline: re-resolve the ones
+      // not dispatched yet (a fired milestone is history, its date stays).
+      if (updated && body.data.deadlineAt) {
+        const offsets = await app.db
+          .select()
+          .from(assignmentMilestones)
+          .where(
+            and(
+              eq(assignmentMilestones.assignmentId, updated.id),
+              isNotNull(assignmentMilestones.offsetDays),
+              isNull(assignmentMilestones.dispatchedAt),
+            ),
+          );
+        for (const m of offsets) {
+          await app.db
+            .update(assignmentMilestones)
+            .set({ dueAt: resolveOffset(updated.deadlineAt, m.offsetDays!) })
+            .where(eq(assignmentMilestones.id, m.id));
+        }
+      }
 
       // Rescheduling (US-08, GH-43): pushing back the deadline of an already
       // expired assignment reopens it; repositories are unlocked (lock

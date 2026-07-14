@@ -7,10 +7,10 @@
  * pg-boss singleton.
  */
 import type { FastifyInstance } from "fastify";
-import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-orm";
 
 import type { AppConfig } from "./config.js";
-import { assignments, classrooms, scheduledTasks } from "./db/schema.js";
+import { assignmentMilestones, assignments, classrooms, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
 import { zurichIso } from "./github/commit.js";
 import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
@@ -105,6 +105,30 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
           GRADE_DISPATCH_QUEUE,
           { assignmentId: id },
           { singletonKey: id, retryLimit: 5, retryBackoff: true, retryDelay: 30 },
+        );
+      }
+
+      // 2c. Intermediate reviews (milestones): due, not yet dispatched, on a
+      //     live (published or locked) assignment. The handler re-reads the
+      //     condition and claims per-repo ledger rows (trigger `milestone`),
+      //     so double-enqueueing is harmless.
+      const milestonesDue = await app.db
+        .select({ id: assignmentMilestones.id, assignmentId: assignmentMilestones.assignmentId })
+        .from(assignmentMilestones)
+        .innerJoin(assignments, eq(assignmentMilestones.assignmentId, assignments.id))
+        .where(
+          and(
+            isNull(assignmentMilestones.dispatchedAt),
+            lte(assignmentMilestones.dueAt, sql`now()`),
+            ne(assignments.state, "draft"),
+            isNull(assignments.archivedAt),
+          ),
+        );
+      for (const m of milestonesDue) {
+        await app.boss.send(
+          GRADE_DISPATCH_QUEUE,
+          { assignmentId: m.assignmentId, milestoneId: m.id },
+          { singletonKey: m.id, retryLimit: 5, retryBackoff: true, retryDelay: 30 },
         );
       }
 

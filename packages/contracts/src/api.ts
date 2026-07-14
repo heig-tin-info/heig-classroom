@@ -60,7 +60,13 @@ export interface RosterEntry {
 export interface ClassroomDetail {
   id: string;
   name: string;
-  org: { login: string; installationId: number | null; githubOrgId: number | null } | null;
+  org: {
+    login: string;
+    installationId: number | null;
+    githubOrgId: number | null;
+    /** GitHub billing plan (`free`, `team`, …); null = unknown. */
+    plan: string | null;
+  } | null;
   roster: RosterEntry[];
   appSlug: string | null;
 }
@@ -175,6 +181,18 @@ export interface AssignmentDetailPayload {
     syncedAt: string | null;
   };
   students: AssignmentDetailStudent[];
+}
+
+// --- Milestones (intermediate reviews, dispatched at due_at) ---
+
+export interface AssignmentMilestone {
+  id: string;
+  /** criteria.yml `milestone:` tag / `score grade --milestone` argument. */
+  name: string;
+  dueAt: string;
+  /** J±n authoring relative to the deadline; null = absolute date. */
+  offsetDays: number | null;
+  dispatchedAt: string | null;
 }
 
 // --- Repository activity (expandable row) ---

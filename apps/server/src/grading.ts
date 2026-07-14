@@ -289,7 +289,11 @@ export async function ingestCompletedRun(
     // grading.yml falls back to "GRADE 1/6" when the LLM step dies (e.g.
     // missing ANTHROPIC_API_KEY), which is an infrastructure failure, not a
     // student grade. The run row above keeps the trace for debugging.
-    if (parse.status === "ok" && run.conclusion === "success") {
+    // Milestone reviews (grade-milestone) also land here and are trace-only:
+    // they run BEFORE the freeze while grade-final only fires after it, so
+    // gating the slot (and the student email) on `frozen_at` keeps an
+    // intermediate review from ever posing as the final grade.
+    if (parse.status === "ok" && run.conclusion === "success" && ctx.assignment.frozenAt) {
       await app.db
         .update(studentRepos)
         .set({ llmGradeRunId: id })

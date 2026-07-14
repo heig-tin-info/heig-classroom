@@ -187,6 +187,7 @@ const en = {
   "email.repo.invitation": "Repository created",
   "email.provision.error": "Repository provisioning failed",
   "email.deadline.applied": "Deadline enforced (summary)",
+  "email.org.deleted": "GitHub organization deleted",
 };
 
 export type Dict = typeof en;
@@ -354,6 +355,7 @@ const fr: Record<keyof Dict, string> = {
   "email.repo.invitation": "Dépôt créé",
   "email.provision.error": "Échec de création d'un dépôt",
   "email.deadline.applied": "Échéance appliquée (résumé)",
+  "email.org.deleted": "Organisation GitHub supprimée",
 };
 
 const DICTS: Record<Locale, Record<string, string>> = { en, fr };

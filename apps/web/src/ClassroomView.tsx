@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Archive,
   Building2,
   CheckCircle2,
@@ -195,6 +196,34 @@ function InstallWizard({ room }: { room: ClassroomDetail }) {
   );
 }
 
+/**
+ * Organization secrets never reach the private repositories of a Free
+ * organization: the LLM review tier fails silently (empty ANTHROPIC_API_KEY).
+ * Teachers get GitHub Team at no cost through GitHub Education.
+ */
+function FreePlanWarning({ orgLogin }: { orgLogin: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+      <AlertTriangle className="size-4 shrink-0" />
+      <span>
+        <span className="font-medium">{orgLogin}</span> is on the GitHub <span className="font-medium">Free</span> plan:
+        organization secrets are not delivered to private repositories, so the automatic LLM
+        review will fail silently. As a teacher you can upgrade the organization to GitHub Team
+        for free through GitHub Education.
+      </span>
+      <span className="flex-1" />
+      <a
+        href="https://education.github.com/globalcampus/teacher"
+        target="_blank"
+        rel="noreferrer"
+        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
+      >
+        Request the education upgrade
+      </a>
+    </div>
+  );
+}
+
 export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
   const qc = useQueryClient();
@@ -254,6 +283,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       ) : null}
 
       {!room.org?.installationId ? <InstallWizard room={room} /> : null}
+
+      {room.org?.installationId && room.org.plan === "free" ? (
+        <FreePlanWarning orgLogin={room.org.login} />
+      ) : null}
 
       <AssignmentsCard
         classroomId={room.id}

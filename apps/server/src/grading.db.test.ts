@@ -30,7 +30,10 @@ const config = { PUBLIC_URL: "https://classroom.test", COOKIE_SECRET: "s" } as A
 const sha = (c: string) => c.repeat(40);
 
 /** One classroom, one provisioned student repo; deadline defaults to the future. */
-async function seed(db: TestDb, opts: { deadlineAt?: Date } = {}): Promise<RepoCtx> {
+async function seed(
+  db: TestDb,
+  opts: { deadlineAt?: Date; frozenAt?: Date } = {},
+): Promise<RepoCtx> {
   const teacherId = randomUUID();
   const studentId = randomUUID();
   const orgId = randomUUID();
@@ -51,6 +54,7 @@ async function seed(db: TestDb, opts: { deadlineAt?: Date } = {}): Promise<RepoC
     state: "published",
     startAt: new Date("2026-07-01T08:00:00Z"),
     deadlineAt: opts.deadlineAt ?? new Date(Date.now() + 7 * 86_400_000),
+    frozenAt: opts.frozenAt ?? null,
     sourceRepoId: 1,
     sourceFullName: "org/labo-1",
     branches: ["main"],
@@ -212,7 +216,11 @@ describe("ingestCompletedRun — LLM review (GR-16)", () => {
   }
 
   it("a successful review becomes the authoritative llm grade", async () => {
-    const ctx = await seed(app.db);
+    // grade-final only fires after the definitive freeze (GR-16).
+    const ctx = await seed(app.db, {
+      deadlineAt: new Date(Date.now() - 3_600_000),
+      frozenAt: new Date(Date.now() - 1_800_000),
+    });
     const id = await ingestCompletedRun(
       app,
       octokitStub({ title: "GRADE", message: "5/6" }),
@@ -222,6 +230,23 @@ describe("ingestCompletedRun — LLM review (GR-16)", () => {
     );
     expect(id).not.toBeNull();
     expect(await llmRunIdOf(ctx.repo.id)).toBe(id);
+  });
+
+  it("a milestone review (before the freeze) is trace-only, never authoritative", async () => {
+    // grade-milestone runs before the freeze: the run is captured (grade
+    // history) but the final-grade slot stays empty until grade-final.
+    const ctx = await seed(app.db);
+    const id = await ingestCompletedRun(
+      app,
+      octokitStub({ title: "GRADE", message: "4/6" }),
+      ctx,
+      llmRun(),
+      config,
+    );
+    expect(id).not.toBeNull();
+    const [row] = await app.db.select().from(gradeRuns).where(eq(gradeRuns.id, id!));
+    expect(row!.kind).toBe("llm");
+    expect(await llmRunIdOf(ctx.repo.id)).toBeNull();
   });
 
   it("a failed run is captured for the trace but NEVER becomes authoritative", async () => {

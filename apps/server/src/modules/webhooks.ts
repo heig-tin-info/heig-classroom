@@ -1,7 +1,8 @@
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
-import { and, eq, gte, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, like, ne, sql } from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
@@ -21,6 +22,7 @@ import { installationClient } from "../github/app.js";
 import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
+import { mailRecipient, queueEmail } from "../mailer.js";
 
 const MAX_REVERTS_PER_HOUR = 5; // anti-loop cap (H10, GH-33)
 
@@ -106,6 +108,8 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
         await handlePullRequest(app, delivery.payload as PullRequestPayload);
       } else if (delivery.event === "member") {
         await handleMember(app, delivery.payload as MemberPayload);
+      } else if (delivery.event === "organization") {
+        await handleOrganization(app, config, delivery.payload as OrganizationPayload);
       }
       await app.db
         .update(webhookDeliveries)
@@ -285,6 +289,136 @@ async function handleMember(app: FastifyInstance, p: MemberPayload) {
     .set({ invitationStatus: "accepted" })
     .where(eq(studentRepos.id, ctx.repo.id));
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+}
+
+interface OrganizationPayload {
+  action?: string;
+  organization?: { id?: number; login?: string };
+  changes?: { login?: { from?: string } };
+}
+
+/**
+ * Organization lifecycle (App event `organization`): `renamed` keeps our
+ * login and every stored `full_name` in step with GitHub (repo ids are the
+ * stable references, the names are display/API sugar that must follow);
+ * `deleted` degrades the organization and warns the affected teachers.
+ * Exported for the PGlite tests.
+ */
+export async function handleOrganization(
+  app: FastifyInstance,
+  config: AppConfig,
+  p: OrganizationPayload,
+) {
+  if (!p.organization?.id) return;
+  const [org] = await app.db
+    .select()
+    .from(organizations)
+    .where(eq(organizations.githubOrgId, p.organization.id))
+    .limit(1);
+  if (!org) return; // organization unknown to the platform
+
+  if (p.action === "renamed") {
+    const newLogin = p.organization.login;
+    if (!newLogin || newLogin === org.login) return; // replayed delivery
+    const oldLogin = org.login;
+    await app.db
+      .update(organizations)
+      .set({ login: newLogin })
+      .where(eq(organizations.id, org.id));
+
+    // Rewrite the "<org>/<repo>" prefixes. GitHub logins are [A-Za-z0-9-],
+    // so the LIKE guard needs no escaping; rows not matching the old prefix
+    // (never provisioned, already renamed) are left alone.
+    const roomIds = app.db
+      .select({ id: classrooms.id })
+      .from(classrooms)
+      .where(eq(classrooms.orgId, org.id));
+    const orgAssignments = app.db
+      .select({ id: assignments.id })
+      .from(assignments)
+      .where(inArray(assignments.classroomId, roomIds));
+    const rename = (col: AnyPgColumn) => sql`${newLogin} || substr(${col}, ${oldLogin.length + 1})`;
+    await app.db
+      .update(assignments)
+      .set({ sourceFullName: rename(assignments.sourceFullName) })
+      .where(
+        and(
+          inArray(assignments.classroomId, roomIds),
+          like(assignments.sourceFullName, `${oldLogin}/%`),
+        ),
+      );
+    await app.db
+      .update(assignments)
+      .set({ squashedFullName: rename(assignments.squashedFullName) })
+      .where(
+        and(
+          inArray(assignments.classroomId, roomIds),
+          like(assignments.squashedFullName, `${oldLogin}/%`),
+        ),
+      );
+    await app.db
+      .update(studentRepos)
+      .set({ fullName: rename(studentRepos.fullName) })
+      .where(
+        and(
+          inArray(studentRepos.assignmentId, orgAssignments),
+          like(studentRepos.fullName, `${oldLogin}/%`),
+        ),
+      );
+    await audit(app.db, {
+      actorType: "system",
+      action: "org.renamed",
+      subjectType: "organization",
+      subjectId: org.id,
+      payload: { from: oldLogin, to: newLogin },
+    });
+    const rooms = await app.db
+      .select({ id: classrooms.id, teacherId: classrooms.teacherId })
+      .from(classrooms)
+      .where(eq(classrooms.orgId, org.id));
+    publish(
+      "orgs",
+      rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+    );
+    return;
+  }
+
+  if (p.action === "deleted") {
+    // The installation died with the organization: degraded until a new org
+    // is wired in. Repositories and grades stay readable in the portal.
+    await app.db
+      .update(organizations)
+      .set({ status: "degraded", installationId: null })
+      .where(eq(organizations.id, org.id));
+    await audit(app.db, {
+      actorType: "system",
+      action: "org.deleted",
+      subjectType: "organization",
+      subjectId: org.id,
+      payload: { login: org.login },
+    });
+    const rooms = await app.db
+      .select({ id: classrooms.id, name: classrooms.name, teacherId: classrooms.teacherId })
+      .from(classrooms)
+      .where(and(eq(classrooms.orgId, org.id), isNull(classrooms.archivedAt)));
+    const byTeacher = new Map<string, string[]>();
+    for (const r of rooms) {
+      byTeacher.set(r.teacherId, [...(byTeacher.get(r.teacherId) ?? []), r.name]);
+    }
+    for (const [teacherId, names] of byTeacher) {
+      const teacher = await mailRecipient(app, teacherId);
+      if (teacher) {
+        await queueEmail(app, config, teacher, "org.deleted", {
+          orgLogin: org.login,
+          detail: names.join(", "),
+        });
+      }
+    }
+    publish(
+      "orgs",
+      rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+    );
+  }
 }
 
 /** GH-52: sync PR state (open / merged / closed) aggregated in the teacher view. */

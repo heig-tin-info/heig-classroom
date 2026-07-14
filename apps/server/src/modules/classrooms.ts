@@ -11,6 +11,7 @@ import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
 import {
+  fetchOrgPlan,
   githubApp,
   listInstalledOrgs,
   orgExistsOnGithub,
@@ -85,12 +86,17 @@ export async function classroomsPlugin(
           .where(sql`lower(${organizations.login}) = ${account.login.toLowerCase()}`)
           .limit(1);
         if (org) {
+          // Free orgs never deliver org secrets to private repos (the LLM
+          // tier would fail silently): read the plan while we hold the
+          // freshly installed installation, the classroom page warns on it.
+          const plan = await fetchOrgPlan(config, installationId, account.login);
           await app.db
             .update(organizations)
             .set({
               installationId,
               githubOrgId: account.id ?? null,
               status: "active",
+              ...(plan ? { plan } : {}),
             })
             .where(eq(organizations.id, org.id));
           await audit(app.db, {
@@ -236,6 +242,7 @@ export async function classroomsPlugin(
         login: organizations.login,
         installationId: organizations.installationId,
         githubOrgId: organizations.githubOrgId,
+        plan: organizations.plan,
       })
       .from(organizations)
       .where(eq(organizations.id, room.orgId))
@@ -265,6 +272,19 @@ export async function classroomsPlugin(
         }
       } catch (err) {
         req.log.warn({ err, org: org.login }, "installation resolution failed");
+      }
+    }
+    // Billing plan check (org secrets vs private repos): re-read while the
+    // plan is unknown or `free`, so the warning appears on install and
+    // clears itself on the next open after the teacher upgrades.
+    if (org && org.installationId !== null && (org.plan === null || org.plan === "free")) {
+      const plan = await fetchOrgPlan(config, org.installationId, org.login);
+      if (plan && plan !== org.plan) {
+        await app.db
+          .update(organizations)
+          .set({ plan })
+          .where(eq(organizations.id, room.orgId));
+        org = { ...org, plan };
       }
     }
     // The install wizard targets the exact organization on GitHub

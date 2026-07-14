@@ -1,9 +1,10 @@
 /**
  * Assignments API, split by concern (same URLs as the original module):
- * - lifecycle.ts : list, create, patch (incl. deadline reopen), publish,
- *                  archive/unarchive, delete
- * - detail.ts    : detail table, grade-run history, repository activity
- * - actions.ts   : source pickers, sync, lock/unlock, grade-now
+ * - lifecycle.ts  : list, create, patch (incl. deadline reopen), publish,
+ *                   archive/unarchive, delete
+ * - detail.ts     : detail table, grade-run history, repository activity
+ * - actions.ts    : source pickers, sync, lock/unlock, grade-now
+ * - milestones.ts : intermediate review checkpoints (grade-milestone)
  */
 import type { FastifyInstance } from "fastify";
 
@@ -11,6 +12,7 @@ import type { AppConfig } from "../../config.js";
 import { assignmentActionRoutes } from "./actions.js";
 import { assignmentDetailRoutes } from "./detail.js";
 import { assignmentLifecycleRoutes } from "./lifecycle.js";
+import { assignmentMilestoneRoutes } from "./milestones.js";
 
 export async function assignmentsPlugin(
   app: FastifyInstance,
@@ -19,4 +21,5 @@ export async function assignmentsPlugin(
   await assignmentLifecycleRoutes(app, opts);
   await assignmentDetailRoutes(app, opts);
   await assignmentActionRoutes(app, opts);
+  await assignmentMilestoneRoutes(app, opts);
 }
