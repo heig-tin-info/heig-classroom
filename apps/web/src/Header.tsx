@@ -1,8 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   BookOpen,
-  CheckCircle2,
   ChevronDown,
   GraduationCap,
   LogOut,
@@ -10,12 +8,13 @@ import {
   Settings as SettingsIcon,
   Sun,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { Me } from "@hgc/contracts";
 
 import { api } from "./api";
 import { useT } from "./i18n";
+import { useToast } from "./notify";
 import { applyTheme, initialTheme, type Theme } from "./theme";
 import { Avatar, Button, GithubIcon } from "./ui";
 
@@ -45,28 +44,21 @@ function ThemeToggle() {
   );
 }
 
-/** Return banner for the linking flow (?github=linked|conflict|error). */
-export function GithubBanner() {
+/** Toast for the linking flow return (?github=linked|conflict|error). */
+export function GithubLinkToast() {
   const t = useT();
-  const [status] = useState(() => {
-    const s = new URLSearchParams(window.location.search).get("github");
-    if (s) window.history.replaceState(null, "", "/");
-    return s;
-  });
-  if (!status) return null;
-  if (status === "linked") {
-    return (
-      <div className="mb-4 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-300">
-        <CheckCircle2 className="size-4" /> {t("github.linked")}
-      </div>
-    );
-  }
-  return (
-    <div className="mb-4 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-500/10 dark:text-red-300">
-      <AlertTriangle className="size-4" />
-{status === "conflict" ? t("github.conflict") : t("github.failed")}
-    </div>
-  );
+  const toast = useToast();
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get("github");
+    if (!status) return;
+    window.history.replaceState(null, "", "/");
+    if (status === "linked") toast(t("github.linked"), "success");
+    else if (status === "conflict") toast(t("github.conflict"), "error");
+    else toast(t("github.failed"), "error");
+    // Fire once on mount: the query param is consumed above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
 }
 
 function UserMenu({ me, onOpenSettings }: { me: Me; onOpenSettings: () => void }) {

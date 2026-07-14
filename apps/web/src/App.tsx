@@ -5,7 +5,7 @@ import type { ClassroomDetail } from "@hgc/contracts";
 
 import { api, useMe } from "./api";
 import { Breadcrumb } from "./Breadcrumb";
-import { GithubBanner, Header, Logo } from "./Header";
+import { GithubLinkToast, Header, Logo } from "./Header";
 import { useI18n, useT } from "./i18n";
 import { useLiveUpdates } from "./live";
 import { useRoute, type Route } from "./router";
@@ -118,7 +118,7 @@ export default function App() {
         }
       />
       <main className="mx-auto max-w-5xl px-4 py-6">
-        <GithubBanner />
+        <GithubLinkToast />
         <Suspense fallback={null}>
         {route.view === "settings" ? (
           <SettingsPage me={me.data} onBack={() => navigate({ view: "home" })} />
