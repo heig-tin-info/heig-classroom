@@ -480,17 +480,31 @@ export async function assignmentLifecycleRoutes(
 
       // Squashed repository created when the assignment is created (GH-11/12);
       // synchronous for this slice (a few seconds), jobs in M3.
+      // Slugs are only unique per classroom while the repo lives at the org
+      // level: on a name collision (422 on a non-empty repo, e.g. the same
+      // assignment in another classroom or a leftover from a failed delete),
+      // retry with a numeric suffix. The real name lands in squashedFullName.
       let squashed;
+      let targetRepo = `${slug}-squashed`;
       try {
-        squashed = await createSquashedRepo({
-          octokit: client.octokit,
-          token: client.token,
-          org: owned.org.login,
-          sourceRepo: source.name,
-          targetRepo: `${slug}-squashed`,
-          strategy: body.data.sourceStrategy,
-          branches,
-        });
+        for (let attempt = 2; ; attempt++) {
+          try {
+            squashed = await createSquashedRepo({
+              octokit: client.octokit,
+              token: client.token,
+              org: owned.org.login,
+              sourceRepo: source.name,
+              targetRepo,
+              strategy: body.data.sourceStrategy,
+              branches,
+            });
+            break;
+          } catch (err) {
+            if ((err as { status?: number }).status !== 422 || attempt > 5) throw err;
+            req.log.info({ targetRepo }, "squashed name taken, retrying with suffix");
+            targetRepo = `${slug}-squashed-${attempt}`;
+          }
+        }
       } catch (err) {
         req.log.error({ err }, "squashed repository creation failed");
         const status = (err as { status?: number }).status;
@@ -498,7 +512,7 @@ export async function assignmentLifecycleRoutes(
           error: "squashed_failed",
           message:
             status === 422
-              ? `Repository ${slug}-squashed already exists in the organization`
+              ? `Repositories ${slug}-squashed through -5 all exist in the organization`
               : "Could not create the squashed repository — try again",
         });
       }
@@ -552,7 +566,7 @@ export async function assignmentLifecycleRoutes(
         await client.octokit
           .request("DELETE /repos/{owner}/{repo}", {
             owner: owned.org.login,
-            repo: `${slug}-squashed`,
+            repo: targetRepo,
           })
           .catch(() => {});
         return reply.code(409).send({
