@@ -7,7 +7,9 @@ import {
   GitCommitHorizontal,
   Loader2,
   Lock,
+  Milestone as MilestoneIcon,
   Plus,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -21,6 +23,7 @@ import {
   Field,
   GithubIcon,
   humanize,
+  IconButton,
   isoDateTime,
   localDateTimeInputValue,
   Progress,
@@ -215,6 +218,13 @@ export function AssignmentForm({
   const [protectedFiles, setProtectedFiles] = useState<Set<string>>(
     new Set(existing?.protectedFiles ?? []),
   );
+  // Intermediate reviews authored with the assignment (creation only; the
+  // detail view manages them afterwards). "n days before deadline" → J−n.
+  const [milestones, setMilestones] = useState<{ name: string; days: string }[]>([]);
+  const milestoneName = /^[a-z0-9][a-z0-9_-]{0,49}$/;
+  const milestonesValid = milestones.every(
+    (m) => milestoneName.test(m.name) && Number.parseInt(m.days, 10) >= 1,
+  );
 
   const repos = useQuery<OrgRepo[]>({
     queryKey: ["org-repos", classroomId],
@@ -260,31 +270,55 @@ export function AssignmentForm({
             };
 
   const save = useMutation({
-    mutationFn: () =>
-      existing
-        ? api(`/app/api/classrooms/${classroomId}/assignments/${existing.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({
-              name,
-              ...whenFields(true),
-              deadlineStrategy,
-              gradingMode,
-              protectedFiles: [...protectedFiles],
-            }),
-          })
-        : api(`/app/api/classrooms/${classroomId}/assignments`, {
+    mutationFn: async () => {
+      if (existing) {
+        return api(`/app/api/classrooms/${classroomId}/assignments/${existing.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            name,
+            ...whenFields(true),
+            deadlineStrategy,
+            gradingMode,
+            protectedFiles: [...protectedFiles],
+          }),
+        });
+      }
+      const created = await api<Assignment>(`/app/api/classrooms/${classroomId}/assignments`, {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          sourceRepo,
+          ...whenFields(false),
+          sourceStrategy,
+          deadlineStrategy,
+          gradingMode,
+          branches: branch ? [branch] : undefined,
+          protectedFiles: [...protectedFiles],
+        }),
+      });
+      // Milestones need the assignment id: created right after, best-effort —
+      // the assignment exists either way and the detail view can fix them up.
+      const failures: string[] = [];
+      for (const m of milestones) {
+        try {
+          await api(`/app/api/classrooms/${classroomId}/assignments/${created.id}/milestones`, {
             method: "POST",
             body: JSON.stringify({
-              name,
-              sourceRepo,
-              ...whenFields(false),
-              sourceStrategy,
-              deadlineStrategy,
-              gradingMode,
-              branches: branch ? [branch] : undefined,
-              protectedFiles: [...protectedFiles],
+              name: m.name.trim(),
+              offsetDays: -Math.abs(Number.parseInt(m.days, 10)),
             }),
-          }),
+          });
+        } catch (err) {
+          failures.push(`${m.name}: ${err instanceof ApiError ? err.message : "failed"}`);
+        }
+      }
+      if (failures.length) {
+        window.alert(
+          `Assignment created, but some milestones could not be added:\n${failures.join("\n")}\nYou can add them from the assignment view.`,
+        );
+      }
+      return created;
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["assignments", classroomId] });
       onDone();
@@ -533,6 +567,69 @@ export function AssignmentForm({
         </label>
       </div>
 
+      {!existing && gradingMode === "auto" ? (
+        <div className="space-y-2">
+          <span className="flex items-center gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            <MilestoneIcon className="size-3.5 text-zinc-400" /> Milestones
+            <span className="font-normal text-zinc-400">
+              — intermediate reviews, n days before the deadline (criteria tagged{" "}
+              <code className="text-xs">milestone:</code>)
+            </span>
+          </span>
+          {milestones.map((m, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-2">
+              <input
+                className={select}
+                placeholder="review-1"
+                aria-label="Milestone name"
+                value={m.name}
+                onChange={(e) =>
+                  setMilestones((rows) =>
+                    rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
+                  )
+                }
+                required
+              />
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">J−</span>
+              <input
+                type="number"
+                min={1}
+                max={365}
+                className={`${select} w-20`}
+                aria-label="Days before the deadline"
+                value={m.days}
+                onChange={(e) =>
+                  setMilestones((rows) =>
+                    rows.map((r, j) => (j === i ? { ...r, days: e.target.value } : r)),
+                  )
+                }
+                required
+              />
+              <span className="text-sm text-zinc-400">days before the deadline</span>
+              <IconButton
+                label="Remove milestone"
+                type="button"
+                onClick={() => setMilestones((rows) => rows.filter((_, j) => j !== i))}
+              >
+                <Trash2 className="size-4" />
+              </IconButton>
+              {m.name !== "" && !milestoneName.test(m.name) ? (
+                <span className="text-xs text-amber-600 dark:text-amber-400">
+                  lowercase letters, digits, - and _
+                </span>
+              ) : null}
+            </div>
+          ))}
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setMilestones((rows) => [...rows, { name: "", days: "7" }])}
+          >
+            <Plus className="size-4" /> Add milestone
+          </Button>
+        </div>
+      ) : null}
+
       {existing?.state === "locked" ? (
         <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
           This assignment has expired. Saving a deadline in the future <b>reopens</b> it:
@@ -617,7 +714,10 @@ export function AssignmentForm({
         </Button>
         <Button
           disabled={
-            save.isPending || (!existing && !sourceRepo) || (durationPicked && durationMinutes < 15)
+            save.isPending ||
+            (!existing && !sourceRepo) ||
+            (durationPicked && durationMinutes < 15) ||
+            !milestonesValid
           }
         >
           {save.isPending ? (

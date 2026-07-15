@@ -85,8 +85,10 @@ export async function assignmentMilestoneRoutes(
         body.data.offsetDays !== undefined
           ? resolveOffset(owned.assignment.deadlineAt, body.data.offsetDays)
           : body.data.dueAt!;
-      // A past date would fire at the next tick: surprising, refuse it.
-      if (dueAt.getTime() <= Date.now()) {
+      // A past date on a LIVE assignment would fire at the next tick:
+      // surprising, refuse it. On a draft it is harmless — the ticker never
+      // dispatches drafts and offsets are re-resolved at publication.
+      if (owned.assignment.state !== "draft" && dueAt.getTime() <= Date.now()) {
         return reply
           .code(400)
           .send({ error: "due_past", message: "The milestone date is in the past" });
