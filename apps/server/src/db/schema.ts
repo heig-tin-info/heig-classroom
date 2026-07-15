@@ -209,6 +209,9 @@ export const assignments = pgTable(
     llmDispatchedAt: timestamp("llm_dispatched_at", { withTimezone: true }),
     /** J-1 email reminder sent (atomic claim in the ticker, one shot). */
     reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+    /** Validation flow: the teacher signed the grades off (final for students). */
+    gradesValidatedAt: timestamp("grades_validated_at", { withTimezone: true }),
+    gradesValidatedBy: uuid("grades_validated_by").references(() => users.id),
     archivedAt: timestamp("archived_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -304,6 +307,12 @@ export const studentRepos = pgTable(
     frozenGradeRunId: uuid("frozen_grade_run_id"),
     /** Authoritative LLM review run (GR-16), separate from the frozen CI grade. */
     llmGradeRunId: uuid("llm_grade_run_id"),
+    /** Validation flow: teacher override of the reviewed grade (points on the
+        assignment scale); null = the LLM/frozen grade stands as-is. */
+    teacherPoints: doublePrecision("teacher_points"),
+    teacherComment: text("teacher_comment"),
+    teacherGradedBy: uuid("teacher_graded_by").references(() => users.id),
+    teacherGradedAt: timestamp("teacher_graded_at", { withTimezone: true }),
   },
   (t) => [
     // Provisioning idempotency key (GH-20, NFR-09).

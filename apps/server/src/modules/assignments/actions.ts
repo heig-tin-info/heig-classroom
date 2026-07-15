@@ -8,7 +8,7 @@ import { z } from "zod";
 
 import { audit } from "../../audit.js";
 import type { AppConfig } from "../../config.js";
-import { studentRepos } from "../../db/schema.js";
+import { assignments, studentRepos } from "../../db/schema.js";
 import { lockStudentRepo, unlockStudentRepo } from "../../github/lock.js";
 import { SYNC_QUEUE } from "../../jobs.js";
 import { ownedAssignment, ownedClassroomWithOrg, ownedStudentRepo, teacherGuard } from "../guards.js";
@@ -223,6 +223,93 @@ export async function assignmentActionRoutes(
         payload: { repo: owned.repo.fullName, ref },
       });
       return reply.code(202).send({ ok: true });
+    },
+  );
+
+  // --- Validation flow: teacher override, then sign-off of the whole sheet ---
+  // Final grade resolution (client + export): teacherPoints ?? LLM ?? frozen CI.
+  const GradeOverride = z.object({
+    points: z.number().min(0).max(1000).nullable(),
+    comment: z.string().max(2000).nullable().optional(),
+  });
+
+  app.patch(
+    "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedStudentRepo(app, req, reply);
+      if (!owned) return reply;
+      const body = GradeOverride.safeParse(req.body);
+      if (!body.success) {
+        return reply.code(400).send({ error: "validation", issues: body.error.issues });
+      }
+      if (owned.assignment.gradingMode === "none") {
+        return reply
+          .code(409)
+          .send({ error: "grading_none", message: "This assignment is not graded" });
+      }
+      // Adjustments happen on a stable grade: after the definitive freeze.
+      if (!owned.assignment.frozenAt) {
+        return reply.code(409).send({
+          error: "not_frozen",
+          message: "Grades can be adjusted once the deadline (and grace) has passed",
+        });
+      }
+      const clearing = body.data.points === null;
+      const [updated] = await app.db
+        .update(studentRepos)
+        .set({
+          teacherPoints: body.data.points,
+          teacherComment: clearing ? null : (body.data.comment ?? null),
+          teacherGradedBy: clearing ? null : req.user!.id,
+          teacherGradedAt: clearing ? null : new Date(),
+        })
+        .where(eq(studentRepos.id, owned.repo.id))
+        .returning();
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "repo.grade_override",
+        subjectType: "student_repo",
+        subjectId: owned.repo.id,
+        payload: { repo: owned.repo.fullName, points: body.data.points },
+      });
+      return updated;
+    },
+  );
+
+  app.post(
+    "/app/api/classrooms/:id/assignments/:aid/validate-grades",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const owned = await ownedAssignment(app, req, reply);
+      if (!owned) return reply;
+      if (owned.assignment.gradingMode === "none") {
+        return reply
+          .code(409)
+          .send({ error: "grading_none", message: "This assignment is not graded" });
+      }
+      if (!owned.assignment.frozenAt) {
+        return reply.code(409).send({
+          error: "not_frozen",
+          message: "Grades can be validated once the deadline (and grace) has passed",
+        });
+      }
+      // Idempotent re-stamp: adjusting after a validation and validating again
+      // is the normal correction path.
+      const [updated] = await app.db
+        .update(assignments)
+        .set({ gradesValidatedAt: new Date(), gradesValidatedBy: req.user!.id })
+        .where(eq(assignments.id, owned.assignment.id))
+        .returning();
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "assignment.grades_validated",
+        subjectType: "assignment",
+        subjectId: owned.assignment.id,
+      });
+      return updated;
     },
   );
 }

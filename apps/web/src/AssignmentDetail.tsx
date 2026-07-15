@@ -6,7 +6,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ClipboardCheck,
   Clock,
+  Download,
   GitCommitHorizontal,
   GitPullRequest,
   History,
@@ -14,12 +16,14 @@ import {
   LockOpen,
   Loader2,
   Milestone as MilestoneIcon,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
   Search as SearchIcon,
   Snowflake,
   Trash2,
+  UserCheck,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -44,6 +48,7 @@ import {
   Field,
   GithubIcon,
   isoDateTime,
+  Modal,
   SortHeader,
   Spinner,
   Tip,
@@ -134,11 +139,108 @@ function RepoLink({ fullName, login }: { fullName: string; login: string | null 
   );
 }
 
+/** Validation flow: teacher override of one student's reviewed grade. */
+function GradeOverrideModal({
+  classroomId,
+  assignmentId,
+  repo,
+  student,
+  onClose,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  repo: NonNullable<AssignmentDetailStudent["repo"]>;
+  student: string;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  // Pre-fill with the grade the override replaces: LLM, else frozen CI.
+  const suggested = repo.llmGrade?.points ?? repo.frozenGrade?.points ?? repo.grade?.points;
+  const [points, setPoints] = useState(
+    repo.teacherPoints != null
+      ? String(repo.teacherPoints)
+      : suggested != null
+        ? String(suggested)
+        : "",
+  );
+  const [comment, setComment] = useState(repo.teacherComment ?? "");
+  const save = useMutation({
+    mutationFn: (payload: { points: number | null; comment?: string | null }) =>
+      api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/repos/${repo.id}/grade`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["assignment-detail", assignmentId] });
+      onClose();
+    },
+  });
+  const parsed = Number.parseFloat(points);
+  return (
+    <Modal title={`Adjust grade — ${student}`} onClose={onClose}>
+      <div className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Points"
+            type="number"
+            step={0.1}
+            min={0}
+            value={points}
+            onChange={(e) => setPoints(e.target.value)}
+            fullWidth
+            required
+          />
+          <p className="self-end pb-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+            {suggested != null ? `Review grade: ${suggested.toFixed(1)}` : "No review grade yet"}
+          </p>
+        </div>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">Comment (optional)</span>
+          <textarea
+            className="min-h-20 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            maxLength={2000}
+          />
+        </label>
+        <div className="flex items-center justify-end gap-3">
+          {save.isError ? (
+            <span className="min-w-0 flex-1 text-sm text-red-600 dark:text-red-400">
+              {save.error instanceof ApiError ? save.error.message : "Request failed"}
+            </span>
+          ) : null}
+          {repo.teacherPoints != null ? (
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => save.mutate({ points: null })}
+              disabled={save.isPending}
+            >
+              Remove adjustment
+            </Button>
+          ) : null}
+          <Button type="button" variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => save.mutate({ points: parsed, comment: comment || null })}
+            disabled={save.isPending || Number.isNaN(parsed) || parsed < 0}
+          >
+            {save.isPending ? <Loader2 className="size-4 animate-spin" /> : null} Save
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 function StudentRow({
   classroomId,
   assignmentId,
   frozen,
   showGrades,
+  canAdjust,
   s,
 }: {
   classroomId: string;
@@ -147,10 +249,13 @@ function StudentRow({
   frozen: boolean;
   /** Grading mode `none` hides the grade column and the grade-now action. */
   showGrades: boolean;
+  /** Validation flow: adjustments open once the grade is frozen. */
+  canAdjust: boolean;
   s: AssignmentDetailStudent;
 }) {
   const t = useT();
   const [showHistory, setShowHistory] = useState(false);
+  const [adjusting, setAdjusting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const qc = useQueryClient();
   const invalidate = () =>
@@ -279,9 +384,21 @@ function StudentRow({
       {showGrades ? (
       <td className={`${cell} whitespace-nowrap`}>
         <span className="inline-flex items-center gap-1">
-          {/* GR-16: the authoritative LLM review, once landed, IS the grade;
-              until then the frozen CI grade shows with a pending marker. */}
-          {r?.llmGrade && r.llmGrade.parseStatus === "ok" ? (
+          {/* Validation flow: the teacher's adjustment IS the final grade. */}
+          {r?.teacherPoints != null ? (
+            <Tip
+              label={`Adjusted by the teacher${r.teacherComment ? ` — ${r.teacherComment}` : ""} (review was ${
+                (r.llmGrade?.points ?? r.frozenGrade?.points)?.toFixed(1) ?? "—"
+              })`}
+            >
+              <span className="inline-flex items-center gap-1 font-medium tabular-nums text-emerald-600 dark:text-emerald-400">
+                <UserCheck className="size-3.5" />
+                {r.teacherPoints.toFixed(1)}
+              </span>
+            </Tip>
+          ) : /* GR-16: the authoritative LLM review, once landed, IS the grade;
+              until then the frozen CI grade shows with a pending marker. */
+          r?.llmGrade && r.llmGrade.parseStatus === "ok" ? (
             <Tip
               label={`LLM review — CI grade was ${
                 r.frozenGrade?.points != null ? r.frozenGrade.points.toFixed(1) : "—"
@@ -316,6 +433,20 @@ function StudentRow({
               </button>
             </Tip>
           ) : null}
+          {canAdjust && r?.provisionStatus === "ok" ? (
+            <Tip label="Adjust grade">
+              <button
+                aria-label="Adjust grade"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAdjusting(true);
+                }}
+                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+              >
+                <Pencil className="size-3.5" />
+              </button>
+            </Tip>
+          ) : null}
         </span>
         {showHistory && r ? (
           <GradeHistoryModal
@@ -325,6 +456,15 @@ function StudentRow({
             fullName={r.fullName}
             student={`${s.prenom} ${s.nom}`.trim()}
             onClose={() => setShowHistory(false)}
+          />
+        ) : null}
+        {adjusting && r ? (
+          <GradeOverrideModal
+            classroomId={classroomId}
+            assignmentId={assignmentId}
+            repo={r}
+            student={`${s.prenom} ${s.nom}`.trim()}
+            onClose={() => setAdjusting(false)}
           />
         ) : null}
       </td>
@@ -678,11 +818,19 @@ export function AssignmentDetail({
   assignmentId: string;
 }) {
   const t = useT();
+  const qc = useQueryClient();
   const [query, setQuery] = useState("");
   const detail = useQuery<AssignmentDetailPayload>({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
       api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/detail`),
+  });
+  const validate = useMutation({
+    mutationFn: () =>
+      api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/validate-grades`, {
+        method: "POST",
+      }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["assignment-detail", assignmentId] }),
   });
 
   const rank = (s: AssignmentDetailStudent, key: SortKey): string | number => {
@@ -694,7 +842,7 @@ export function AssignmentDetail({
       case "commitCount":
         return s.repo?.commitCount ?? -1;
       case "grade":
-        return s.repo?.grade?.points ?? -1;
+        return s.repo?.teacherPoints ?? s.repo?.llmGrade?.points ?? s.repo?.grade?.points ?? -1;
       case "status":
         return s.repo?.provisionStatus === "ok" ? 2 : s.claimStatus === "claimed" ? 1 : 0;
     }
@@ -715,6 +863,31 @@ export function AssignmentDetail({
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
   // Grading mode `none`: no grades, no review countdown, no milestones.
   const showGrades = a.gradingMode !== "none";
+  // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
+  const canAdjust = showGrades && a.frozenAt != null;
+
+  // Grades sheet (nom, prénom, email, note) — final = teacher ?? LLM ?? frozen CI.
+  const exportGrades = async () => {
+    const XLSX = await import("xlsx");
+    const rows = students.map((s) => {
+      const r = s.repo;
+      const llm = r?.llmGrade?.parseStatus === "ok" ? r.llmGrade.points : null;
+      const ci = r?.frozenGrade?.parseStatus === "ok" ? r.frozenGrade.points : (r?.grade?.parseStatus === "ok" ? r.grade.points : null);
+      const final = r?.teacherPoints ?? llm ?? ci;
+      return {
+        Nom: s.nom,
+        "Prénom": s.prenom,
+        Email: s.email,
+        Note: final ?? "",
+        Source:
+          r?.teacherPoints != null ? "teacher" : llm != null ? "llm" : ci != null ? "ci" : "",
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Notes");
+    XLSX.writeFile(wb, `${a.name} — notes.xlsx`);
+  };
 
   // La recherche trie déjà par pertinence.
   const rows = query.trim() !== "" ? shown : sorted;
@@ -734,6 +907,13 @@ export function AssignmentDetail({
           {t(`state.${a.state}` as Parameters<typeof t>[0])}
         </Badge>
         {showGrades ? <ReviewChip a={a} students={students} /> : null}
+        {a.gradesValidatedAt ? (
+          <Tip label={`Validated ${isoDateTime(a.gradesValidatedAt)}`}>
+            <Badge tone="green" icon={ClipboardCheck}>
+              {t("assignment.gradesValidated")}
+            </Badge>
+          </Tip>
+        ) : null}
         <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
           <CalendarClock className="size-3.5" />
           {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
@@ -742,6 +922,29 @@ export function AssignmentDetail({
           {t("assignment.accepted", { n: accepted, total: students.length })}
         </Badge>
         <span className="flex-1" />
+        {showGrades ? (
+          <Tip label={t("assignment.exportTip")}>
+            <Button variant="ghost" aria-label={t("assignment.export")} onClick={() => void exportGrades()}>
+              <Download className="size-4" /> {t("assignment.export")}
+            </Button>
+          </Tip>
+        ) : null}
+        {canAdjust ? (
+          <Button
+            variant="subtle"
+            onClick={() => {
+              if (window.confirm(t("assignment.validateConfirm"))) validate.mutate();
+            }}
+            disabled={validate.isPending}
+          >
+            {validate.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <ClipboardCheck className="size-4" />
+            )}
+            {a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate")}
+          </Button>
+        ) : null}
         <Button variant="ghost" onClick={() => detail.refetch()} disabled={detail.isFetching}>
           <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> {t("common.refresh")}
         </Button>
@@ -795,6 +998,7 @@ export function AssignmentDetail({
                 assignmentId={assignmentId}
                 frozen={a.state === "locked"}
                 showGrades={showGrades}
+                canAdjust={canAdjust}
                 s={s}
               />
             ))}

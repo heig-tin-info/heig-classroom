@@ -180,6 +180,9 @@ export interface AssignmentDetailRepo {
   grade: GradeView | null;
   frozenGrade: GradeView | null;
   llmGrade: GradeView | null;
+  /** Validation flow: teacher override; final = teacherPoints ?? llm ?? frozen CI. */
+  teacherPoints: number | null;
+  teacherComment: string | null;
   lastCommitSha: string | null;
   lastCommitAt: string | null;
   commitCount: number | null;
@@ -211,6 +214,8 @@ export interface AssignmentDetailPayload {
     gradingMode: GradingMode;
     frozenAt: string | null;
     llmDispatchedAt: string | null;
+    /** Validation flow: grades signed off by the teacher (final for students). */
+    gradesValidatedAt: string | null;
     sourceAheadSha: string | null;
     sourcePushedAt: string | null;
     syncedAt: string | null;
@@ -260,6 +265,8 @@ export interface StudentRepo {
   grade: GradeView | null;
   llmGrade: GradeView | null;
   gradeFrozen: boolean;
+  /** Teacher override, only exposed once the grades are validated. */
+  teacherPoints: number | null;
 }
 
 export interface StudentAssignment {
@@ -271,6 +278,8 @@ export interface StudentAssignment {
   /** Review countdown: the LLM review fires at deadline + grace. */
   graceMinutes: number;
   gradingMode: GradingMode;
+  /** Grades signed off by the teacher: what the student sees is final. */
+  gradesValidatedAt: string | null;
   repo: StudentRepo | null;
 }
 

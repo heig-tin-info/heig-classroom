@@ -40,16 +40,29 @@ function Countdown({ deadline }: { deadline: string }) {
   );
 }
 
+/** Validation flow: the grade a student sees once the teacher signed off —
+    teacher adjustment first, else the LLM review, else the CI grade. */
+function finalGrade(repo: StudentRepo): { points: number; max: number } | null {
+  const llm = repo.llmGrade?.parseStatus === "ok" ? repo.llmGrade : null;
+  const ci = repo.grade?.parseStatus === "ok" ? repo.grade : null;
+  const points = repo.teacherPoints ?? llm?.points ?? ci?.points;
+  if (points == null) return null;
+  return { points, max: llm?.max ?? ci?.max ?? 6 };
+}
+
 /** Metrics row for an accepted repository: commits, CI donut, grade scale. */
 function RepoMetrics({
   repo,
   reviewAt,
   showGrades,
+  validated,
 }: {
   repo: StudentRepo;
   reviewAt: number;
   /** Grading mode `none`: commits and CI feedback stay, points/review go. */
   showGrades: boolean;
+  /** Grades signed off by the teacher: show the final grade, nothing else. */
+  validated: boolean;
 }) {
   const t = useT();
   const now = useNow(15_000);
@@ -79,7 +92,15 @@ function RepoMetrics({
           {t("student.ciRunning")}
         </Badge>
       ) : null}
-      {!showGrades ? null : repo.llmGrade && repo.llmGrade.parseStatus === "ok" ? (
+      {!showGrades ? null : validated && finalGrade(repo) ? (
+        <Tip label={t("student.finalTip")}>
+          <span className="inline-flex items-center gap-1.5">
+            <CheckCircle2 className="size-3.5 text-emerald-500" />
+            <GradeScale points={finalGrade(repo)!.points} max={finalGrade(repo)!.max} />
+            <span className="text-xs text-zinc-400">{t("student.final")}</span>
+          </span>
+        </Tip>
+      ) : repo.llmGrade && repo.llmGrade.parseStatus === "ok" ? (
         // GR-16: the authoritative LLM review replaces the indicative grade.
         <Tip label={t("student.reviewedTip")}>
           <span className="inline-flex items-center gap-1.5">
@@ -188,6 +209,7 @@ function StudentAssignmentRow({
             repo={a.repo!}
             reviewAt={new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000}
             showGrades={a.gradingMode !== "none"}
+            validated={a.gradesValidatedAt != null}
           />
         ) : (
           <span className="text-zinc-400">—</span>
@@ -455,6 +477,14 @@ export function StudentHome({ me }: { me: Me }) {
                       <td className={cell}>
                         {a.gradingMode === "none" ? (
                           <span className="text-zinc-400">—</span>
+                        ) : a.gradesValidatedAt && a.repo && finalGrade(a.repo) ? (
+                          <span className="inline-flex items-center gap-1">
+                            <CheckCircle2 className="size-3.5 text-emerald-500" />
+                            <GradeScale
+                              points={finalGrade(a.repo)!.points}
+                              max={finalGrade(a.repo)!.max}
+                            />
+                          </span>
                         ) : a.repo?.llmGrade && a.repo.llmGrade.parseStatus === "ok" ? (
                           <span className="inline-flex items-center gap-1">
                             <Bot className="size-3.5 text-accent" />

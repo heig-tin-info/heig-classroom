@@ -76,6 +76,7 @@ export async function studentPlugin(
               deadlineAt: assignments.deadlineAt,
               graceMinutes: assignments.graceMinutes,
               gradingMode: assignments.gradingMode,
+              gradesValidatedAt: assignments.gradesValidatedAt,
             })
             .from(assignments)
             .where(
@@ -180,6 +181,8 @@ export async function studentPlugin(
                       ? (grades.get(repo.llmGradeRunId) ?? null)
                       : null,
                     gradeFrozen: frozen,
+                    // The teacher's adjustment stays private until sign-off.
+                    teacherPoints: a.gradesValidatedAt ? repo.teacherPoints : null,
                   }
                 : null,
             };

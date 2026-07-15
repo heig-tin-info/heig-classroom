@@ -122,6 +122,8 @@ export async function assignmentDetailRoutes(
                   llmGrade: repo.llmGradeRunId
                     ? (grades.get(repo.llmGradeRunId) ?? null)
                     : null,
+                  teacherPoints: repo.teacherPoints,
+                  teacherComment: repo.teacherComment,
                   ...(live.get(repo.id) ?? {
                     lastCommitSha: repo.lastCommitSha,
                     lastCommitAt: repo.lastCommitAt,

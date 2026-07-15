@@ -9,29 +9,21 @@ sans re-diagnostiquer.
 > Pipeline build CI → GHCR → deploy : **fait et validé end-to-end le
 > 2026-07-13** (voir README §Deployment et `deploy.md` §7). Reste :
 
-### 1. Copie off-VM des backups (rclone)
-- Le service `backup` du compose fait un `pg_dump -Fc` quotidien dans
-  `./backups/` sur la VM, mais la copie hors droplet n'est **pas câblée** :
-  un disque perdu = backups perdus.
-- **À faire** : `rclone copy backups remote:hgc-backups` en cron (DigitalOcean
-  Spaces, stockage SWITCH…). Voir `compose.prod.yml` service `backup` et
-  `deploy.md` §Sauvegardes.
-
-> YCR Note: Backup is automatically done in digital ocean.
+### 1. Copie off-VM des backups — SOLDÉ (2026-07-15)
+- Les backups droplet sont gérés automatiquement par DigitalOcean ; pas de
+  copie rclone à câbler. Le `pg_dump -Fc` quotidien du service `backup`
+  reste en place comme filet local.
 
 ## Pipeline de correction
 
-### 7. score/grading.yml : push du commit de review fragile après hot-fix du shim
-- **Contexte** (E2E 2026-07-12) : `Commit the review file` pousse
-  `HEAD:master` (échoue toujours en stratégie « commit » : le commit-bot de
-  deadline a fait avancer master — attendu) puis fallback
-  `--force HEAD:refs/heads/grading`. Ce fallback est rejeté si le workflow du
-  sha gelé diffère de celui de master (« refusing to allow a GitHub App to
-  update workflow without `workflows` permission ») — cas rencontré juste
-  après le hot-fix du shim. En régime normal les deux coïncident et ça passe.
-- **Correctif visé (0.7.2)** : pousser la review via l'API contents (créer la
-  ref `grading` sur un sha existant, puis PUT `GRADING.yml` seul) — plus de
-  sensibilité au diff de workflows, et pas besoin d'élargir les permissions.
+### 7. score/grading.yml : push du commit de review fragile — CORRIGÉ (0.7.5, 2026-07-15)
+- Le fallback `--force HEAD:refs/heads/grading` est remplacé par l'API :
+  ref `grading` pointée sur le sha dispatché (git refs API), puis PUT du seul
+  fichier de review (contents API) — les workflows n'entrent plus dans le
+  diff, aucune permission élargie. score taggé 0.7.5 (release PyPI auto).
+- **Reste** : bump des shims `@0.7.4 → @0.7.5` (canonique labo-02-quadratic,
+  squashed + repo étudiant de heig-test-classroom2) — bloqué en mode auto,
+  à faire à la main ou en autorisant la commande.
 
 ## Fonctionnalités reportées
 
@@ -53,11 +45,17 @@ sans re-diagnostiquer.
   « trace-only » (le slot `llm_grade_run_id` n'est réclamé qu'après
   `frozen_at`).
 
-### 7. Flow de validation des notes (phases)
-- Note indicative (CI) → note LLM (deadline) → **note validée par le prof**
-  (ajouts/ajustements) → note finale. À dériver des colonnes existantes
-  (`deadlineAt`, `frozenAt`, un futur `validatedAt` + `finalGrade`) plutôt que
-  d'introduire une machine à états.
+### 7. Flow de validation des notes — FAIT (2026-07-15)
+- Implémenté sans machine à états (migration `0021_grade-validation.sql`) :
+  `student_repos.teacher_points/comment/graded_by/at` (override par étudiant,
+  PATCH `…/repos/:rid/grade`, ouvert après le freeze) +
+  `assignments.grades_validated_at/by` (POST `…/validate-grades`, re-stamp
+  idempotent). Résolution finale : teacher ?? LLM ?? CI gelée. UI : crayon
+  d'ajustement + bouton « Valider les notes » côté prof ; l'étudiant voit la
+  note finale (badge « note finale ») une fois validée, l'ajustement reste
+  privé avant. Export Excel (nom, prénom, email, note, source) dans la vue
+  assignment. Reste éventuel : email `grades.validated` aux étudiants, export
+  classroom-wide (étudiants × assignments).
 
 ## Refactoring — reste
 
