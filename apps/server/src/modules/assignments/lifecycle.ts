@@ -472,9 +472,30 @@ export async function assignmentLifecycleRoutes(
         throw err;
       }
 
-      const slug = slugify(body.data.name);
-      if (!slug) {
+      const base = slugify(body.data.name);
+      if (!base) {
         return reply.code(400).send({ error: "validation", message: "Name contains no usable characters" });
+      }
+      // UNIQUE(classroom_id, slug) counts archived assignments too: recreating
+      // "Labo 02 Quadratic" in the same classroom must not dead-end. Suffix
+      // the slug (labo-02-quadratic-2, …) — the squashed and student repos
+      // inherit the suffixed name, so nothing collides downstream either.
+      const taken = new Set(
+        (
+          await app.db
+            .select({ slug: assignments.slug })
+            .from(assignments)
+            .where(eq(assignments.classroomId, owned.room.id))
+        ).map((r) => r.slug),
+      );
+      let slug = base;
+      for (let i = 2; taken.has(slug); i++) {
+        if (i > 20) {
+          return reply
+            .code(409)
+            .send({ error: "duplicate_slug", message: `Too many assignments named “${base}”` });
+        }
+        slug = `${base.slice(0, 57)}-${i}`;
       }
       const branches = body.data.branches ?? [source.default_branch];
 
