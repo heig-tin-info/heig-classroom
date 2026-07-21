@@ -278,6 +278,15 @@ export function AssignmentsCard({
       {modal ? (
         <Modal
           title={modal === "create" ? "New assignment" : `Edit “${modal.name}”`}
+          subtitle={
+            modal === "create" || modal.state === "draft"
+              ? "Draft — nothing is published yet"
+              : modal.state === "locked"
+                ? "Expired — move the deadline forward to reopen"
+                : "Live — changes apply when you save"
+          }
+          narrow
+          flush
           onClose={() => setModal(null)}
         >
           <AssignmentForm

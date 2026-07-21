@@ -1,17 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronRight,
   FileText,
   Folder,
   GitBranch,
   GitCommitHorizontal,
   Loader2,
   Lock,
-  Milestone as MilestoneIcon,
   Plus,
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 import type { Assignment, OrgRepo, RepoTree } from "@hgc/contracts";
 
@@ -29,8 +28,8 @@ import {
   localDateKey,
   localDateTimeInputValue,
   Progress,
-  RadioGroup,
   RangeCalendar,
+  Segmented,
   Tip,
   Z,
 } from "./ui";
@@ -151,6 +150,35 @@ function CreatingOverlay() {
       <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
         {CREATE_STEPS[step]}
       </p>
+    </div>
+  );
+}
+
+/**
+ * Settings row: label + a description of the CURRENT choice on the left
+ * (one dynamic line, not one per option), the control on the right.
+ */
+function SettingRow({
+  title,
+  desc,
+  help,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  help?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="min-w-0">
+        <span className="flex items-center gap-1 text-sm text-zinc-800 dark:text-zinc-200">
+          {title}
+          {help ? <HelpIcon topic={help} /> : null}
+        </span>
+        {desc ? <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{desc}</p> : null}
+      </div>
+      {children}
     </div>
   );
 }
@@ -362,382 +390,94 @@ export function AssignmentForm({
 
   const select =
     "rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900";
+  // Recessed panel for conditional detail — one surface level below the sheet.
+  const panel = "rounded-lg bg-zinc-100/70 p-3 dark:bg-zinc-800/50";
+  const eyebrow = "text-xs font-medium text-zinc-400 dark:text-zinc-500";
+  const fileCount = tree.data?.tree.filter((e) => e.type === "blob").length ?? 0;
 
   return (
     <form
-      className="relative space-y-4"
+      className="relative"
       onSubmit={(e) => {
         e.preventDefault();
         save.mutate();
       }}
     >
       {save.isPending && !existing ? <CreatingOverlay /> : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        {existing ? (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-              Source repository <HelpIcon topic="assignment-source" />
-            </span>
-            <span className="inline-flex items-center gap-1.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-              <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
-            </span>
-          </label>
-        ) : (
-          // The repository comes first: picking it pre-fills a humanized name
-          // ("labo-02-quadratic" → "Labo 02 Quadratic") that stays editable.
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-              Source repository <HelpIcon topic="assignment-source" />
-            </span>
-            <select
-              className={`${select} w-full`}
-              value={sourceRepo}
-              onChange={(e) => {
-                const next = e.target.value;
-                setName((n) => (n === "" || n === humanize(sourceRepo) ? humanize(next) : n));
-                setSourceRepo(next);
-              }}
-              required
-            >
-              <option value="" disabled>
-                {repos.isLoading ? "Loading…" : "Pick a repository"}
-              </option>
-              {repos.data?.map((r) => (
-                <option key={r.name} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <Field
-          label="Name"
-          placeholder="Lab 1 — Pointers"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          fullWidth
-          required
-        />
-      </div>
-
-      {!livePublished ? (
-        <div className="grid items-start gap-3 sm:grid-cols-2">
-          <RadioGroup
-            name="publish-mode"
-            label="Publication"
-            help="assignment-dates"
-            value={publishMode}
-            onChange={setPublishMode}
-            options={[
-              { value: "manual", label: "Manual", description: "Goes live when you press Publish" },
-              {
-                value: "scheduled",
-                label: "Scheduled",
-                description: "Published automatically at the start date",
-              },
-            ]}
-          />
-          {publishMode === "manual" ? (
-            <RadioGroup
-              name="deadline-kind"
-              label="Deadline"
-              help="assignment-dates"
-              value={deadlineKind}
-              onChange={setDeadlineKind}
-              options={[
-                { value: "date", label: "Fixed date", description: "Same deadline for everyone" },
-                {
-                  value: "duration",
-                  label: "Duration",
-                  description: "Counted from the moment you publish",
-                },
-              ]}
-            />
-          ) : null}
-        </div>
-      ) : null}
-
-      {durationOnly ? (
-        <div className="flex flex-wrap items-end gap-3">
+      <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+        {/* --- Identity: name, source, protected files --- */}
+        <div className="space-y-3 px-5 py-4">
           <Field
-            label="Days"
-            type="number"
-            min={0}
-            max={400}
-            className="w-24"
-            value={durationDays}
-            onChange={(e) => setDurationDays(e.target.value)}
+            label="Name"
+            placeholder="Lab 1 — Pointers"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            fullWidth
             required
           />
-          <Field
-            label="Hours"
-            type="number"
-            min={0}
-            max={23}
-            className="w-24"
-            value={durationHours}
-            onChange={(e) => setDurationHours(e.target.value)}
-            required
-          />
-          {durationMinutes < 15 ? (
-            <p className="pb-1.5 text-sm text-amber-600 dark:text-amber-400">
-              The duration must be at least 15 minutes.
-            </p>
-          ) : (
-            <p className="pb-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-              Deadline {compactDuration(durationMinutes * 60_000)} after publication.
-            </p>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <RangeCalendar
-            mode={rangeMode ? "range" : "single"}
-            start={rangeMode ? startAt.slice(0, 10) : ""}
-            end={deadlineAt.slice(0, 10)}
-            onChange={(s, e) => {
-              // The calendar owns the days; times survive a day change.
-              if (rangeMode) setStartAt(s === "" ? "" : `${s}T${timeOf(startAt) || "08:00"}`);
-              setDeadlineAt(e === "" ? "" : `${e}T${timeOf(deadlineAt) || "23:59"}`);
-            }}
-          />
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-            {rangeMode ? (
-              <Field
-                label={livePublished ? "Start time" : "Start time (auto-publish)"}
-                type="time"
-                className="w-28"
-                value={timeOf(startAt)}
-                disabled={startAt === ""}
-                onChange={(e) => setStartAt(`${startAt.slice(0, 10)}T${e.target.value}`)}
-                required
-              />
-            ) : null}
-            <Field
-              label="Deadline time"
-              type="time"
-              className="w-28"
-              value={timeOf(deadlineAt)}
-              disabled={deadlineAt === ""}
-              onChange={(e) => setDeadlineAt(`${deadlineAt.slice(0, 10)}T${e.target.value}`)}
-              required
-            />
-            <p className="min-w-0 flex-1 pb-1.5 text-right text-sm">
-              {rangeInvalid ? (
-                <span className="text-amber-600 dark:text-amber-400">
-                  The deadline must come after the start.
+          <div className="flex items-end gap-2.5">
+            {existing ? (
+              <div className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+                <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+                  Source repository <HelpIcon topic="assignment-source" />
                 </span>
-              ) : missingWhen ? (
-                <span className="text-zinc-400">
-                  {rangeMode
-                    ? startAt === ""
-                      ? "Pick the start day, then the deadline."
-                      : deadlineAt === ""
-                        ? "Now pick the deadline day."
-                        : "Set the start and deadline times."
-                    : deadlineAt === ""
-                      ? "Pick the deadline day in the calendar."
-                      : "Set the deadline time."}
+                <span className="inline-flex items-center gap-1.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+                  <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
                 </span>
-              ) : rangeMode ? (
-                <span className="text-zinc-500 dark:text-zinc-400">
-                  {isoDateTime(toIso(startAt))} → {isoDateTime(toIso(deadlineAt))}
-                  {" · "}
-                  {compactDuration(new Date(deadlineAt).getTime() - new Date(startAt).getTime())}
+              </div>
+            ) : (
+              // Picking the repository pre-fills a humanized name
+              // ("labo-02-quadratic" → "Labo 02 Quadratic") that stays editable.
+              <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
+                <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+                  Source repository <HelpIcon topic="assignment-source" />
                 </span>
-              ) : (
-                <span className="text-zinc-500 dark:text-zinc-400">
-                  Deadline {isoDateTime(toIso(deadlineAt))}
-                </span>
-              )}
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="grid items-start gap-3 sm:grid-cols-3">
-        {!existing ? (
-          <RadioGroup
-            name="source-strategy"
-            label="Distributed source"
-            help="distributed-source"
-            value={sourceStrategy}
-            onChange={setSourceStrategy}
-            options={[
-              {
-                value: "squash",
-                label: "Squash",
-                description: "Single initial commit, history stays private",
-              },
-              { value: "whole", label: "Whole history", description: "Full history pushed as is" },
-            ]}
-          />
-        ) : null}
-        {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-              Branch to squash <HelpIcon topic="squash-branch" />
-            </span>
-            <select
-              className={`${select} w-full`}
-              value={branch}
-              onChange={(e) => setBranch(e.target.value)}
-            >
-              {tree.data!.branches.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
-        <RadioGroup
-          name="grading-mode"
-          label="Grading"
-          value={gradingMode}
-          onChange={setGradingMode}
-          options={[
-            { value: "auto", label: "Automatic", description: "Points and final review" },
-            { value: "none", label: "None", description: "No grades shown to students" },
-          ]}
-        />
-        <Tip
-          label={livePublished ? "The deadline strategy is fixed at publication" : null}
-          className="flex w-full"
-        >
-          <RadioGroup
-            name="deadline-strategy"
-            label="At deadline"
-            help="deadline-strategy"
-            className="w-full"
-            value={deadlineStrategy}
-            onChange={setDeadlineStrategy}
-            disabled={livePublished}
-            options={[
-              {
-                value: "lock",
-                label: "Lock the repository",
-                description: "Pushes blocked, repository read-only",
-              },
-              {
-                value: "commit",
-                label: "Deadline commit",
-                description: "Marker commit; late pushes stay visible",
-              },
-            ]}
-          />
-        </Tip>
-      </div>
-
-      {!existing && gradingMode === "auto" ? (
-        <div className="space-y-2">
-          <span className="flex items-center gap-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            <MilestoneIcon className="size-3.5 text-zinc-400" /> Milestones
-            <span className="font-normal text-zinc-400">
-              — intermediate reviews, n days before the deadline (criteria tagged{" "}
-              <code className="text-xs">milestone:</code>)
-            </span>
-          </span>
-          {milestones.map((m, i) => (
-            <div key={i} className="flex flex-wrap items-center gap-2">
-              <input
-                className={select}
-                placeholder="review-1"
-                aria-label="Milestone name"
-                value={m.name}
-                onChange={(e) =>
-                  setMilestones((rows) =>
-                    rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
-                  )
-                }
-                required
-              />
-              <input
-                type="number"
-                min={1}
-                max={365}
-                className={`${select} w-20`}
-                aria-label="Days before the deadline"
-                value={m.days}
-                onChange={(e) =>
-                  setMilestones((rows) =>
-                    rows.map((r, j) => (j === i ? { ...r, days: e.target.value } : r)),
-                  )
-                }
-                required
-              />
-              <span className="text-sm text-zinc-400">
-                days before the deadline
-                {milestoneDate(m.days) ? (
-                  <span className="text-zinc-500 dark:text-zinc-400"> → {milestoneDate(m.days)}</span>
-                ) : null}
-              </span>
-              <IconButton
-                label="Remove milestone"
-                type="button"
-                onClick={() => setMilestones((rows) => rows.filter((_, j) => j !== i))}
-              >
-                <Trash2 className="size-4" />
-              </IconButton>
-              {m.name !== "" && !milestoneName.test(m.name) ? (
-                <span className="text-xs text-amber-600 dark:text-amber-400">
-                  lowercase letters, digits, - and _
-                </span>
-              ) : null}
-            </div>
-          ))}
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => setMilestones((rows) => [...rows, { name: "", days: "7" }])}
-          >
-            <Plus className="size-4" /> Add milestone
-          </Button>
-        </div>
-      ) : null}
-
-      {existing?.state === "locked" ? (
-        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          This assignment has expired. Saving a deadline in the future <b>reopens</b> it:
-          repositories are unlocked, students can push again, and the grade freezes anew at
-          the new deadline (the previous frozen grade and LLM review are discarded).
-        </p>
-      ) : null}
-
-      {sourceRepo === "" ? (
-        <p className="text-sm text-zinc-400">
-          Pick a source repository to explore its content and choose protected files.
-        </p>
-      ) : tree.isFetching ? (
-        <Progress label={`Exploring ${sourceRepo}…`} />
-      ) : tree.data ? (
-        <div className="rounded-lg border border-zinc-200 dark:border-zinc-800">
-          {/* Collapsed by default: the suggestion is right in most cases. */}
-          <div className="flex w-full items-center gap-2 px-3 py-2 text-sm">
-            <button
+                <select
+                  className={`${select} w-full`}
+                  value={sourceRepo}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setName((n) => (n === "" || n === humanize(sourceRepo) ? humanize(next) : n));
+                    setSourceRepo(next);
+                  }}
+                  required
+                >
+                  <option value="" disabled>
+                    {repos.isLoading ? "Loading…" : "Pick a repository"}
+                  </option>
+                  {repos.data?.map((r) => (
+                    <option key={r.name} value={r.name}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <Button
               type="button"
+              variant="subtle"
+              disabled={!tree.data}
               onClick={() => setShowFiles((v) => !v)}
-              className="flex min-w-0 flex-1 items-center gap-2 text-left"
               aria-expanded={showFiles}
             >
-              <ChevronRight
-                className={`size-4 shrink-0 text-zinc-400 transition-transform ${showFiles ? "rotate-90" : ""}`}
-              />
-              <Lock className="size-3.5 shrink-0 text-zinc-400" />
-              <span>
-                {protectedFiles.size} file{protectedFiles.size === 1 ? "" : "s"} automatically
-                protected
-              </span>
-            </button>
-            <HelpIcon topic="protected-files" />
-            <span className="hidden items-center gap-2 text-xs text-zinc-400 sm:inline-flex">
-              <GitCommitHorizontal className="size-3.5" />
-              {tree.data.headSha.slice(0, 7)}
-              {tree.data.headDate ? ` · ${isoDateTime(tree.data.headDate)}` : ""}
-            </span>
+              <Lock className="size-3.5" /> Protect files
+            </Button>
           </div>
-          {showFiles ? (
-            <div className="space-y-2 border-t border-zinc-100 p-3 dark:border-zinc-800">
+          {sourceRepo === "" ? (
+            <p className="text-xs text-zinc-400">
+              Pick a source repository to browse its files and protect some of them.
+            </p>
+          ) : tree.isFetching ? (
+            <Progress label={`Exploring ${sourceRepo}…`} />
+          ) : tree.data ? (
+            <p className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+              {fileCount} file{fileCount === 1 ? "" : "s"} · {protectedFiles.size} protected —
+              student changes to protected files are reverted
+              <HelpIcon topic="protected-files" />
+            </p>
+          ) : null}
+          {showFiles && tree.data ? (
+            <div className={`${panel} space-y-2`}>
               <div className="flex flex-wrap items-center gap-2 text-sm">
                 <Badge tone="zinc" icon={GitBranch}>
                   {tree.data.defaultBranch}
@@ -747,8 +487,13 @@ export function AssignmentForm({
                     {tree.data.branches.length} branches
                   </span>
                 ) : null}
+                <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                  <GitCommitHorizontal className="size-3.5" />
+                  {tree.data.headSha.slice(0, 7)}
+                  {tree.data.headDate ? ` · ${isoDateTime(tree.data.headDate)}` : ""}
+                </span>
               </div>
-              <div className="max-h-64 overflow-y-auto rounded-lg border border-zinc-200 p-2 dark:border-zinc-800">
+              <div className="max-h-64 overflow-y-auto rounded-md bg-white p-2 dark:bg-zinc-900">
                 <TreeView
                   nodes={nodes}
                   checked={protectedFiles}
@@ -762,45 +507,355 @@ export function AssignmentForm({
                   }
                 />
               </div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Checked files are protected: any student change is automatically reverted.
-                {tree.data.truncated ? " (large repository — tree truncated)" : ""}
-              </p>
+              {tree.data.truncated ? (
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Large repository — tree truncated.
+                </p>
+              ) : null}
             </div>
           ) : null}
         </div>
-      ) : null}
 
-      <div className="flex items-center justify-end gap-3">
-        {error ? (
-          <span className="min-w-0 flex-1 text-sm text-red-600 dark:text-red-400">{error}</span>
-        ) : null}
-        <Button type="button" variant="ghost" onClick={onDone}>
-          Cancel
-        </Button>
-        <Button
-          disabled={
-            save.isPending ||
-            (!existing && !sourceRepo) ||
-            (durationOnly && durationMinutes < 15) ||
-            missingWhen ||
-            rangeInvalid ||
-            !milestonesValid
-          }
-        >
-          {save.isPending ? (
-            <>
-              <Loader2 className="size-4 animate-spin" />
-              {existing ? "Saving…" : "Creating squashed repository…"}
-            </>
-          ) : existing ? (
-            "Save changes"
+        {/* --- Timing: publication mode, deadline shape, dates --- */}
+        <div className="space-y-4 px-5 py-4">
+          {!livePublished ? (
+            <SettingRow
+              title="Goes live"
+              help="assignment-dates"
+              desc={
+                publishMode === "manual"
+                  ? "When you press Publish"
+                  : "At the start date, automatically"
+              }
+            >
+              <Segmented
+                name="publish-mode"
+                value={publishMode}
+                onChange={setPublishMode}
+                options={[
+                  { value: "manual", label: "Manually" },
+                  { value: "scheduled", label: "On a date" },
+                ]}
+              />
+            </SettingRow>
           ) : (
-            <>
-              <Plus className="size-4" /> Create assignment
-            </>
+            <SettingRow
+              title="Start & deadline"
+              help="assignment-dates"
+              desc="The assignment is live — dates stay editable"
+            />
           )}
-        </Button>
+          {!livePublished && publishMode === "manual" ? (
+            <SettingRow
+              title="Deadline"
+              desc={
+                deadlineKind === "date" ? "The same date for everyone" : "Counted from publication"
+              }
+            >
+              <Segmented
+                name="deadline-kind"
+                value={deadlineKind}
+                onChange={setDeadlineKind}
+                options={[
+                  { value: "date", label: "Fixed date" },
+                  { value: "duration", label: "Duration" },
+                ]}
+              />
+            </SettingRow>
+          ) : null}
+          {durationOnly ? (
+            <div className={`${panel} flex flex-wrap items-center gap-2.5`}>
+              <input
+                type="number"
+                min={0}
+                max={400}
+                className={`${select} w-16 text-center font-mono`}
+                aria-label="Days"
+                value={durationDays}
+                onChange={(e) => setDurationDays(e.target.value)}
+                required
+              />
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">days</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                className={`${select} w-16 text-center font-mono`}
+                aria-label="Hours"
+                value={durationHours}
+                onChange={(e) => setDurationHours(e.target.value)}
+                required
+              />
+              <span className="text-sm text-zinc-500 dark:text-zinc-400">hours</span>
+              <span
+                className={`ml-auto text-sm ${
+                  durationMinutes < 15
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-zinc-500 dark:text-zinc-400"
+                }`}
+              >
+                {durationMinutes < 15
+                  ? "At least 15 minutes"
+                  : `→ due ${compactDuration(durationMinutes * 60_000)} after you publish`}
+              </span>
+            </div>
+          ) : (
+            <div className={`${panel} space-y-3`}>
+              <RangeCalendar
+                mode={rangeMode ? "range" : "single"}
+                start={rangeMode ? startAt.slice(0, 10) : ""}
+                end={deadlineAt.slice(0, 10)}
+                onChange={(s, e) => {
+                  // The calendar owns the days; times survive a day change.
+                  if (rangeMode) setStartAt(s === "" ? "" : `${s}T${timeOf(startAt) || "08:00"}`);
+                  setDeadlineAt(e === "" ? "" : `${e}T${timeOf(deadlineAt) || "23:59"}`);
+                }}
+              />
+              <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+                {rangeMode ? (
+                  <Field
+                    label={livePublished ? "Start time" : "Start time (auto-publish)"}
+                    type="time"
+                    className="w-28"
+                    value={timeOf(startAt)}
+                    disabled={startAt === ""}
+                    onChange={(e) => setStartAt(`${startAt.slice(0, 10)}T${e.target.value}`)}
+                    required
+                  />
+                ) : null}
+                <Field
+                  label="Deadline time"
+                  type="time"
+                  className="w-28"
+                  value={timeOf(deadlineAt)}
+                  disabled={deadlineAt === ""}
+                  onChange={(e) => setDeadlineAt(`${deadlineAt.slice(0, 10)}T${e.target.value}`)}
+                  required
+                />
+                <p className="min-w-0 flex-1 pb-1.5 text-right text-sm">
+                  {rangeInvalid ? (
+                    <span className="text-amber-600 dark:text-amber-400">
+                      The deadline must come after the start.
+                    </span>
+                  ) : missingWhen ? (
+                    <span className="text-zinc-400">
+                      {rangeMode
+                        ? startAt === ""
+                          ? "Pick the start day, then the deadline."
+                          : deadlineAt === ""
+                            ? "Now pick the deadline day."
+                            : "Set the start and deadline times."
+                        : deadlineAt === ""
+                          ? "Pick the deadline day in the calendar."
+                          : "Set the deadline time."}
+                    </span>
+                  ) : rangeMode ? (
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      {isoDateTime(toIso(startAt))} → {isoDateTime(toIso(deadlineAt))}
+                      {" · "}
+                      {compactDuration(new Date(deadlineAt).getTime() - new Date(startAt).getTime())}
+                    </span>
+                  ) : (
+                    <span className="text-zinc-500 dark:text-zinc-400">
+                      Deadline {isoDateTime(toIso(deadlineAt))}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* --- Repository setup --- */}
+        <div className="space-y-3.5 px-5 py-4">
+          <p className={eyebrow}>Repository setup</p>
+          {!existing ? (
+            <SettingRow
+              title="Students receive"
+              help="distributed-source"
+              desc={
+                sourceStrategy === "squash"
+                  ? "Your commit history stays private"
+                  : "The full history is distributed as is"
+              }
+            >
+              <Segmented
+                name="source-strategy"
+                value={sourceStrategy}
+                onChange={setSourceStrategy}
+                options={[
+                  { value: "squash", label: "One commit" },
+                  { value: "whole", label: "Full history" },
+                ]}
+              />
+            </SettingRow>
+          ) : null}
+          {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
+            <SettingRow title="Branch to squash" help="squash-branch">
+              <select
+                className={select}
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+              >
+                {tree.data!.branches.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
+            </SettingRow>
+          ) : null}
+          <SettingRow
+            title="Grading"
+            desc={gradingMode === "auto" ? "Points and a final review" : "Students see no grades"}
+          >
+            <Segmented
+              name="grading-mode"
+              value={gradingMode}
+              onChange={setGradingMode}
+              options={[
+                { value: "auto", label: "Automatic" },
+                { value: "none", label: "No grades" },
+              ]}
+            />
+          </SettingRow>
+          <SettingRow
+            title="At the deadline"
+            help="deadline-strategy"
+            desc={
+              deadlineStrategy === "lock"
+                ? "Pushes blocked, repository read-only"
+                : "A marker commit; late pushes stay visible"
+            }
+          >
+            <Tip label={livePublished ? "The deadline strategy is fixed at publication" : null}>
+              <Segmented
+                name="deadline-strategy"
+                value={deadlineStrategy}
+                onChange={setDeadlineStrategy}
+                disabled={livePublished}
+                options={[
+                  { value: "lock", label: "Lock" },
+                  { value: "commit", label: "Mark and allow" },
+                ]}
+              />
+            </Tip>
+          </SettingRow>
+        </div>
+
+        {/* --- Milestones (creation only, graded assignments) --- */}
+        {!existing && gradingMode === "auto" ? (
+          <div className="space-y-2.5 px-5 py-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <span className={eyebrow}>Milestones — optional intermediate reviews</span>
+              <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
+                criteria tagged milestone:
+              </span>
+            </div>
+            {milestones.map((m, i) => (
+              <div key={i} className="flex flex-wrap items-center gap-2">
+                <input
+                  className={`${select} min-w-0 flex-1 font-mono`}
+                  placeholder="review-1"
+                  aria-label="Milestone name"
+                  value={m.name}
+                  onChange={(e) =>
+                    setMilestones((rows) =>
+                      rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
+                    )
+                  }
+                  required
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className={`${select} w-16 text-center font-mono`}
+                  aria-label="Days before the deadline"
+                  value={m.days}
+                  onChange={(e) =>
+                    setMilestones((rows) =>
+                      rows.map((r, j) => (j === i ? { ...r, days: e.target.value } : r)),
+                    )
+                  }
+                  required
+                />
+                <span className="whitespace-nowrap text-sm text-zinc-500 dark:text-zinc-400">
+                  days before
+                  {milestoneDate(m.days) ? ` → ${milestoneDate(m.days)}` : ""}
+                </span>
+                <IconButton
+                  label="Remove milestone"
+                  type="button"
+                  onClick={() => setMilestones((rows) => rows.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="size-4" />
+                </IconButton>
+                {m.name !== "" && !milestoneName.test(m.name) ? (
+                  <span className="w-full text-xs text-amber-600 dark:text-amber-400">
+                    lowercase letters, digits, - and _
+                  </span>
+                ) : null}
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => setMilestones((rows) => [...rows, { name: "", days: "7" }])}
+              className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:text-accent-hover"
+            >
+              <Plus className="size-4" /> Add milestone
+            </button>
+          </div>
+        ) : null}
+
+        {existing?.state === "locked" ? (
+          <div className="px-5 py-4">
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+              This assignment has expired. Saving a deadline in the future <b>reopens</b> it:
+              repositories are unlocked, students can push again, and the grade freezes anew at
+              the new deadline (the previous frozen grade and LLM review are discarded).
+            </p>
+          </div>
+        ) : null}
+
+        {/* --- Footer: state note (or error) + actions --- */}
+        <div className="flex items-center justify-between gap-3 bg-zinc-50 px-5 py-3 dark:bg-zinc-950/40">
+          {error ? (
+            <span className="min-w-0 text-xs text-red-600 dark:text-red-400">{error}</span>
+          ) : (
+            <span className="text-xs text-zinc-400 dark:text-zinc-500">
+              {livePublished
+                ? "The assignment is live — changes apply when you save"
+                : "Saved as a draft until you publish"}
+            </span>
+          )}
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" variant="ghost" onClick={onDone}>
+              Cancel
+            </Button>
+            <Button
+              disabled={
+                save.isPending ||
+                (!existing && !sourceRepo) ||
+                (durationOnly && durationMinutes < 15) ||
+                missingWhen ||
+                rangeInvalid ||
+                !milestonesValid
+              }
+            >
+              {save.isPending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  {existing ? "Saving…" : "Creating squashed repository…"}
+                </>
+              ) : existing ? (
+                "Save changes"
+              ) : (
+                "Create assignment"
+              )}
+            </Button>
+          </div>
+        </div>
       </div>
     </form>
   );

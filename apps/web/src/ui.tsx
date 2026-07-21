@@ -283,10 +283,19 @@ export function localDateTimeInputValue(date = new Date()): string {
 
 export function Modal({
   title,
+  subtitle,
+  narrow,
+  flush,
   onClose,
   children,
 }: {
   title: string;
+  /** Muted state line under the title ("Draft — nothing is published yet"). */
+  subtitle?: ReactNode;
+  /** 600px settings-sheet width instead of the default 768px. */
+  narrow?: boolean;
+  /** Children own the padding: full-bleed sections separated by hairlines. */
+  flush?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -299,10 +308,24 @@ export function Modal({
       aria-modal="true"
       aria-label={title}
     >
-      <div className="modal-panel mt-10 w-full max-w-3xl rounded-xl bg-white p-5 shadow-2xl dark:bg-zinc-900">
-        <div className="mb-4 flex items-center gap-2">
-          <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-          <span className="flex-1" />
+      <div
+        className={`modal-panel mt-10 w-full rounded-xl bg-white shadow-2xl dark:bg-zinc-900 ${
+          narrow ? "max-w-[600px]" : "max-w-3xl"
+        } ${flush ? "overflow-hidden" : "p-5"}`}
+      >
+        <div
+          className={
+            flush
+              ? "flex items-start gap-2 border-b border-zinc-200 px-5 pb-3.5 pt-4 dark:border-zinc-800"
+              : "mb-4 flex items-start gap-2"
+          }
+        >
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
+            {subtitle ? (
+              <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p>
+            ) : null}
+          </div>
           <button
             aria-label="Close"
             onClick={onClose}
@@ -441,62 +464,55 @@ export function EmptyState({
 }
 
 /**
- * Radio group for 2–3 mutually exclusive choices: every option is visible
- * (unlike a dropdown), and the plain native radio is the whole selected
- * state — no boxes, borders or fills, the form stays light. A `fieldset`
- * so `disabled` freezes every radio natively.
+ * Segmented control for 2–3 mutually exclusive choices: the selected chip is
+ * raised (surface + hairline border) — selection is structure, never color,
+ * the accent stays reserved for primary actions. Native radios underneath
+ * (sr-only) keep it a keyboard-accessible radiogroup.
  */
-export function RadioGroup<T extends string>({
+export function Segmented<T extends string>({
   name,
-  label,
-  help,
   value,
   options,
   onChange,
   disabled,
-  className = "",
 }: {
   /** Groups the native radios (one form can hold several groups). */
   name: string;
-  label: ReactNode;
-  help?: string;
   value: T;
-  options: { value: T; label: string; description?: string }[];
+  options: { value: T; label: string }[];
   onChange: (value: T) => void;
   disabled?: boolean;
-  className?: string;
 }) {
   return (
-    <fieldset className={`min-w-0 text-sm ${disabled ? "opacity-60" : ""} ${className}`} disabled={disabled}>
-      <legend className="mb-1.5 flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-        {label}
-        {help ? <HelpIcon topic={help} /> : null}
-      </legend>
-      <div className="space-y-2">
-        {options.map((o) => (
-          <label
-            key={o.value}
-            className={`flex items-start gap-2 ${disabled ? "" : "cursor-pointer"}`}
-          >
-            <input
-              type="radio"
-              name={name}
-              className="mt-0.5 accent-accent"
-              checked={value === o.value}
-              onChange={() => onChange(o.value)}
-            />
-            <span className="min-w-0">
-              <span className="block leading-5">{o.label}</span>
-              {o.description ? (
-                <span className="block text-xs leading-4 text-zinc-500 dark:text-zinc-400">
-                  {o.description}
-                </span>
-              ) : null}
-            </span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
+    <div
+      role="radiogroup"
+      className={`inline-flex shrink-0 gap-[3px] rounded-lg bg-zinc-100 p-[3px] dark:bg-zinc-800 ${
+        disabled ? "opacity-60" : ""
+      }`}
+    >
+      {options.map((o) => (
+        <label
+          key={o.value}
+          className={`rounded-md border px-3 py-1 text-[13px] leading-5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/50 ${
+            value === o.value
+              ? "border-zinc-300 bg-white text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+              : `border-transparent text-zinc-500 dark:text-zinc-400 ${
+                  disabled ? "" : "cursor-pointer hover:text-zinc-800 dark:hover:text-zinc-200"
+                }`
+          }`}
+        >
+          <input
+            type="radio"
+            name={name}
+            className="sr-only"
+            checked={value === o.value}
+            onChange={() => onChange(o.value)}
+            disabled={disabled}
+          />
+          {o.label}
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -573,7 +589,7 @@ export function RangeCalendar({
       type="button"
       aria-label={label}
       onClick={() => shift(delta)}
-      className={`rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${className}`}
+      className={`rounded-md p-1 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-200 ${className}`}
     >
       {delta < 0 ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
     </button>
@@ -610,7 +626,7 @@ export function RangeCalendar({
                     onClick={() => pick(day)}
                     onMouseEnter={() => setHover(day)}
                     aria-pressed={day === start || day === end}
-                    className={`h-8 w-9 text-sm tabular-nums transition-colors ${
+                    className={`h-8 w-8 text-sm tabular-nums transition-colors ${
                       (mode === "range" && day === start) || day === end
                         ? `bg-accent font-medium text-white ${
                             mode === "single" || !bandEnd || start === bandEnd
@@ -623,7 +639,7 @@ export function RangeCalendar({
                           ? "bg-accent/10 text-zinc-800 dark:text-zinc-200"
                           : day === bandEnd && picking
                             ? "rounded-r-md bg-accent/70 text-white"
-                            : `rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                            : `rounded-md hover:bg-zinc-200/70 dark:hover:bg-zinc-700/60 ${
                                 day === today ? "font-semibold text-accent" : ""
                               }`
                     }`}
