@@ -442,8 +442,9 @@ export function EmptyState({
 
 /**
  * Radio group for 2–3 mutually exclusive choices: every option is visible
- * (unlike a dropdown), the selected card is outlined in the accent color.
- * A `fieldset` so `disabled` freezes every radio natively.
+ * (unlike a dropdown), and the plain native radio is the whole selected
+ * state — no boxes, borders or fills, the form stays light. A `fieldset`
+ * so `disabled` freezes every radio natively.
  */
 export function RadioGroup<T extends string>({
   name,
@@ -467,17 +468,15 @@ export function RadioGroup<T extends string>({
 }) {
   return (
     <fieldset className={`min-w-0 text-sm ${disabled ? "opacity-60" : ""} ${className}`} disabled={disabled}>
-      <legend className="mb-1 flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+      <legend className="mb-1.5 flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
         {label}
         {help ? <HelpIcon topic={help} /> : null}
       </legend>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {options.map((o) => (
           <label
             key={o.value}
-            className={`flex items-start gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 shadow-sm transition-colors has-checked:border-accent/60 has-checked:bg-accent/5 has-checked:ring-1 has-checked:ring-accent/40 dark:border-zinc-700 dark:bg-zinc-900 ${
-              disabled ? "" : "cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600"
-            }`}
+            className={`flex items-start gap-2 ${disabled ? "" : "cursor-pointer"}`}
           >
             <input
               type="radio"
@@ -487,7 +486,7 @@ export function RadioGroup<T extends string>({
               onChange={() => onChange(o.value)}
             />
             <span className="min-w-0">
-              <span className="block font-medium leading-5">{o.label}</span>
+              <span className="block leading-5">{o.label}</span>
               {o.description ? (
                 <span className="block text-xs leading-4 text-zinc-500 dark:text-zinc-400">
                   {o.description}

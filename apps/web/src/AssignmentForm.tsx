@@ -490,7 +490,7 @@ export function AssignmentForm({
           )}
         </div>
       ) : (
-        <div className="space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+        <div className="space-y-3">
           <RangeCalendar
             mode={rangeMode ? "range" : "single"}
             start={rangeMode ? startAt.slice(0, 10) : ""}
@@ -501,7 +501,7 @@ export function AssignmentForm({
               setDeadlineAt(e === "" ? "" : `${e}T${timeOf(deadlineAt) || "23:59"}`);
             }}
           />
-          <div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
             {rangeMode ? (
               <Field
                 label={livePublished ? "Start time" : "Start time (auto-publish)"}

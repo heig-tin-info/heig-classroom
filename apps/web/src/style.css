@@ -117,18 +117,8 @@ html.ui-v2 .hgc-btn {
 html.ui-v2 .hgc-btn:active {
   transform: scale(0.96);
 }
-html.ui-v2
-  :is(
-    input[type="text"],
-    input[type="search"],
-    input[type="email"],
-    input[type="datetime-local"],
-    input:not([type]),
-    select,
-    textarea
-  ) {
-  border-radius: 0.75rem;
-}
+/* Inputs deliberately keep their Tailwind rounded-lg: a per-type override
+   here once left number/time fields with a different radius than text ones. */
 @supports (corner-shape: squircle) {
   html.ui-v2 .hgc-card,
   html.ui-v2 .modal-panel,
