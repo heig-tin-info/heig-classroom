@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Building2, Loader2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
@@ -436,6 +436,207 @@ export function EmptyState({
       {children ? (
         <p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">{children}</p>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Radio group for 2–3 mutually exclusive choices: every option is visible
+ * (unlike a dropdown), the selected card is outlined in the accent color.
+ * A `fieldset` so `disabled` freezes every radio natively.
+ */
+export function RadioGroup<T extends string>({
+  name,
+  label,
+  help,
+  value,
+  options,
+  onChange,
+  disabled,
+  className = "",
+}: {
+  /** Groups the native radios (one form can hold several groups). */
+  name: string;
+  label: ReactNode;
+  help?: string;
+  value: T;
+  options: { value: T; label: string; description?: string }[];
+  onChange: (value: T) => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <fieldset className={`min-w-0 text-sm ${disabled ? "opacity-60" : ""} ${className}`} disabled={disabled}>
+      <legend className="mb-1 flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
+        {label}
+        {help ? <HelpIcon topic={help} /> : null}
+      </legend>
+      <div className="space-y-1.5">
+        {options.map((o) => (
+          <label
+            key={o.value}
+            className={`flex items-start gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 shadow-sm transition-colors has-checked:border-accent/60 has-checked:bg-accent/5 has-checked:ring-1 has-checked:ring-accent/40 dark:border-zinc-700 dark:bg-zinc-900 ${
+              disabled ? "" : "cursor-pointer hover:border-zinc-300 dark:hover:border-zinc-600"
+            }`}
+          >
+            <input
+              type="radio"
+              name={name}
+              className="mt-0.5 accent-accent"
+              checked={value === o.value}
+              onChange={() => onChange(o.value)}
+            />
+            <span className="min-w-0">
+              <span className="block font-medium leading-5">{o.label}</span>
+              {o.description ? (
+                <span className="block text-xs leading-4 text-zinc-500 dark:text-zinc-400">
+                  {o.description}
+                </span>
+              ) : null}
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+// --- Range calendar (assignment start → deadline) ---
+
+const WEEKDAYS = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** Local "YYYY-MM-DD" key — comparable with plain string ordering. */
+export function localDateKey(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Days of a month as "YYYY-MM-DD" keys, padded with nulls to a Monday start. */
+function monthDays(year: number, month: number): (string | null)[] {
+  const offset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const count = new Date(year, month + 1, 0).getDate();
+  return [
+    ...Array.from({ length: offset }, () => null),
+    ...Array.from({ length: count }, (_, i) => localDateKey(new Date(year, month, i + 1))),
+  ];
+}
+
+/**
+ * Inline two-month calendar (one on mobile), Monday-first.
+ * - `mode="range"`: first click picks the start, second the end; the interval
+ *   is drawn as a continuous band. Clicking again restarts the selection, and
+ *   while the end is pending the hovered range is previewed.
+ * - `mode="single"`: one date only, carried in `end` (`start` is ignored).
+ * Dates are "YYYY-MM-DD" strings ("" = unset); time is not this component's
+ * concern — pair it with `type="time"` inputs.
+ */
+export function RangeCalendar({
+  start,
+  end,
+  mode,
+  onChange,
+}: {
+  start: string;
+  end: string;
+  mode: "range" | "single";
+  onChange: (start: string, end: string) => void;
+}) {
+  const today = localDateKey();
+  const anchor = (mode === "range" ? start : end) || end || today;
+  const [view, setView] = useState({
+    y: Number(anchor.slice(0, 4)),
+    m: Number(anchor.slice(5, 7)) - 1,
+  });
+  const [hover, setHover] = useState("");
+
+  const picking = mode === "range" && start !== "" && end === "";
+  // While picking the end, preview the band up to the hovered day.
+  const bandEnd = end || (picking && hover >= start ? hover : "");
+
+  const pick = (day: string) => {
+    if (mode === "single") onChange("", day);
+    else if (!start || end || day < start) onChange(day, "");
+    else onChange(start, day);
+  };
+
+  const shift = (delta: number) =>
+    setView(({ y, m }) => {
+      const n = y * 12 + m + delta;
+      return { y: Math.floor(n / 12), m: ((n % 12) + 12) % 12 };
+    });
+
+  const nav = (delta: number, label: string, className = "") => (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={() => shift(delta)}
+      className={`rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200 ${className}`}
+    >
+      {delta < 0 ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
+    </button>
+  );
+
+  return (
+    <div className="flex justify-center gap-8" onMouseLeave={() => setHover("")}>
+      {[0, 1].map((k) => {
+        const y = view.y + Math.floor((view.m + k) / 12);
+        const m = (view.m + k) % 12;
+        return (
+          <div key={k} className={k === 1 ? "hidden sm:block" : ""}>
+            <div className="mb-1 flex items-center justify-between">
+              {k === 0 ? nav(-1, "Previous month") : <span className="size-6" />}
+              <span className="text-sm font-medium">
+                {MONTH_NAMES[m]} {y}
+              </span>
+              {/* Right arrow lives on the last visible month (first on mobile). */}
+              {k === 0 ? nav(1, "Next month", "sm:invisible") : nav(1, "Next month")}
+            </div>
+            <div className="grid grid-cols-7 text-center">
+              {WEEKDAYS.map((d) => (
+                <span key={d} className="pb-1 text-xs font-medium text-zinc-400">
+                  {d}
+                </span>
+              ))}
+              {monthDays(y, m).map((day, i) =>
+                day === null ? (
+                  <span key={`pad-${i}`} />
+                ) : (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => pick(day)}
+                    onMouseEnter={() => setHover(day)}
+                    aria-pressed={day === start || day === end}
+                    className={`h-8 w-9 text-sm tabular-nums transition-colors ${
+                      (mode === "range" && day === start) || day === end
+                        ? `bg-accent font-medium text-white ${
+                            mode === "single" || !bandEnd || start === bandEnd
+                              ? "rounded-md"
+                              : day === start
+                                ? "rounded-l-md"
+                                : "rounded-r-md"
+                          }`
+                        : bandEnd !== "" && day > start && day < bandEnd && mode === "range"
+                          ? "bg-accent/10 text-zinc-800 dark:text-zinc-200"
+                          : day === bandEnd && picking
+                            ? "rounded-r-md bg-accent/70 text-white"
+                            : `rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+                                day === today ? "font-semibold text-accent" : ""
+                              }`
+                    }`}
+                  >
+                    {Number(day.slice(8, 10))}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

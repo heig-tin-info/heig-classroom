@@ -17,6 +17,7 @@ import type { Assignment, OrgRepo, RepoTree } from "@hgc/contracts";
 
 import { api, ApiError, apiErrorMessage } from "./api";
 import { HelpIcon } from "./help";
+import { useToast } from "./notify";
 import {
   Badge,
   Button,
@@ -25,8 +26,11 @@ import {
   humanize,
   IconButton,
   isoDateTime,
+  localDateKey,
   localDateTimeInputValue,
   Progress,
+  RadioGroup,
+  RangeCalendar,
   Tip,
   Z,
 } from "./ui";
@@ -113,6 +117,8 @@ function TreeView({
 
 const toIso = (local: string) => new Date(local).toISOString();
 const toLocalInput = (iso: string) => localDateTimeInputValue(new Date(iso));
+/** "HH:mm" of a datetime-local string, "" when unset. */
+const timeOf = (local: string) => (local.length >= 16 ? local.slice(11, 16) : "");
 
 // The backend provisions the squashed repository synchronously (create →
 // clone → squash → push), which takes several seconds. We can't stream real
@@ -173,6 +179,7 @@ export function AssignmentForm({
   onDone: () => void;
 }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [name, setName] = useState(existing?.name ?? "");
   const [sourceRepo, setSourceRepo] = useState(
     existing ? existing.sourceFullName.split("/")[1]! : "",
@@ -206,6 +213,21 @@ export function AssignmentForm({
   const durationPicked = publishMode === "manual" && deadlineKind === "duration";
   // Published/locked: the mode is frozen, only the absolute dates move (GH-43 reopen).
   const livePublished = existing !== undefined && existing.state !== "draft";
+  // Start + deadline both live in the calendar when the assignment has a real
+  // start; manual mode only picks a deadline (the start is the Publish click).
+  // Once published, even a duration-based assignment edits absolute dates.
+  const rangeMode = livePublished || publishMode === "scheduled";
+  const durationOnly = durationPicked && !livePublished;
+  // A value is complete once it holds both a day and a time ("…THH:mm"):
+  // clearing the time input leaves a bare "YYYY-MM-DDT" behind.
+  const whenSet = (v: string) => v.length >= 16;
+  const missingWhen = durationOnly
+    ? false
+    : (rangeMode && !whenSet(startAt)) || !whenSet(deadlineAt);
+  // The calendar enforces start ≤ deadline; a same-day range can still invert
+  // through the time inputs ("YYYY-MM-DDTHH:mm" compares as a plain string).
+  const rangeInvalid =
+    !durationOnly && rangeMode && whenSet(startAt) && whenSet(deadlineAt) && deadlineAt <= startAt;
   const [sourceStrategy, setSourceStrategy] = useState<"squash" | "whole">(
     existing?.sourceStrategy ?? "squash",
   );
@@ -225,6 +247,14 @@ export function AssignmentForm({
   const milestonesValid = milestones.every(
     (m) => milestoneName.test(m.name) && Number.parseInt(m.days, 10) >= 1,
   );
+  // Resolved calendar day of a milestone (deadline − n days), when it is known.
+  const milestoneDate = (days: string): string | null => {
+    const n = Number.parseInt(days, 10);
+    if (durationOnly || !whenSet(deadlineAt) || !(n >= 1)) return null;
+    const d = new Date(deadlineAt);
+    d.setDate(d.getDate() - n);
+    return localDateKey(d);
+  };
 
   const repos = useQuery<OrgRepo[]>({
     queryKey: ["org-repos", classroomId],
@@ -313,8 +343,9 @@ export function AssignmentForm({
         }
       }
       if (failures.length) {
-        window.alert(
-          `Assignment created, but some milestones could not be added:\n${failures.join("\n")}\nYou can add them from the assignment view.`,
+        toast(
+          `Assignment created, but some milestones could not be added (${failures.join("; ")}). You can add them from the assignment view.`,
+          "warning",
         );
       }
       return created;
@@ -389,127 +420,158 @@ export function AssignmentForm({
         />
       </div>
 
-      {livePublished ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Start"
+      {!livePublished ? (
+        <div className="grid items-start gap-3 sm:grid-cols-2">
+          <RadioGroup
+            name="publish-mode"
+            label="Publication"
             help="assignment-dates"
-            type="datetime-local"
-            value={startAt}
-            onChange={(e) => setStartAt(e.target.value)}
-            fullWidth
-            required
+            value={publishMode}
+            onChange={setPublishMode}
+            options={[
+              { value: "manual", label: "Manual", description: "Goes live when you press Publish" },
+              {
+                value: "scheduled",
+                label: "Scheduled",
+                description: "Published automatically at the start date",
+              },
+            ]}
           />
-          <Field
-            label="Deadline"
-            help="assignment-dates"
-            type="datetime-local"
-            value={deadlineAt}
-            onChange={(e) => setDeadlineAt(e.target.value)}
-            fullWidth
-            required
-          />
+          {publishMode === "manual" ? (
+            <RadioGroup
+              name="deadline-kind"
+              label="Deadline"
+              help="assignment-dates"
+              value={deadlineKind}
+              onChange={setDeadlineKind}
+              options={[
+                { value: "date", label: "Fixed date", description: "Same deadline for everyone" },
+                {
+                  value: "duration",
+                  label: "Duration",
+                  description: "Counted from the moment you publish",
+                },
+              ]}
+            />
+          ) : null}
         </div>
-      ) : (
-        <>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-                Publication <HelpIcon topic="assignment-dates" />
-              </span>
-              <select
-                className={`${select} w-full`}
-                value={publishMode}
-                onChange={(e) => setPublishMode(e.target.value as "scheduled" | "manual")}
-              >
-                <option value="manual">Manual — Publish button</option>
-                <option value="scheduled">Scheduled — goes live at start date</option>
-              </select>
-            </label>
-            {publishMode === "manual" ? (
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="font-medium text-zinc-700 dark:text-zinc-300">Deadline</span>
-                <select
-                  className={`${select} w-full`}
-                  value={deadlineKind}
-                  onChange={(e) => setDeadlineKind(e.target.value as "date" | "duration")}
-                >
-                  <option value="date">Fixed date</option>
-                  <option value="duration">Duration after publication</option>
-                </select>
-              </label>
-            ) : null}
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {publishMode === "scheduled" ? (
-              <Field
-                label="Start (auto-publish)"
-                help="assignment-dates"
-                type="datetime-local"
-                value={startAt}
-                onChange={(e) => setStartAt(e.target.value)}
-                fullWidth
-                required
-              />
-            ) : null}
-            {durationPicked ? (
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Days"
-                  type="number"
-                  min={0}
-                  max={400}
-                  value={durationDays}
-                  onChange={(e) => setDurationDays(e.target.value)}
-                  fullWidth
-                  required
-                />
-                <Field
-                  label="Hours"
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={durationHours}
-                  onChange={(e) => setDurationHours(e.target.value)}
-                  fullWidth
-                  required
-                />
-              </div>
-            ) : (
-              <Field
-                label="Deadline"
-                help="assignment-dates"
-                type="datetime-local"
-                value={deadlineAt}
-                onChange={(e) => setDeadlineAt(e.target.value)}
-                fullWidth
-                required
-              />
-            )}
-          </div>
-          {durationPicked && durationMinutes < 15 ? (
-            <p className="text-sm text-amber-600 dark:text-amber-400">
+      ) : null}
+
+      {durationOnly ? (
+        <div className="flex flex-wrap items-end gap-3">
+          <Field
+            label="Days"
+            type="number"
+            min={0}
+            max={400}
+            className="w-24"
+            value={durationDays}
+            onChange={(e) => setDurationDays(e.target.value)}
+            required
+          />
+          <Field
+            label="Hours"
+            type="number"
+            min={0}
+            max={23}
+            className="w-24"
+            value={durationHours}
+            onChange={(e) => setDurationHours(e.target.value)}
+            required
+          />
+          {durationMinutes < 15 ? (
+            <p className="pb-1.5 text-sm text-amber-600 dark:text-amber-400">
               The duration must be at least 15 minutes.
             </p>
-          ) : null}
-        </>
+          ) : (
+            <p className="pb-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              Deadline {compactDuration(durationMinutes * 60_000)} after publication.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3 rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+          <RangeCalendar
+            mode={rangeMode ? "range" : "single"}
+            start={rangeMode ? startAt.slice(0, 10) : ""}
+            end={deadlineAt.slice(0, 10)}
+            onChange={(s, e) => {
+              // The calendar owns the days; times survive a day change.
+              if (rangeMode) setStartAt(s === "" ? "" : `${s}T${timeOf(startAt) || "08:00"}`);
+              setDeadlineAt(e === "" ? "" : `${e}T${timeOf(deadlineAt) || "23:59"}`);
+            }}
+          />
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-2 border-t border-zinc-100 pt-3 dark:border-zinc-800">
+            {rangeMode ? (
+              <Field
+                label={livePublished ? "Start time" : "Start time (auto-publish)"}
+                type="time"
+                className="w-28"
+                value={timeOf(startAt)}
+                disabled={startAt === ""}
+                onChange={(e) => setStartAt(`${startAt.slice(0, 10)}T${e.target.value}`)}
+                required
+              />
+            ) : null}
+            <Field
+              label="Deadline time"
+              type="time"
+              className="w-28"
+              value={timeOf(deadlineAt)}
+              disabled={deadlineAt === ""}
+              onChange={(e) => setDeadlineAt(`${deadlineAt.slice(0, 10)}T${e.target.value}`)}
+              required
+            />
+            <p className="min-w-0 flex-1 pb-1.5 text-right text-sm">
+              {rangeInvalid ? (
+                <span className="text-amber-600 dark:text-amber-400">
+                  The deadline must come after the start.
+                </span>
+              ) : missingWhen ? (
+                <span className="text-zinc-400">
+                  {rangeMode
+                    ? startAt === ""
+                      ? "Pick the start day, then the deadline."
+                      : deadlineAt === ""
+                        ? "Now pick the deadline day."
+                        : "Set the start and deadline times."
+                    : deadlineAt === ""
+                      ? "Pick the deadline day in the calendar."
+                      : "Set the deadline time."}
+                </span>
+              ) : rangeMode ? (
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  {isoDateTime(toIso(startAt))} → {isoDateTime(toIso(deadlineAt))}
+                  {" · "}
+                  {compactDuration(new Date(deadlineAt).getTime() - new Date(startAt).getTime())}
+                </span>
+              ) : (
+                <span className="text-zinc-500 dark:text-zinc-400">
+                  Deadline {isoDateTime(toIso(deadlineAt))}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid items-start gap-3 sm:grid-cols-3">
         {!existing ? (
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-              Distributed source <HelpIcon topic="distributed-source" />
-            </span>
-            <select
-              className={`${select} w-full`}
-              value={sourceStrategy}
-              onChange={(e) => setSourceStrategy(e.target.value as "squash" | "whole")}
-            >
-              <option value="squash">Squash (single initial commit)</option>
-              <option value="whole">Whole history</option>
-            </select>
-          </label>
+          <RadioGroup
+            name="source-strategy"
+            label="Distributed source"
+            help="distributed-source"
+            value={sourceStrategy}
+            onChange={setSourceStrategy}
+            options={[
+              {
+                value: "squash",
+                label: "Squash",
+                description: "Single initial commit, history stays private",
+              },
+              { value: "whole", label: "Whole history", description: "Full history pushed as is" },
+            ]}
+          />
         ) : null}
         {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
           <label className="flex flex-col gap-1 text-sm">
@@ -529,42 +591,42 @@ export function AssignmentForm({
             </select>
           </label>
         ) : null}
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-            Grading
-          </span>
-          <select
-            className={`${select} w-full`}
-            value={gradingMode}
-            onChange={(e) => setGradingMode(e.target.value as "none" | "auto")}
-          >
-            <option value="auto">Automatic (points & review)</option>
-            <option value="none">None (no grades shown)</option>
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-            At deadline <HelpIcon topic="deadline-strategy" />
-          </span>
-          <Tip
-            label={
-              existing !== undefined && existing.state !== "draft"
-                ? "The deadline strategy is fixed at publication"
-                : null
-            }
-            className="flex w-full"
-          >
-            <select
-              className={`${select} w-full disabled:pointer-events-none`}
-              value={deadlineStrategy}
-              onChange={(e) => setDeadlineStrategy(e.target.value as "lock" | "commit")}
-              disabled={existing !== undefined && existing.state !== "draft"}
-            >
-              <option value="lock">Lock the repository</option>
-              <option value="commit">Deadline commit</option>
-            </select>
-          </Tip>
-        </label>
+        <RadioGroup
+          name="grading-mode"
+          label="Grading"
+          value={gradingMode}
+          onChange={setGradingMode}
+          options={[
+            { value: "auto", label: "Automatic", description: "Points and final review" },
+            { value: "none", label: "None", description: "No grades shown to students" },
+          ]}
+        />
+        <Tip
+          label={livePublished ? "The deadline strategy is fixed at publication" : null}
+          className="flex w-full"
+        >
+          <RadioGroup
+            name="deadline-strategy"
+            label="At deadline"
+            help="deadline-strategy"
+            className="w-full"
+            value={deadlineStrategy}
+            onChange={setDeadlineStrategy}
+            disabled={livePublished}
+            options={[
+              {
+                value: "lock",
+                label: "Lock the repository",
+                description: "Pushes blocked, repository read-only",
+              },
+              {
+                value: "commit",
+                label: "Deadline commit",
+                description: "Marker commit; late pushes stay visible",
+              },
+            ]}
+          />
+        </Tip>
       </div>
 
       {!existing && gradingMode === "auto" ? (
@@ -590,7 +652,6 @@ export function AssignmentForm({
                 }
                 required
               />
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">J−</span>
               <input
                 type="number"
                 min={1}
@@ -605,7 +666,12 @@ export function AssignmentForm({
                 }
                 required
               />
-              <span className="text-sm text-zinc-400">days before the deadline</span>
+              <span className="text-sm text-zinc-400">
+                days before the deadline
+                {milestoneDate(m.days) ? (
+                  <span className="text-zinc-500 dark:text-zinc-400"> → {milestoneDate(m.days)}</span>
+                ) : null}
+              </span>
               <IconButton
                 label="Remove milestone"
                 type="button"
@@ -716,7 +782,9 @@ export function AssignmentForm({
           disabled={
             save.isPending ||
             (!existing && !sourceRepo) ||
-            (durationPicked && durationMinutes < 15) ||
+            (durationOnly && durationMinutes < 15) ||
+            missingWhen ||
+            rangeInvalid ||
             !milestonesValid
           }
         >
