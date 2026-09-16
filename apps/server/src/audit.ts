@@ -43,6 +43,7 @@ export type AuditAction =
   | "org.installation_resolved"
   | "org.renamed"
   | "repo.deadline_archived"
+  | "repo.deleted"
   | "repo.grade_now"
   | "repo.grade_override"
   | "repo.lock"

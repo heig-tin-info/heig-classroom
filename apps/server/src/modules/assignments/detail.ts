@@ -56,7 +56,11 @@ export async function assignmentDetailRoutes(
 
       const live = new Map<string, RepoLiveState>();
 
-      const provisioned = repos.filter((r) => r.provisionStatus === "ok" && r.fullName);
+      // A repository known deleted (issue #10) is not fetched: the call can
+      // only 404, and `deleted_at` already tells the view what to render.
+      const provisioned = repos.filter(
+        (r) => r.provisionStatus === "ok" && r.fullName && !r.deletedAt,
+      );
       if (provisioned.length > 0 && owned.org.installationId !== null) {
         // Instrumentation for the planned live-state cache: N GitHub calls
         // per view; decide TTL vs SSE refresh on these numbers.
@@ -132,6 +136,9 @@ export async function assignmentDetailRoutes(
                     checksTotal: null,
                     ciStatus: repo.ciStatus,
                   }),
+                  // One visual state: the stored deletion (webhook or a 404
+                  // on a write path) and the live 404 render the same badge.
+                  missing: repo.deletedAt !== null || live.get(repo.id)?.missing === true,
                 }
               : null,
           };

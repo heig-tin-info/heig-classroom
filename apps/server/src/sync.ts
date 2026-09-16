@@ -7,7 +7,7 @@
  * open PR, so a retry after a partial failure is safe.
  */
 import type { FastifyInstance } from "fastify";
-import { and, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Octokit } from "octokit";
 
 import { audit } from "./audit.js";
@@ -16,6 +16,7 @@ import { assignments, botCommits, classrooms, organizations, studentRepos } from
 import { publish } from "./events.js";
 import { installationClient } from "./github/app.js";
 import { openSyncWorkspace, updateSquashedRepo } from "./github/sync.js";
+import { repoIsLive } from "./repos.js";
 
 export interface SyncJob {
   assignmentId: string;
@@ -113,8 +114,7 @@ export function makeSyncHandler(app: FastifyInstance, config: AppConfig) {
       .where(
         and(
           eq(studentRepos.assignmentId, a.id),
-          eq(studentRepos.provisionStatus, "ok"),
-          isNotNull(studentRepos.fullName),
+          repoIsLive(),
           isNull(studentRepos.lockedAt),
         ),
       );

@@ -12,7 +12,7 @@ import {
   users,
 } from "../db/schema.js";
 import { testApp, type TestDb } from "../test/db.js";
-import { handleInstallation, handleOrganization } from "./webhooks.js";
+import { handleInstallation, handleOrganization, handleRepository } from "./webhooks.js";
 
 const config = { PUBLIC_URL: "https://classroom.test", COOKIE_SECRET: "s" } as AppConfig;
 
@@ -52,6 +52,7 @@ async function seed(db: TestDb) {
     id: repoId,
     assignmentId,
     userId: studentId,
+    githubRepoId: 555,
     fullName: "heig-prg1/labo-1-student",
     provisionStatus: "ok",
   });
@@ -134,5 +135,36 @@ describe("handleInstallation (webhook `installation`)", () => {
     await handleInstallation(app, { action: "deleted", installation: { id: 12345 } });
     const [org] = await app.db.select().from(organizations).where(eq(organizations.id, orgId));
     expect(org!.installationId).toBe(99);
+  });
+});
+
+describe("handleRepository (webhook `repository`)", () => {
+  it("deleted: marks the student repository gone (issue #10)", async () => {
+    const app = await testApp();
+    const { repoId } = await seed(app.db);
+    await handleRepository(app, { action: "deleted", repository: { id: 555 } });
+    const [r] = await app.db.select().from(studentRepos).where(eq(studentRepos.id, repoId));
+    expect(r!.deletedAt).not.toBeNull();
+  });
+
+  it("renamed: follows the new full_name, the repo id being the reference", async () => {
+    const app = await testApp();
+    const { repoId } = await seed(app.db);
+    await handleRepository(app, {
+      action: "renamed",
+      repository: { id: 555, full_name: "heig-prg1/labo-1-student-bis" },
+    });
+    const [r] = await app.db.select().from(studentRepos).where(eq(studentRepos.id, repoId));
+    expect(r!.fullName).toBe("heig-prg1/labo-1-student-bis");
+    expect(r!.deletedAt).toBeNull();
+  });
+
+  it("ignores other actions and repositories unknown to the platform", async () => {
+    const app = await testApp();
+    const { repoId } = await seed(app.db);
+    await handleRepository(app, { action: "publicized", repository: { id: 555 } });
+    await handleRepository(app, { action: "deleted", repository: { id: 999999 } });
+    const [r] = await app.db.select().from(studentRepos).where(eq(studentRepos.id, repoId));
+    expect(r!.deletedAt).toBeNull();
   });
 });
