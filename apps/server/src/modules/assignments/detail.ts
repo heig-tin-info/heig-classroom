@@ -8,7 +8,7 @@ import { enrollments, gradeRuns, studentRepos, users } from "../../db/schema.js"
 import { installationClient } from "../../github/app.js";
 import { fetchRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
 import { gradeView, gradeViewsByIds } from "../../grading.js";
-import { ownedAssignment, ownedStudentRepo, teacherGuard } from "../guards.js";
+import { accessibleAssignment, accessibleStudentRepo, teacherGuard } from "../guards.js";
 
 export async function assignmentDetailRoutes(
   app: FastifyInstance,
@@ -24,9 +24,9 @@ export async function assignmentDetailRoutes(
     "/app/api/classrooms/:id/assignments/:aid/detail",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
-      const a = owned.assignment;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
+      const a = scope.assignment;
 
       const roster = await app.db
         .select({
@@ -57,11 +57,11 @@ export async function assignmentDetailRoutes(
       const live = new Map<string, RepoLiveState>();
 
       const provisioned = repos.filter((r) => r.provisionStatus === "ok" && r.fullName);
-      if (provisioned.length > 0 && owned.org.installationId !== null) {
+      if (provisioned.length > 0 && scope.org.installationId !== null) {
         // Instrumentation for the planned live-state cache: N GitHub calls
         // per view; decide TTL vs SSE refresh on these numbers.
         const liveStart = Date.now();
-        const client = await installationClient(config, owned.org.installationId);
+        const client = await installationClient(config, scope.org.installationId);
         await Promise.all(
           provisioned.map(async (r) => {
             try {
@@ -145,8 +145,8 @@ export async function assignmentDetailRoutes(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-runs",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const params = z.object({ rid: z.uuid() }).safeParse(req.params);
       if (!params.success) return reply.code(404).send({ error: "not_found" });
       const [repo] = await app.db
@@ -155,7 +155,7 @@ export async function assignmentDetailRoutes(
         .where(
           and(
             eq(studentRepos.id, params.data.rid),
-            eq(studentRepos.assignmentId, owned.assignment.id),
+            eq(studentRepos.assignmentId, scope.assignment.id),
           ),
         )
         .limit(1);
@@ -187,12 +187,12 @@ export async function assignmentDetailRoutes(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/activity",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedStudentRepo(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleStudentRepo(app, req, reply);
+      if (!scope) return reply;
       const empty = { commits: [], branches: [], tests: [] };
-      if (owned.org.installationId === null) return empty;
-      const client = await installationClient(config, owned.org.installationId);
-      const repoName = owned.repo.fullName!.split("/")[1]!;
+      if (scope.org.installationId === null) return empty;
+      const client = await installationClient(config, scope.org.installationId);
+      const repoName = scope.repo.fullName!.split("/")[1]!;
 
       // Test counters over time (TESTS annotation, score ≥ 0.7.2).
       const tests = await app.db
@@ -202,13 +202,13 @@ export async function assignmentDetailRoutes(
           total: gradeRuns.testsTotal,
         })
         .from(gradeRuns)
-        .where(and(eq(gradeRuns.studentRepoId, owned.repo.id), isNotNull(gradeRuns.testsTotal)))
+        .where(and(eq(gradeRuns.studentRepoId, scope.repo.id), isNotNull(gradeRuns.testsTotal)))
         .orderBy(gradeRuns.completedAt);
 
       try {
         const { data: branchData } = await client.octokit.request(
           "GET /repos/{owner}/{repo}/branches",
-          { owner: owned.org.login, repo: repoName, per_page: 10 },
+          { owner: scope.org.login, repo: repoName, per_page: 10 },
         );
         const branches = branchData.map((b) => ({ name: b.name, headSha: b.commit.sha }));
         // One listing per branch (capped), merged by sha: enough to draw the
@@ -219,7 +219,7 @@ export async function assignmentDetailRoutes(
         >();
         for (const branch of branches.slice(0, 6)) {
           const { data } = await client.octokit.request("GET /repos/{owner}/{repo}/commits", {
-            owner: owned.org.login,
+            owner: scope.org.login,
             repo: repoName,
             sha: branch.name,
             per_page: 100,

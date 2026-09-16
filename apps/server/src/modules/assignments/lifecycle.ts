@@ -21,7 +21,7 @@ import { zurichIso } from "../../github/commit.js";
 import { createSquashedRepo } from "../../github/squash.js";
 import { selectGradeRun } from "../../grading.js";
 import { classroomRecipients, queueEmail } from "../../mailer.js";
-import { ownedAssignment, ownedClassroomWithOrg, teacherGuard } from "../guards.js";
+import { accessibleAssignment, accessibleClassroomWithOrg, teacherGuard } from "../guards.js";
 import { resolveOffset } from "./milestones.js";
 import { clientFor } from "./shared.js";
 
@@ -107,8 +107,8 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleClassroomWithOrg(app, req, reply);
+      if (!scope) return reply;
       // ?archived=1 lists the archive instead of the active assignments.
       const archived = (req.query as { archived?: string }).archived === "1";
       return app.db
@@ -116,7 +116,7 @@ export async function assignmentLifecycleRoutes(
         .from(assignments)
         .where(
           and(
-            eq(assignments.classroomId, owned.room.id),
+            eq(assignments.classroomId, scope.room.id),
             archived ? isNotNull(assignments.archivedAt) : isNull(assignments.archivedAt),
           ),
         )
@@ -142,8 +142,8 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments/:aid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const body = AssignmentPatch.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
@@ -151,9 +151,9 @@ export async function assignmentLifecycleRoutes(
       // The two strategies are exclusive and fixed at publication (GH-42).
       // Re-sending the current value is fine: the edit form always posts it.
       if (
-        owned.assignment.state !== "draft" &&
+        scope.assignment.state !== "draft" &&
         body.data.deadlineStrategy &&
-        body.data.deadlineStrategy !== owned.assignment.deadlineStrategy
+        body.data.deadlineStrategy !== scope.assignment.deadlineStrategy
       ) {
         return reply.code(409).send({
           error: "strategy_frozen",
@@ -162,10 +162,10 @@ export async function assignmentLifecycleRoutes(
       }
       // Publication mode only matters before going live; freeze it after.
       if (
-        owned.assignment.state !== "draft" &&
-        ((body.data.publishMode && body.data.publishMode !== owned.assignment.publishMode) ||
+        scope.assignment.state !== "draft" &&
+        ((body.data.publishMode && body.data.publishMode !== scope.assignment.publishMode) ||
           (body.data.durationMinutes !== undefined &&
-            body.data.durationMinutes !== owned.assignment.durationMinutes))
+            body.data.durationMinutes !== scope.assignment.durationMinutes))
       ) {
         return reply.code(409).send({
           error: "publish_mode_frozen",
@@ -175,11 +175,11 @@ export async function assignmentLifecycleRoutes(
       const patch = { ...body.data };
       // A duration on a draft keeps a provisional deadline (now + duration)
       // so lists and the timeline stay meaningful; Publish recomputes it.
-      if (patch.durationMinutes != null && owned.assignment.state === "draft") {
+      if (patch.durationMinutes != null && scope.assignment.state === "draft") {
         patch.deadlineAt = new Date(Date.now() + patch.durationMinutes * 60_000);
       }
-      const nextStart = patch.startAt ?? owned.assignment.startAt;
-      const nextDeadline = patch.deadlineAt ?? owned.assignment.deadlineAt;
+      const nextStart = patch.startAt ?? scope.assignment.startAt;
+      const nextDeadline = patch.deadlineAt ?? scope.assignment.deadlineAt;
       if (nextDeadline <= nextStart) {
         return reply
           .code(400)
@@ -188,14 +188,14 @@ export async function assignmentLifecycleRoutes(
       const [updated] = await app.db
         .update(assignments)
         .set(patch)
-        .where(eq(assignments.id, owned.assignment.id))
+        .where(eq(assignments.id, scope.assignment.id))
         .returning();
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.update",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
         payload: body.data,
       });
 
@@ -209,10 +209,10 @@ export async function assignmentLifecycleRoutes(
       // deadline. Repositories archived in degraded mode (H8) stay archived.
       if (
         updated &&
-        owned.assignment.deadlineAppliedAt &&
+        scope.assignment.deadlineAppliedAt &&
         updated.deadlineAt.getTime() > Date.now()
       ) {
-        if (updated.deadlineStrategy === "lock" && owned.org.installationId !== null) {
+        if (updated.deadlineStrategy === "lock" && scope.org.installationId !== null) {
           const lockedRepos = await app.db
             .select()
             .from(studentRepos)
@@ -220,7 +220,7 @@ export async function assignmentLifecycleRoutes(
               and(eq(studentRepos.assignmentId, updated.id), isNotNull(studentRepos.lockedAt)),
             );
           if (lockedRepos.length > 0) {
-            const client = await installationClient(config, owned.org.installationId);
+            const client = await installationClient(config, scope.org.installationId);
             for (const repo of lockedRepos) {
               const [orgLogin, repoName] = repo.fullName!.split("/") as [string, string];
               try {
@@ -313,9 +313,9 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments/:aid/publish",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
-      if (owned.assignment.state !== "draft") {
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
+      if (scope.assignment.state !== "draft") {
         return reply
           .code(409)
           .send({ error: "not_draft", message: "Only draft assignments can be published" });
@@ -324,7 +324,7 @@ export async function assignmentLifecycleRoutes(
       // deadline = stored absolute date or now + duration. Scheduled drafts
       // published early keep their absolute dates.
       const now = new Date();
-      const a = owned.assignment;
+      const a = scope.assignment;
       const startAt = a.publishMode === "manual" ? now : a.startAt;
       const deadlineAt =
         a.publishMode === "manual" && a.durationMinutes != null
@@ -355,7 +355,7 @@ export async function assignmentLifecycleRoutes(
       for (const student of await classroomRecipients(app, a.classroomId)) {
         await queueEmail(app, config, student, "assignment.published", {
           assignmentName: a.name,
-          classroomName: owned.classroomName,
+          classroomName: scope.classroomName,
           deadlineAt: zurichIso(deadlineAt),
         });
       }
@@ -367,19 +367,19 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments/:aid/archive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const [updated] = await app.db
         .update(assignments)
         .set({ archivedAt: new Date() })
-        .where(eq(assignments.id, owned.assignment.id))
+        .where(eq(assignments.id, scope.assignment.id))
         .returning();
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.archive",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
       });
       return updated;
     },
@@ -389,19 +389,19 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments/:aid/unarchive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const [updated] = await app.db
         .update(assignments)
         .set({ archivedAt: null })
-        .where(eq(assignments.id, owned.assignment.id))
+        .where(eq(assignments.id, scope.assignment.id))
         .returning();
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.unarchive",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
       });
       return updated;
     },
@@ -411,30 +411,30 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments/:aid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
-      if (owned.assignment.state !== "draft") {
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
+      if (scope.assignment.state !== "draft") {
         return reply
           .code(409)
           .send({ error: "not_draft", message: "Only draft assignments can be deleted" });
       }
       // The squashed repository is deleted with the draft (no student repository exists).
-      if (owned.assignment.squashedFullName) {
-        const client = await clientFor(config, reply, owned.org);
+      if (scope.assignment.squashedFullName) {
+        const client = await clientFor(config, reply, scope.org);
         if (!client) return reply;
-        const [, repo] = owned.assignment.squashedFullName.split("/");
+        const [, repo] = scope.assignment.squashedFullName.split("/");
         await client.octokit
-          .request("DELETE /repos/{owner}/{repo}", { owner: owned.org.login, repo: repo! })
+          .request("DELETE /repos/{owner}/{repo}", { owner: scope.org.login, repo: repo! })
           .catch((err) => req.log.warn({ err }, "squashed deletion failed"));
       }
-      await app.db.delete(assignments).where(eq(assignments.id, owned.assignment.id));
+      await app.db.delete(assignments).where(eq(assignments.id, scope.assignment.id));
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.delete",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
-        payload: { name: owned.assignment.name, squashed: owned.assignment.squashedFullName },
+        subjectId: scope.assignment.id,
+        payload: { name: scope.assignment.name, squashed: scope.assignment.squashedFullName },
       });
       return reply.code(204).send();
     },
@@ -444,20 +444,20 @@ export async function assignmentLifecycleRoutes(
     "/app/api/classrooms/:id/assignments",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleClassroomWithOrg(app, req, reply);
+      if (!scope) return reply;
       const body = AssignmentCreate.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
       }
-      const client = await clientFor(config, reply, owned.org);
+      const client = await clientFor(config, reply, scope.org);
       if (!client) return reply;
 
       // The source repository must exist in the organization (GH-10).
       let source;
       try {
         const res = await client.octokit.request("GET /repos/{owner}/{repo}", {
-          owner: owned.org.login,
+          owner: scope.org.login,
           repo: body.data.sourceRepo,
           request: { retries: 0 },
         });
@@ -466,7 +466,7 @@ export async function assignmentLifecycleRoutes(
         if ((err as { status?: number }).status === 404) {
           return reply.code(400).send({
             error: "source_not_found",
-            message: `Repository ${body.data.sourceRepo} not found in ${owned.org.login}`,
+            message: `Repository ${body.data.sourceRepo} not found in ${scope.org.login}`,
           });
         }
         throw err;
@@ -485,7 +485,7 @@ export async function assignmentLifecycleRoutes(
           await app.db
             .select({ slug: assignments.slug })
             .from(assignments)
-            .where(eq(assignments.classroomId, owned.room.id))
+            .where(eq(assignments.classroomId, scope.room.id))
         ).map((r) => r.slug),
       );
       let slug = base;
@@ -513,7 +513,7 @@ export async function assignmentLifecycleRoutes(
             squashed = await createSquashedRepo({
               octokit: client.octokit,
               token: client.token,
-              org: owned.org.login,
+              org: scope.org.login,
               sourceRepo: source.name,
               targetRepo,
               strategy: body.data.sourceStrategy,
@@ -553,7 +553,7 @@ export async function assignmentLifecycleRoutes(
           .insert(assignments)
           .values({
             id: randomUUID(),
-            classroomId: owned.room.id,
+            classroomId: scope.room.id,
             name: body.data.name,
             slug,
             publishMode: body.data.publishMode,
@@ -586,7 +586,7 @@ export async function assignmentLifecycleRoutes(
         // was just created for nothing, delete it to stay replayable.
         await client.octokit
           .request("DELETE /repos/{owner}/{repo}", {
-            owner: owned.org.login,
+            owner: scope.org.login,
             repo: targetRepo,
           })
           .catch(() => {});

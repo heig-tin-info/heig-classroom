@@ -6,11 +6,13 @@ import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
-import { avatars, teacherGrants, users } from "../db/schema.js";
+import { avatars, users } from "../db/schema.js";
 import { isDateFormat, isEmailKind, type DateFormat } from "@hgc/contracts";
 
 import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
+import { claimStaffSeats } from "../modules/staff.js";
+import { roleForEmail } from "../roles.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
   CSRF_COOKIE,
@@ -32,25 +34,15 @@ declare module "fastify" {
 }
 
 /**
- * User upsert at login (key: oidc_sub). Role recomputed on every login:
- * admin (SUPER_ADMIN_EMAIL), teacher (database grant), otherwise student.
+ * User upsert at login (key: oidc_sub). The role is recomputed on every
+ * login through the single rule of roles.ts (grant or classroom staff).
  */
 async function upsertUser(
   app: FastifyInstance,
   config: AppConfig,
   claims: OidcClaims,
 ): Promise<SessionUser> {
-  let role: "student" | "teacher" | "admin" = "student";
-  if (config.SUPER_ADMIN_EMAIL && claims.email === config.SUPER_ADMIN_EMAIL) {
-    role = "admin";
-  } else {
-    const [grant] = await app.db
-      .select({ id: teacherGrants.id })
-      .from(teacherGrants)
-      .where(eq(teacherGrants.email, claims.email))
-      .limit(1);
-    if (grant) role = "teacher";
-  }
+  const role = await roleForEmail(app.db, config, claims.email);
   const now = new Date();
   const [row] = await app.db
     .insert(users)
@@ -169,9 +161,11 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     }
 
     const user = await upsertUser(app, config, claims);
-    // Automatic roster claim on verified email (AU-18, H3).
+    // Automatic roster claim on verified email (AU-18, H3); staff seats
+    // invited by e-mail (GH-9) are attached under the same condition.
     if (claims.emailVerified) {
       await claimEnrollments(app.db, { id: user.id, email: user.email });
+      await claimStaffSeats(app.db, { id: user.id, email: user.email });
     }
     const session = await createSession(app.db, user.id, config.SESSION_TTL_HOURS);
     await audit(app.db, {

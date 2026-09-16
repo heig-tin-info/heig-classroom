@@ -8,14 +8,17 @@ import {
   GraduationCap,
   Settings as SettingsIcon,
   Trash2,
+  UserMinus,
+  UserPlus,
   Users,
+  UsersRound,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
 
-import type { ClassroomDetail } from "@hgc/contracts";
+import type { ClassroomDetail, ClassroomStaffRole } from "@hgc/contracts";
 
-import { api, useMe } from "./api";
+import { api, apiErrorMessage, useMe } from "./api";
 import { AssignmentsCard } from "./AssignmentsCard";
 import { Breadcrumb } from "./Breadcrumb";
 import { HelpIcon } from "./help";
@@ -23,7 +26,18 @@ import { useT } from "./i18n";
 import type { Route } from "./router";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
-import { Badge, Button, Card, Field, GithubIcon, Modal, OrgAvatar, Spinner, Tip } from "./ui";
+import {
+  Badge,
+  Button,
+  Card,
+  Field,
+  GithubIcon,
+  Modal,
+  OrgAvatar,
+  Segmented,
+  Spinner,
+  Tip,
+} from "./ui";
 
 function ClassroomSettings({
   room,
@@ -79,44 +93,48 @@ function ClassroomSettings({
           </Button>
         </form>
 
-        <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">
-          <h3 className="mb-1 font-medium">Archive classroom</h3>
-          <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-            Removes the classroom from the interface for you and the students. Data and
-            GitHub repositories are kept.
-          </p>
-          <Button
-            variant="subtle"
-            onClick={() => {
-              if (window.confirm(`Archive “${room.name}”?`)) archive.mutate();
-            }}
-            disabled={archive.isPending}
-          >
-            <Archive className="size-4" /> Archive
-          </Button>
-        </div>
+        {room.isOwner ? (
+          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">
+            <h3 className="mb-1 font-medium">Archive classroom</h3>
+            <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+              Removes the classroom from the interface for you and the students. Data and
+              GitHub repositories are kept.
+            </p>
+            <Button
+              variant="subtle"
+              onClick={() => {
+                if (window.confirm(`Archive “${room.name}”?`)) archive.mutate();
+              }}
+              disabled={archive.isPending}
+            >
+              <Archive className="size-4" /> Archive
+            </Button>
+          </div>
+        ) : null}
 
-        <div className="rounded-lg bg-red-50 p-4 dark:bg-red-500/10">
-          <h3 className="mb-1 font-medium text-red-700 dark:text-red-400">Delete classroom</h3>
-          <p className="mb-3 text-sm text-red-700/80 dark:text-red-400/80">
-            Deletes the classroom, its roster and its assignments from the portal. GitHub
-            repositories are not touched. This cannot be undone.
-          </p>
-          <Button
-            onClick={() => {
-              if (
-                window.confirm(
-                  `Delete “${room.name}” permanently? Roster and assignments will be removed from the portal.`,
-                )
-              ) {
-                remove.mutate();
-              }
-            }}
-            disabled={remove.isPending}
-          >
-            <Trash2 className="size-4" /> Delete permanently
-          </Button>
-        </div>
+        {room.isOwner ? (
+          <div className="rounded-lg bg-red-50 p-4 dark:bg-red-500/10">
+            <h3 className="mb-1 font-medium text-red-700 dark:text-red-400">Delete classroom</h3>
+            <p className="mb-3 text-sm text-red-700/80 dark:text-red-400/80">
+              Deletes the classroom, its roster and its assignments from the portal. GitHub
+              repositories are not touched. This cannot be undone.
+            </p>
+            <Button
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Delete “${room.name}” permanently? Roster and assignments will be removed from the portal.`,
+                  )
+                ) {
+                  remove.mutate();
+                }
+              }}
+              disabled={remove.isPending}
+            >
+              <Trash2 className="size-4" /> Delete permanently
+            </Button>
+          </div>
+        ) : null}
       </div>
     </Modal>
   );
@@ -280,6 +298,122 @@ function FreePlanWarning({ orgLogin }: { orgLogin: string }) {
   );
 }
 
+/**
+ * Classroom staff (GH-9): the colleagues who co-teach this course. Every
+ * member does everything inside the classroom; the teacher/assistant role is
+ * a label. Only the owner edits the list — other members read it.
+ */
+function StaffCard({ room }: { room: ClassroomDetail }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState<ClassroomStaffRole>("teacher");
+  const refresh = () => qc.invalidateQueries({ queryKey: ["classroom", room.id] });
+
+  const add = useMutation({
+    mutationFn: () =>
+      api(`/app/api/classrooms/${room.id}/staff`, {
+        method: "POST",
+        body: JSON.stringify({ email, role }),
+      }),
+    onSuccess: () => {
+      setEmail("");
+      void refresh();
+    },
+  });
+  const remove = useMutation({
+    mutationFn: (sid: string) =>
+      api(`/app/api/classrooms/${room.id}/staff/${sid}`, { method: "DELETE" }),
+    onSuccess: () => void refresh(),
+  });
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
+        <UsersRound className="size-4 text-zinc-400" />
+        <h2 className="font-medium">{t("staff.title")}</h2>
+        <span className="flex-1" />
+        {room.isOwner ? null : (
+          <span className="text-xs text-zinc-400">{t("staff.readonly")}</span>
+        )}
+      </div>
+
+      {room.staff.length === 0 ? (
+        <p className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">{t("staff.empty")}</p>
+      ) : (
+        <ul className="divide-y divide-zinc-100/80 dark:divide-zinc-800/60">
+          {room.staff.map((m) => (
+            <li key={m.id} className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
+              <span className="font-medium">
+                {m.claimed ? `${m.givenName ?? ""} ${m.familyName ?? ""}`.trim() || m.email : m.email}
+              </span>
+              {m.claimed ? (
+                <span className="text-zinc-500 dark:text-zinc-400">{m.email}</span>
+              ) : (
+                <span className="text-xs text-zinc-400">{t("staff.pending")}</span>
+              )}
+              <span className="flex-1" />
+              <Badge tone="zinc">{t(`staff.role.${m.role}`)}</Badge>
+              {room.isOwner ? (
+                <Tip label={t("staff.remove")}>
+                  <Button
+                    variant="ghost"
+                    aria-label={t("staff.remove")}
+                    disabled={remove.isPending}
+                    onClick={() => {
+                      if (window.confirm(t("staff.confirmRemove", { email: m.email }))) {
+                        remove.mutate(m.id);
+                      }
+                    }}
+                  >
+                    <UserMinus className="size-4" />
+                  </Button>
+                </Tip>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {room.isOwner ? (
+        <form
+          className="flex flex-wrap items-end gap-3 border-t border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60"
+          onSubmit={(e) => {
+            e.preventDefault();
+            add.mutate();
+          }}
+        >
+          <Field
+            label={t("staff.email")}
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="prenom.nom@heig-vd.ch"
+            required
+          />
+          <Segmented
+            name="staff-role"
+            value={role}
+            onChange={setRole}
+            options={[
+              { value: "teacher", label: t("staff.role.teacher") },
+              { value: "assistant", label: t("staff.role.assistant") },
+            ]}
+          />
+          <Button disabled={add.isPending || email.trim() === ""}>
+            <UserPlus className="size-4" /> {t("staff.add")}
+          </Button>
+          {add.isError ? (
+            <p className="w-full text-sm text-red-600 dark:text-red-400">
+              {apiErrorMessage(add.error, "Could not add this e-mail")}
+            </p>
+          ) : null}
+        </form>
+      ) : null}
+    </Card>
+  );
+}
+
 export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
   const qc = useQueryClient();
@@ -403,6 +537,8 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       </Card>
 
       <RosterImport classroomId={room.id} />
+
+      <StaffCard room={room} />
     </div>
   );
 }
