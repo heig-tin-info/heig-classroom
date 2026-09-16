@@ -54,8 +54,10 @@ sans re-diagnostiquer.
   d'ajustement + bouton « Valider les notes » côté prof ; l'étudiant voit la
   note finale (badge « note finale ») une fois validée, l'ajustement reste
   privé avant. Export Excel (nom, prénom, email, note, source) dans la vue
-  assignment. Reste éventuel : email `grades.validated` aux étudiants, export
-  classroom-wide (étudiants × assignments).
+  assignment. Export classroom-wide (étudiants × assignments) : FAIT
+  (`GET /app/api/classrooms/:id/grades` + bouton « Grade sheet », base d'un
+  futur import GAPS — format inconnu, à demander au rapporteur). Reste
+  éventuel : email `grades.validated` aux étudiants.
 
 ## Refactoring — reste
 

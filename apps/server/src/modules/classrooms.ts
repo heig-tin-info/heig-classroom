@@ -18,6 +18,7 @@ import {
   orgExistsOnGithub,
   resolveOrgInstallation,
 } from "../github/app.js";
+import { classroomGrades } from "./grades.js";
 import { ownedClassroom, ownedEnrollment, teacherGuard } from "./guards.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
 
@@ -342,6 +343,19 @@ export async function classroomsPlugin(
       appSlug: config.GITHUB_APP_SLUG || null,
     };
   });
+
+  // Grade sheet of the whole classroom (roster x graded assignments): what a
+  // GAPS import — or any other transfer into the school's grade system —
+  // starts from. Read-only, database only.
+  app.get(
+    "/app/api/classrooms/:id/grades",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await ownedClassroom(app, req, reply);
+      if (!room) return reply;
+      return classroomGrades(app, room);
+    },
+  );
 
   app.post(
     "/app/api/classrooms/:id/archive",

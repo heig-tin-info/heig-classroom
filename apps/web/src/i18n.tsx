@@ -40,6 +40,10 @@ const en = {
   "menu.studentView": "Switch to student view",
   "menu.teacherView": "Back to teacher view",
 
+  "classroom.gradeSheet": "Grade sheet",
+  "classroom.gradeSheetTip":
+    "Download the grades of the whole classroom as an Excel sheet (students × assignments)",
+
   "roster.join": "Join as student",
   "roster.joined": "You have a seat in this classroom",
   "roster.staff": "staff",
@@ -232,6 +236,10 @@ const fr: Record<keyof Dict, string> = {
   "menu.user": "Menu utilisateur",
   "menu.studentView": "Passer en vue étudiant",
   "menu.teacherView": "Revenir à la vue enseignant",
+
+  "classroom.gradeSheet": "Feuille de notes",
+  "classroom.gradeSheetTip":
+    "Télécharger les notes de toute la classe en fichier Excel (étudiants × travaux)",
 
   "roster.join": "Me joindre comme étudiant",
   "roster.joined": "Vous avez une place dans cette classe",

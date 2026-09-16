@@ -35,6 +35,7 @@ import type {
   AssignmentMilestone,
   GradeView,
 } from "@hgc/contracts";
+import { finalPoints, resolveFinalGrade } from "@hgc/domain";
 
 import { ActivityPanel } from "./activity/ActivityPanel";
 import { api, ApiError } from "./api";
@@ -844,7 +845,7 @@ export function AssignmentDetail({
       case "commitCount":
         return s.repo?.commitCount ?? -1;
       case "grade":
-        return s.repo?.teacherPoints ?? s.repo?.llmGrade?.points ?? s.repo?.grade?.points ?? -1;
+        return s.repo ? (finalPoints(s.repo) ?? -1) : -1;
       case "status":
         return s.repo?.provisionStatus === "ok" ? 2 : s.claimStatus === "claimed" ? 1 : 0;
     }
@@ -868,21 +869,17 @@ export function AssignmentDetail({
   // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
   const canAdjust = showGrades && a.frozenAt != null;
 
-  // Grades sheet (nom, prénom, email, note) — final = teacher ?? LLM ?? frozen CI.
+  // Grades sheet (nom, prénom, email, note) — final grade rule: @hgc/domain.
   const exportGrades = async () => {
     const XLSX = await import("xlsx");
     const rows = students.map((s) => {
-      const r = s.repo;
-      const llm = r?.llmGrade?.parseStatus === "ok" ? r.llmGrade.points : null;
-      const ci = r?.frozenGrade?.parseStatus === "ok" ? r.frozenGrade.points : (r?.grade?.parseStatus === "ok" ? r.grade.points : null);
-      const final = r?.teacherPoints ?? llm ?? ci;
+      const final = s.repo ? resolveFinalGrade(s.repo) : null;
       return {
         Nom: s.nom,
         "Prénom": s.prenom,
         Email: s.email,
-        Note: final ?? "",
-        Source:
-          r?.teacherPoints != null ? "teacher" : llm != null ? "llm" : ci != null ? "ci" : "",
+        Note: final?.points ?? "",
+        Source: final?.source ?? "",
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);

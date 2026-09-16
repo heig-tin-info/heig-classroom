@@ -15,6 +15,7 @@ import {
 import { useEffect, useState } from "react";
 
 import type { Me, StudentAssignment, StudentClassroom, StudentRepo } from "@hgc/contracts";
+import { resolveFinalGrade } from "@hgc/domain";
 
 import { api, ApiError, apiErrorMessage } from "./api";
 import { GradeScale, TestDonut } from "./charts";
@@ -41,13 +42,10 @@ function Countdown({ deadline }: { deadline: string }) {
 }
 
 /** Validation flow: the grade a student sees once the teacher signed off —
-    teacher adjustment first, else the LLM review, else the CI grade. */
+    same rule as everywhere else (@hgc/domain), on a default /6 scale. */
 function finalGrade(repo: StudentRepo): { points: number; max: number } | null {
-  const llm = repo.llmGrade?.parseStatus === "ok" ? repo.llmGrade : null;
-  const ci = repo.grade?.parseStatus === "ok" ? repo.grade : null;
-  const points = repo.teacherPoints ?? llm?.points ?? ci?.points;
-  if (points == null) return null;
-  return { points, max: llm?.max ?? ci?.max ?? 6 };
+  const final = resolveFinalGrade(repo);
+  return final ? { points: final.points, max: final.max ?? 6 } : null;
 }
 
 /** Metrics row for an accepted repository: commits, CI donut, grade scale. */

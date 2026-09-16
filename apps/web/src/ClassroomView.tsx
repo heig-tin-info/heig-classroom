@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  FileSpreadsheet,
   GraduationCap,
   Settings as SettingsIcon,
   Trash2,
@@ -13,7 +14,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import type { ClassroomDetail } from "@hgc/contracts";
+import type { ClassroomDetail, ClassroomGradesPayload } from "@hgc/contracts";
 
 import { api, useMe } from "./api";
 import { AssignmentsCard } from "./AssignmentsCard";
@@ -289,6 +290,32 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
   });
+  // Grade sheet (issue #4): roster x graded assignments, the sheet a GAPS
+  // import starts from. Fetched on click — nothing to prefetch on open.
+  const gradeSheet = useMutation({
+    mutationFn: async () => {
+      const data = await api<ClassroomGradesPayload>(`/app/api/classrooms/${id}/grades`);
+      const XLSX = await import("xlsx");
+      const header = [
+        "Nom",
+        "Prénom",
+        "Email",
+        ...data.assignments.map((a) =>
+          a.gradesValidatedAt ? a.name : `${a.name} (not validated)`,
+        ),
+      ];
+      const rows = data.students.map((s) => [
+        s.nom,
+        s.prenom,
+        s.email,
+        ...data.assignments.map((a) => s.points[a.id] ?? ""),
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([header, ...rows]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Notes");
+      XLSX.writeFile(wb, `${data.classroom.name} — grades.xlsx`);
+    },
+  });
   const join = useMutation({
     mutationFn: () => api(`/app/api/classrooms/${id}/self-enroll`, { method: "POST" }),
     onSuccess: () => {
@@ -348,6 +375,16 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             GitHub App not installed
           </Badge>
         )}
+        <Tip label={t("classroom.gradeSheetTip")}>
+          <Button
+            variant="ghost"
+            aria-label={t("classroom.gradeSheet")}
+            onClick={() => gradeSheet.mutate()}
+            disabled={gradeSheet.isPending}
+          >
+            <FileSpreadsheet className="size-4" /> {t("classroom.gradeSheet")}
+          </Button>
+        </Tip>
         <Tip label="Classroom settings">
           <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
             <SettingsIcon className="size-4" />
