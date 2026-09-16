@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Clock,
   Download,
+  FileCode,
   GitCommitHorizontal,
   GitPullRequest,
   History,
@@ -37,6 +38,7 @@ import type {
 
 import { ActivityPanel } from "./activity/ActivityPanel";
 import { api, ApiError } from "./api";
+import { buildCloneScript, cloneScriptFileName } from "./cloneScript";
 import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
@@ -889,6 +891,29 @@ export function AssignmentDetail({
     XLSX.writeFile(wb, `${a.name} — notes.xlsx`);
   };
 
+  // Clone script (issue #3): one bash file for the whole assignment, built
+  // from the repositories this page already knows about — no server round
+  // trip, no `gh` dependency.
+  const downloadCloneScript = () => {
+    const repos = students
+      .map((s) => s.repo)
+      .filter((r) => r != null && r.provisionStatus === "ok" && r.fullName != null && !r.missing)
+      .map((r) => r!.fullName!);
+    const script = buildCloneScript({
+      assignmentName: a.name,
+      slug: a.slug,
+      classroomName: a.classroom,
+      repos,
+      generatedAt: new Date(),
+    });
+    const url = URL.createObjectURL(new Blob([script], { type: "text/x-shellscript" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = cloneScriptFileName(a.slug);
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   // La recherche trie déjà par pertinence.
   const rows = query.trim() !== "" ? shown : sorted;
 
@@ -922,6 +947,15 @@ export function AssignmentDetail({
           {t("assignment.accepted", { n: accepted, total: students.length })}
         </Badge>
         <span className="flex-1" />
+        <Tip label={t("assignment.cloneScriptTip")}>
+          <Button
+            variant="ghost"
+            aria-label={t("assignment.cloneScript")}
+            onClick={downloadCloneScript}
+          >
+            <FileCode className="size-4" /> {t("assignment.cloneScript")}
+          </Button>
+        </Tip>
         {showGrades ? (
           <Tip label={t("assignment.exportTip")}>
             <Button variant="ghost" aria-label={t("assignment.export")} onClick={() => void exportGrades()}>

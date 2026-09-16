@@ -153,6 +153,9 @@ const en = {
     "Validate the grades? Students will see their final grade (teacher adjustments included).",
   "assignment.export": "Export",
   "assignment.exportTip": "Download the grades as an Excel sheet",
+  "assignment.cloneScript": "Clone script",
+  "assignment.cloneScriptTip":
+    "Download a bash script that clones (or pulls) every student repository, and pushes them back with the `push` argument",
   "assignment.gradeNowStarted": "Grading started — the grade will appear when the run completes",
   "assignment.gradeNowUnsupported": "This repository's grading workflow does not support manual runs",
   "assignment.lockRepo": "Lock repository (block pushes)",
@@ -343,6 +346,9 @@ const fr: Record<keyof Dict, string> = {
     "Valider les notes ? Les étudiants verront leur note finale (ajustements compris).",
   "assignment.export": "Exporter",
   "assignment.exportTip": "Télécharger les notes en fichier Excel",
+  "assignment.cloneScript": "Script de clonage",
+  "assignment.cloneScriptTip":
+    "Télécharger un script bash qui clone (ou met à jour) tous les dépôts des étudiants, et les pousse avec l’argument « push »",
   "assignment.gradeNowStarted": "Correction lancée — la note apparaîtra à la fin du run",
   "assignment.gradeNowUnsupported": "Le workflow de correction de ce dépôt ne permet pas le lancement manuel",
   "assignment.lockRepo": "Verrouiller le dépôt (bloque les pushs)",

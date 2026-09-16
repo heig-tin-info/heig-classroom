@@ -206,6 +206,10 @@ export interface AssignmentDetailPayload {
   assignment: {
     id: string;
     name: string;
+    /** Used client-side to name the generated clone script. */
+    slug: string;
+    /** Classroom name, for the header of the generated clone script. */
+    classroom: string;
     state: AssignmentState;
     startAt: string;
     deadlineAt: string;
