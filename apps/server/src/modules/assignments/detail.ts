@@ -94,7 +94,9 @@ export async function assignmentDetailRoutes(
       }
 
       return {
-        assignment: a,
+        // `classroom`: the detail page names the generated clone script after
+        // the assignment and stamps the classroom in its header.
+        assignment: { ...a, classroom: owned.classroomName },
         students: roster.map((s) => {
           const repo = s.userId ? repos.find((r) => r.userId === s.userId) : undefined;
           return {

@@ -206,6 +206,10 @@ export interface AssignmentDetailPayload {
   assignment: {
     id: string;
     name: string;
+    /** Used client-side to name the generated clone script. */
+    slug: string;
+    /** Classroom name, for the header of the generated clone script. */
+    classroom: string;
     state: AssignmentState;
     startAt: string;
     deadlineAt: string;
@@ -221,6 +225,34 @@ export interface AssignmentDetailPayload {
     syncedAt: string | null;
   };
   students: AssignmentDetailStudent[];
+}
+
+// --- Classroom grade sheet (teacher): roster x graded assignments ---
+
+export interface ClassroomGradesAssignment {
+  id: string;
+  name: string;
+  deadlineAt: string;
+  /** Null = the teacher has not signed the grades off yet (provisional). */
+  gradesValidatedAt: string | null;
+}
+
+export interface ClassroomGradesStudent {
+  enrollmentId: string;
+  nom: string;
+  prenom: string;
+  email: string;
+  status: "pending" | "claimed";
+  /** Final points per assignment id; missing/null = no grade for that one. */
+  points: Record<string, number | null>;
+}
+
+export interface ClassroomGradesPayload {
+  classroom: { id: string; name: string };
+  /** Graded, non-archived assignments, oldest deadline first. */
+  assignments: ClassroomGradesAssignment[];
+  /** Non-staff roster, ordered by name. */
+  students: ClassroomGradesStudent[];
 }
 
 // --- Milestones (intermediate reviews, dispatched at due_at) ---

@@ -40,6 +40,10 @@ const en = {
   "menu.studentView": "Switch to student view",
   "menu.teacherView": "Back to teacher view",
 
+  "classroom.gradeSheet": "Grade sheet",
+  "classroom.gradeSheetTip":
+    "Download the grades of the whole classroom as an Excel sheet (students × assignments)",
+
   "roster.join": "Join as student",
   "roster.joined": "You have a seat in this classroom",
   "roster.staff": "staff",
@@ -153,6 +157,9 @@ const en = {
     "Validate the grades? Students will see their final grade (teacher adjustments included).",
   "assignment.export": "Export",
   "assignment.exportTip": "Download the grades as an Excel sheet",
+  "assignment.cloneScript": "Clone script",
+  "assignment.cloneScriptTip":
+    "Download a bash script that clones (or pulls) every student repository, and pushes them back with the `push` argument",
   "assignment.gradeNowStarted": "Grading started — the grade will appear when the run completes",
   "assignment.gradeNowUnsupported": "This repository's grading workflow does not support manual runs",
   "assignment.lockRepo": "Lock repository (block pushes)",
@@ -229,6 +236,10 @@ const fr: Record<keyof Dict, string> = {
   "menu.user": "Menu utilisateur",
   "menu.studentView": "Passer en vue étudiant",
   "menu.teacherView": "Revenir à la vue enseignant",
+
+  "classroom.gradeSheet": "Feuille de notes",
+  "classroom.gradeSheetTip":
+    "Télécharger les notes de toute la classe en fichier Excel (étudiants × travaux)",
 
   "roster.join": "Me joindre comme étudiant",
   "roster.joined": "Vous avez une place dans cette classe",
@@ -343,6 +354,9 @@ const fr: Record<keyof Dict, string> = {
     "Valider les notes ? Les étudiants verront leur note finale (ajustements compris).",
   "assignment.export": "Exporter",
   "assignment.exportTip": "Télécharger les notes en fichier Excel",
+  "assignment.cloneScript": "Script de clonage",
+  "assignment.cloneScriptTip":
+    "Télécharger un script bash qui clone (ou met à jour) tous les dépôts des étudiants, et les pousse avec l’argument « push »",
   "assignment.gradeNowStarted": "Correction lancée — la note apparaîtra à la fin du run",
   "assignment.gradeNowUnsupported": "Le workflow de correction de ce dépôt ne permet pas le lancement manuel",
   "assignment.lockRepo": "Verrouiller le dépôt (bloque les pushs)",

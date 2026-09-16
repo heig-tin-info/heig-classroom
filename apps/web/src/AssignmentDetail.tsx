@@ -9,6 +9,7 @@ import {
   ClipboardCheck,
   Clock,
   Download,
+  FileCode,
   GitCommitHorizontal,
   GitPullRequest,
   History,
@@ -34,9 +35,11 @@ import type {
   AssignmentMilestone,
   GradeView,
 } from "@hgc/contracts";
+import { finalPoints, resolveFinalGrade } from "@hgc/domain";
 
 import { ActivityPanel } from "./activity/ActivityPanel";
 import { api, ApiError } from "./api";
+import { buildCloneScript, cloneScriptFileName } from "./cloneScript";
 import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
@@ -845,7 +848,7 @@ export function AssignmentDetail({
       case "commitCount":
         return s.repo?.commitCount ?? -1;
       case "grade":
-        return s.repo?.teacherPoints ?? s.repo?.llmGrade?.points ?? s.repo?.grade?.points ?? -1;
+        return s.repo ? (finalPoints(s.repo) ?? -1) : -1;
       case "status":
         return s.repo?.provisionStatus === "ok" ? 2 : s.claimStatus === "claimed" ? 1 : 0;
     }
@@ -869,27 +872,46 @@ export function AssignmentDetail({
   // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
   const canAdjust = showGrades && a.frozenAt != null;
 
-  // Grades sheet (nom, prénom, email, note) — final = teacher ?? LLM ?? frozen CI.
+  // Grades sheet (nom, prénom, email, note) — final grade rule: @hgc/domain.
   const exportGrades = async () => {
     const XLSX = await import("xlsx");
     const rows = students.map((s) => {
-      const r = s.repo;
-      const llm = r?.llmGrade?.parseStatus === "ok" ? r.llmGrade.points : null;
-      const ci = r?.frozenGrade?.parseStatus === "ok" ? r.frozenGrade.points : (r?.grade?.parseStatus === "ok" ? r.grade.points : null);
-      const final = r?.teacherPoints ?? llm ?? ci;
+      const final = s.repo ? resolveFinalGrade(s.repo) : null;
       return {
         Nom: s.nom,
         "Prénom": s.prenom,
         Email: s.email,
-        Note: final ?? "",
-        Source:
-          r?.teacherPoints != null ? "teacher" : llm != null ? "llm" : ci != null ? "ci" : "",
+        Note: final?.points ?? "",
+        Source: final?.source ?? "",
       };
     });
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Notes");
     XLSX.writeFile(wb, `${a.name} — notes.xlsx`);
+  };
+
+  // Clone script (issue #3): one bash file for the whole assignment, built
+  // from the repositories this page already knows about — no server round
+  // trip, no `gh` dependency.
+  const downloadCloneScript = () => {
+    const repos = students
+      .map((s) => s.repo)
+      .filter((r) => r != null && r.provisionStatus === "ok" && r.fullName != null && !r.missing)
+      .map((r) => r!.fullName!);
+    const script = buildCloneScript({
+      assignmentName: a.name,
+      slug: a.slug,
+      classroomName: a.classroom,
+      repos,
+      generatedAt: new Date(),
+    });
+    const url = URL.createObjectURL(new Blob([script], { type: "text/x-shellscript" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = cloneScriptFileName(a.slug);
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   // La recherche trie déjà par pertinence.
@@ -925,6 +947,15 @@ export function AssignmentDetail({
           {t("assignment.accepted", { n: accepted, total: students.length })}
         </Badge>
         <span className="flex-1" />
+        <Tip label={t("assignment.cloneScriptTip")}>
+          <Button
+            variant="ghost"
+            aria-label={t("assignment.cloneScript")}
+            onClick={downloadCloneScript}
+          >
+            <FileCode className="size-4" /> {t("assignment.cloneScript")}
+          </Button>
+        </Tip>
         {showGrades ? (
           <Tip label={t("assignment.exportTip")}>
             <Button variant="ghost" aria-label={t("assignment.export")} onClick={() => void exportGrades()}>
