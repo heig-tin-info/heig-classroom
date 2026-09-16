@@ -291,13 +291,16 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                       {t("classrooms.archived")}
                     </Badge>
                     <span className="flex-1" />
-                    <Button
-                      variant="subtle"
-                      onClick={() => unarchive.mutate(c.id)}
-                      disabled={unarchive.isPending}
-                    >
-                      <ArchiveRestore className="size-4" /> {t("classrooms.restore")}
-                    </Button>
+                    {/* Restoring is the owner's call (GH-9). */}
+                    {c.isOwner ? (
+                      <Button
+                        variant="subtle"
+                        onClick={() => unarchive.mutate(c.id)}
+                        disabled={unarchive.isPending}
+                      >
+                        <ArchiveRestore className="size-4" /> {t("classrooms.restore")}
+                      </Button>
+                    ) : null}
                   </div>
                   <p className="mt-1 flex items-center gap-2 text-sm text-zinc-500 dark:text-zinc-400">
                     <OrgLink login={c.orgLogin} />

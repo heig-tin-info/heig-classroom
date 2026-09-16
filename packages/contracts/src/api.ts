@@ -48,6 +48,8 @@ export interface ClassroomSummary {
   orgLogin: string;
   createdAt: string;
   archivedAt: string | null;
+  /** The viewer created this classroom; false for one they only co-teach. */
+  isOwner: boolean;
   students: number;
   claimed: number;
   assignments: {
@@ -74,6 +76,25 @@ export interface RosterEntry {
   hasUploadedAvatar: boolean;
 }
 
+/**
+ * Classroom staff (GH-9): the additional teachers/assistants of a classroom,
+ * beside its owner. `role` is a label — every member holds the same rights
+ * inside the classroom; only the owner manages this list.
+ */
+export type ClassroomStaffRole = "teacher" | "assistant";
+
+export interface ClassroomStaffMember {
+  id: string;
+  email: string;
+  role: ClassroomStaffRole;
+  /** Filled once the invited e-mail matched an account (null otherwise). */
+  givenName: string | null;
+  familyName: string | null;
+  /** The invitation was resolved to a real account. */
+  claimed: boolean;
+  createdAt: string;
+}
+
 export interface ClassroomDetail {
   id: string;
   name: string;
@@ -94,6 +115,10 @@ export interface ClassroomDetail {
     llmSecret: "ok" | "missing" | null;
   } | null;
   roster: RosterEntry[];
+  staff: ClassroomStaffMember[];
+  /** The viewer created this classroom (or is an admin): may manage staff,
+      archive and delete it. Other staff members see those read-only. */
+  isOwner: boolean;
   appSlug: string | null;
 }
 

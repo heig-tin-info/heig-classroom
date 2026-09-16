@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 
 import { classrooms, enrollments } from "../db/schema.js";
 import { subscribe } from "../events.js";
+import { staffAccess } from "./guards.js";
 
 /**
  * SSE stream (ADR-005): unidirectional, session cookies reused,
@@ -19,10 +20,12 @@ export async function eventsPlugin(app: FastifyInstance) {
       const topics = new Set<string>([`user:${me.id}`]);
       if (me.role === "teacher" || me.role === "admin") {
         topics.add(`teacher:${me.id}`);
+        // Same access predicate as the guards: a co-teacher receives the
+        // classroom hints of every classroom they work in (GH-9).
         const rooms = await app.db
           .select({ id: classrooms.id })
           .from(classrooms)
-          .where(eq(classrooms.teacherId, me.id));
+          .where(staffAccess(me.id));
         for (const r of rooms) topics.add(`classroom:${r.id}`);
       } else {
         const rooms = await app.db

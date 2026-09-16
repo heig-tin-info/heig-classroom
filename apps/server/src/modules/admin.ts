@@ -7,6 +7,7 @@ import { z } from "zod";
 import { audit } from "../audit.js";
 import type { AppConfig } from "../config.js";
 import { classrooms, scheduledTasks, teacherGrants, users } from "../db/schema.js";
+import { syncUserRole } from "../roles.js";
 import { TASK_DEFS, taskDef } from "../tasks.js";
 import { adminGuard } from "./guards.js";
 import { TASK_QUEUE } from "../jobs.js";
@@ -65,10 +66,7 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
         .send({ error: "already_teacher", message: "This e-mail is already a teacher" });
     }
     // Immediate effect if the account already exists (otherwise: at first login).
-    await app.db
-      .update(users)
-      .set({ role: "teacher" })
-      .where(sql`lower(${users.email}) = ${email} AND ${users.role} = 'student'`);
+    await syncUserRole(app.db, config, email);
     await audit(app.db, {
       actorUserId: req.user!.id,
       actorType: "user",
@@ -96,10 +94,9 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
       if (!grant) return reply.code(404).send({ error: "not_found" });
       await app.db.delete(teacherGrants).where(eq(teacherGrants.id, grant.id));
       // Immediate demotion; their classrooms stay in the database, untouched.
-      await app.db
-        .update(users)
-        .set({ role: "student" })
-        .where(sql`lower(${users.email}) = ${grant.email} AND ${users.role} = 'teacher'`);
+      // Recomputed, not forced: staff of someone else's classroom (GH-9)
+      // keeps the teacher role.
+      await syncUserRole(app.db, config, grant.email);
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",

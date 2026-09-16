@@ -15,7 +15,7 @@ import { audit } from "../../audit.js";
 import type { AppConfig } from "../../config.js";
 import { assignmentMilestones } from "../../db/schema.js";
 import { publish } from "../../events.js";
-import { ownedAssignment, teacherGuard } from "../guards.js";
+import { accessibleAssignment, teacherGuard } from "../guards.js";
 
 export const DAY_MS = 86_400_000;
 
@@ -60,12 +60,12 @@ export async function assignmentMilestoneRoutes(
     "/app/api/classrooms/:id/assignments/:aid/milestones",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const rows = await app.db
         .select()
         .from(assignmentMilestones)
-        .where(eq(assignmentMilestones.assignmentId, owned.assignment.id))
+        .where(eq(assignmentMilestones.assignmentId, scope.assignment.id))
         .orderBy(asc(assignmentMilestones.dueAt));
       return rows.map(view);
     },
@@ -75,25 +75,25 @@ export async function assignmentMilestoneRoutes(
     "/app/api/classrooms/:id/assignments/:aid/milestones",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const body = MilestoneCreate.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
       }
       const dueAt =
         body.data.offsetDays !== undefined
-          ? resolveOffset(owned.assignment.deadlineAt, body.data.offsetDays)
+          ? resolveOffset(scope.assignment.deadlineAt, body.data.offsetDays)
           : body.data.dueAt!;
       // A past date on a LIVE assignment would fire at the next tick:
       // surprising, refuse it. On a draft it is harmless — the ticker never
       // dispatches drafts and offsets are re-resolved at publication.
-      if (owned.assignment.state !== "draft" && dueAt.getTime() <= Date.now()) {
+      if (scope.assignment.state !== "draft" && dueAt.getTime() <= Date.now()) {
         return reply
           .code(400)
           .send({ error: "due_past", message: "The milestone date is in the past" });
       }
-      if (dueAt.getTime() >= owned.assignment.deadlineAt.getTime()) {
+      if (dueAt.getTime() >= scope.assignment.deadlineAt.getTime()) {
         return reply.code(400).send({
           error: "due_after_deadline",
           message: "A milestone must be before the deadline",
@@ -103,7 +103,7 @@ export async function assignmentMilestoneRoutes(
         .insert(assignmentMilestones)
         .values({
           id: randomUUID(),
-          assignmentId: owned.assignment.id,
+          assignmentId: scope.assignment.id,
           name: body.data.name,
           dueAt,
           offsetDays: body.data.offsetDays ?? null,
@@ -121,10 +121,10 @@ export async function assignmentMilestoneRoutes(
         actorType: "user",
         action: "milestone.create",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
         payload: { name: row.name, dueAt: row.dueAt, offsetDays: row.offsetDays },
       });
-      publish("assignments", [`classroom:${owned.assignment.classroomId}`]);
+      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
       return reply.code(201).send(view(row));
     },
   );
@@ -133,8 +133,8 @@ export async function assignmentMilestoneRoutes(
     "/app/api/classrooms/:id/assignments/:aid/milestones/:mid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
       const params = z.object({ mid: z.uuid() }).safeParse(req.params);
       if (!params.success) return reply.code(404).send({ error: "not_found" });
       const [gone] = await app.db
@@ -142,7 +142,7 @@ export async function assignmentMilestoneRoutes(
         .where(
           and(
             eq(assignmentMilestones.id, params.data.mid),
-            eq(assignmentMilestones.assignmentId, owned.assignment.id),
+            eq(assignmentMilestones.assignmentId, scope.assignment.id),
           ),
         )
         .returning();
@@ -152,10 +152,10 @@ export async function assignmentMilestoneRoutes(
         actorType: "user",
         action: "milestone.delete",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
         payload: { name: gone.name, dispatched: gone.dispatchedAt !== null },
       });
-      publish("assignments", [`classroom:${owned.assignment.classroomId}`]);
+      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
       return reply.code(204).send();
     },
   );

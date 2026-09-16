@@ -132,6 +132,45 @@ export const classrooms = pgTable("classrooms", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * Additional staff of a classroom (GH-9): courses run by several teachers,
+ * with or without assistants. `classrooms.teacher_id` stays the owner (the
+ * creator); these rows are the co-workers. Granted by email like
+ * `teacher_grants`, so a colleague can be added before they ever logged in;
+ * `user_id` is resolved at insert when the account exists, otherwise at
+ * their next login (claimStaffSeats).
+ */
+export const classroomStaff = pgTable(
+  "classroom_staff",
+  {
+    id: uuid("id").primaryKey(),
+    classroomId: uuid("classroom_id")
+      .notNull()
+      .references(() => classrooms.id, { onDelete: "cascade" }),
+    /** Normalized (trim + lowercase), like the roster (AU-14). */
+    email: text("email").notNull(),
+    /**
+     * Informational label only: teachers and assistants hold exactly the
+     * same rights inside the classroom. No permission matrix until a real
+     * need shows up (YAGNI).
+     */
+    role: text("role", { enum: ["teacher", "assistant"] })
+      .notNull()
+      .default("teacher"),
+    userId: uuid("user_id").references(() => users.id),
+    invitedBy: uuid("invited_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("classroom_staff_classroom_email_uq").on(t.classroomId, t.email),
+    // Access predicate lookup (guards.ts staffAccess).
+    index("classroom_staff_user_idx").on(t.userId),
+    index("classroom_staff_email_idx").on(t.email),
+  ],
+);
+
 export const enrollments = pgTable(
   "enrollments",
   {

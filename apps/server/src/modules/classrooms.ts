@@ -19,8 +19,15 @@ import {
   resolveOrgInstallation,
 } from "../github/app.js";
 import { classroomGrades } from "./grades.js";
-import { ownedClassroom, ownedEnrollment, teacherGuard } from "./guards.js";
+import {
+  accessibleClassroom,
+  accessibleEnrollment,
+  isOwner,
+  staffAccess,
+  teacherGuard,
+} from "./guards.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
+import { addStaffMember, removeStaffMember, staffView } from "./staff.js";
 
 const RowsBody = z.object({
   rows: z
@@ -142,6 +149,7 @@ export async function classroomsPlugin(
         id: classrooms.id,
         name: classrooms.name,
         orgLogin: organizations.login,
+        teacherId: classrooms.teacherId,
         createdAt: classrooms.createdAt,
         archivedAt: classrooms.archivedAt,
         // Staff seats (teacher self-enroll) are not part of the headcount.
@@ -153,7 +161,8 @@ export async function classroomsPlugin(
       .leftJoin(enrollments, eq(enrollments.classroomId, classrooms.id))
       .where(
         and(
-          eq(classrooms.teacherId, req.user!.id),
+          // Same predicate as the guards: owned or co-taught classrooms (GH-9).
+          staffAccess(req.user!.id),
           archived ? isNotNull(classrooms.archivedAt) : isNull(classrooms.archivedAt),
         ),
       )
@@ -190,8 +199,11 @@ export async function classroomsPlugin(
           .where(inArray(enrollments.classroomId, ids))
           .orderBy(enrollments.nom, enrollments.prenom)
       : [];
-    return rows.map((r) => ({
+    return rows.map(({ teacherId, ...r }) => ({
       ...r,
+      // Owner-only actions (restore, delete) stay hidden on a co-taught
+      // classroom — same rule as the server's `isOwner` (GH-9).
+      isOwner: isOwner(req, { teacherId }),
       assignments: assigns
         .filter((a) => a.classroomId === r.id)
         .map(({ classroomId: _c, ...a }) => a),
@@ -237,7 +249,7 @@ export async function classroomsPlugin(
   });
 
   app.get("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(app, req, reply);
+    const room = await accessibleClassroom(app, req, reply);
     if (!room) return reply;
     let [org] = await app.db
       .select({
@@ -340,6 +352,10 @@ export async function classroomsPlugin(
       ...room,
       org: org ? { ...org, exists: orgExists, llmSecret } : org,
       roster,
+      // Co-teachers/assistants (GH-9); `isOwner` drives the read-only state
+      // of the section — no extra round-trip for a handful of rows.
+      staff: await staffView(app.db, room.id),
+      isOwner: isOwner(req, room),
       appSlug: config.GITHUB_APP_SLUG || null,
     };
   });
@@ -351,7 +367,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/grades",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(app, req, reply);
+      const room = await accessibleClassroom(app, req, reply);
       if (!room) return reply;
       return classroomGrades(app, room);
     },
@@ -361,8 +377,10 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/archive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(app, req, reply);
+      const room = await accessibleClassroom(app, req, reply);
       if (!room) return reply;
+      // Owner-only (GH-9): the rest of the classroom is open to the staff.
+      if (!isOwner(req, room)) return reply.code(403).send({ error: "forbidden" });
       await app.db
         .update(classrooms)
         .set({ archivedAt: new Date() })
@@ -383,8 +401,10 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/unarchive",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(app, req, reply);
+      const room = await accessibleClassroom(app, req, reply);
       if (!room) return reply;
+      // Owner-only (GH-9): the rest of the classroom is open to the staff.
+      if (!isOwner(req, room)) return reply.code(403).send({ error: "forbidden" });
       await app.db
         .update(classrooms)
         .set({ archivedAt: null })
@@ -409,7 +429,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/self-enroll",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(app, req, reply);
+      const room = await accessibleClassroom(app, req, reply);
       if (!room) return reply;
       const me = req.user!;
       try {
@@ -448,6 +468,83 @@ export async function classroomsPlugin(
     },
   );
 
+  // --- Classroom staff (GH-9): co-teachers and assistants ---
+  // Reading the list comes with ClassroomDetail; only the owner (or an
+  // admin) may change it, everything else in the classroom is open to the
+  // whole staff.
+
+  const StaffBody = z.object({
+    email: z.email(),
+    role: z.enum(["teacher", "assistant"]).default("teacher"),
+  });
+  const StaffParam = z.object({ id: z.uuid(), sid: z.uuid() });
+
+  app.post("/app/api/classrooms/:id/staff", { preHandler: requireTeacher }, async (req, reply) => {
+    const room = await accessibleClassroom(app, req, reply);
+    if (!room) return reply;
+    if (!isOwner(req, room)) return reply.code(403).send({ error: "forbidden" });
+    const body = StaffBody.safeParse(req.body);
+    if (!body.success) {
+      return reply.code(400).send({ error: "validation", message: "A valid e-mail is required" });
+    }
+    const res = await addStaffMember(app.db, config, {
+      classroomId: room.id,
+      ownerId: room.teacherId,
+      email: body.data.email,
+      role: body.data.role,
+      invitedBy: req.user!.id,
+    });
+    if (!res.ok) {
+      return reply.code(409).send({
+        error: res.error,
+        message:
+          res.error === "is_owner"
+            ? "This e-mail owns the classroom"
+            : "This e-mail is already on the staff",
+      });
+    }
+    await audit(app.db, {
+      actorUserId: req.user!.id,
+      actorType: "user",
+      action: "classroom.staff_add",
+      subjectType: "classroom",
+      subjectId: room.id,
+      payload: { email: res.member.email, role: res.member.role },
+    });
+    // `classroom:<id>` is already published by the app-wide mutation hook;
+    // the new member's own topic is what refreshes THEIR classroom list
+    // (their SSE topic set was computed before they had access).
+    if (res.member.userId) publish("mutation", [`user:${res.member.userId}`]);
+    return reply.code(201).send(res.member);
+  });
+
+  app.delete(
+    "/app/api/classrooms/:id/staff/:sid",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await accessibleClassroom(app, req, reply);
+      if (!room) return reply;
+      if (!isOwner(req, room)) return reply.code(403).send({ error: "forbidden" });
+      const params = StaffParam.safeParse(req.params);
+      if (!params.success) return reply.code(404).send({ error: "not_found" });
+      const removed = await removeStaffMember(app.db, config, {
+        classroomId: room.id,
+        id: params.data.sid,
+      });
+      if (!removed) return reply.code(404).send({ error: "not_found" });
+      await audit(app.db, {
+        actorUserId: req.user!.id,
+        actorType: "user",
+        action: "classroom.staff_remove",
+        subjectType: "classroom",
+        subjectId: room.id,
+        payload: { email: removed.email, role: removed.role },
+      });
+      if (removed.userId) publish("mutation", [`user:${removed.userId}`]);
+      return reply.code(204).send();
+    },
+  );
+
   // --- Roster editing, entry by entry ---
 
   const EnrollmentPatch = z
@@ -462,7 +559,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster/:eid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(app, req, reply);
+      const entry = await accessibleEnrollment(app, req, reply);
       if (!entry) return reply;
       const body = EnrollmentPatch.safeParse(req.body);
       if (!body.success) {
@@ -507,7 +604,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster/:eid/unclaim",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(app, req, reply);
+      const entry = await accessibleEnrollment(app, req, reply);
       if (!entry) return reply;
       const [updated] = await app.db
         .update(enrollments)
@@ -530,7 +627,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster/:eid",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const entry = await ownedEnrollment(app, req, reply);
+      const entry = await accessibleEnrollment(app, req, reply);
       if (!entry) return reply;
       await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
       await audit(app.db, {
@@ -546,7 +643,7 @@ export async function classroomsPlugin(
   );
 
   app.patch("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(app, req, reply);
+    const room = await accessibleClassroom(app, req, reply);
     if (!room) return reply;
     const body = z.object({ name: z.string().min(1).max(200) }).safeParse(req.body);
     if (!body.success) {
@@ -569,8 +666,10 @@ export async function classroomsPlugin(
   });
 
   app.delete("/app/api/classrooms/:id", { preHandler: requireTeacher }, async (req, reply) => {
-    const room = await ownedClassroom(app, req, reply);
+    const room = await accessibleClassroom(app, req, reply);
     if (!room) return reply;
+    // Owner-only (GH-9), like archiving.
+    if (!isOwner(req, room)) return reply.code(403).send({ error: "forbidden" });
     await app.db.delete(classrooms).where(eq(classrooms.id, room.id));
     await audit(app.db, {
       actorUserId: req.user!.id,
@@ -587,7 +686,7 @@ export async function classroomsPlugin(
     "/app/api/classrooms/:id/roster",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const room = await ownedClassroom(app, req, reply);
+      const room = await accessibleClassroom(app, req, reply);
       if (!room) return reply;
       // Two forms: raw CSV (text/csv) or tabular {rows} lines (JSON),
       // typically extracted from an Excel file client-side.

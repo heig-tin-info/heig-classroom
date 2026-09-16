@@ -11,7 +11,7 @@ import type { AppConfig } from "../../config.js";
 import { assignments, studentRepos } from "../../db/schema.js";
 import { lockStudentRepo, unlockStudentRepo } from "../../github/lock.js";
 import { SYNC_QUEUE } from "../../jobs.js";
-import { ownedAssignment, ownedClassroomWithOrg, ownedStudentRepo, teacherGuard } from "../guards.js";
+import { accessibleAssignment, accessibleClassroomWithOrg, accessibleStudentRepo, teacherGuard } from "../guards.js";
 import { clientFor } from "./shared.js";
 
 /** Files pre-checked as protected if they exist in the source (GH-30). */
@@ -29,12 +29,12 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/org-repos",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(app, req, reply);
-      if (!owned) return reply;
-      const client = await clientFor(config, reply, owned.org);
+      const scope = await accessibleClassroomWithOrg(app, req, reply);
+      if (!scope) return reply;
+      const client = await clientFor(config, reply, scope.org);
       if (!client) return reply;
       const { data } = await client.octokit.request("GET /orgs/{org}/repos", {
-        org: owned.org.login,
+        org: scope.org.login,
         sort: "pushed",
         direction: "desc",
         per_page: 100,
@@ -57,12 +57,12 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/org-repos/:repo/tree",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedClassroomWithOrg(app, req, reply);
-      if (!owned) return reply;
-      const client = await clientFor(config, reply, owned.org);
+      const scope = await accessibleClassroomWithOrg(app, req, reply);
+      if (!scope) return reply;
+      const client = await clientFor(config, reply, scope.org);
       if (!client) return reply;
       const repo = z.string().min(1).max(200).parse((req.params as { repo: string }).repo);
-      const owner = owned.org.login;
+      const owner = scope.org.login;
       let repoData;
       try {
         const res = await client.octokit.request("GET /repos/{owner}/{repo}", {
@@ -119,9 +119,9 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/assignments/:aid/sync",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
-      const a = owned.assignment;
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
+      const a = scope.assignment;
       if (a.state === "draft" || a.archivedAt) {
         return reply
           .code(409)
@@ -155,28 +155,28 @@ export async function assignmentActionRoutes(
       `/app/api/classrooms/:id/assignments/:aid/repos/:rid/${action}`,
       { preHandler: requireTeacher },
       async (req, reply) => {
-        const owned = await ownedStudentRepo(app, req, reply);
-        if (!owned) return reply;
-        const client = await clientFor(config, reply, owned.org);
+        const scope = await accessibleStudentRepo(app, req, reply);
+        if (!scope) return reply;
+        const client = await clientFor(config, reply, scope.org);
         if (!client) return reply;
-        const repoName = owned.repo.fullName!.split("/")[1]!;
+        const repoName = scope.repo.fullName!.split("/")[1]!;
         if (action === "lock") {
-          await lockStudentRepo(client.octokit, owned.org.login, repoName);
+          await lockStudentRepo(client.octokit, scope.org.login, repoName);
         } else {
-          await unlockStudentRepo(client.octokit, owned.org.login, repoName);
+          await unlockStudentRepo(client.octokit, scope.org.login, repoName);
         }
         const [updated] = await app.db
           .update(studentRepos)
           .set({ lockedAt: action === "lock" ? new Date() : null })
-          .where(eq(studentRepos.id, owned.repo.id))
+          .where(eq(studentRepos.id, scope.repo.id))
           .returning();
         await audit(app.db, {
           actorUserId: req.user!.id,
           actorType: "user",
           action: `repo.${action}`,
           subjectType: "student_repo",
-          subjectId: owned.repo.id,
-          payload: { repo: owned.repo.fullName },
+          subjectId: scope.repo.id,
+          payload: { repo: scope.repo.fullName },
         });
         return updated;
       },
@@ -192,16 +192,16 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade-now",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedStudentRepo(app, req, reply);
-      if (!owned) return reply;
-      const client = await clientFor(config, reply, owned.org);
+      const scope = await accessibleStudentRepo(app, req, reply);
+      if (!scope) return reply;
+      const client = await clientFor(config, reply, scope.org);
       if (!client) return reply;
-      const repoName = owned.repo.fullName!.split("/")[1]!;
-      const ref = owned.repo.defaultBranch ?? owned.assignment.branches[0] ?? "main";
+      const repoName = scope.repo.fullName!.split("/")[1]!;
+      const ref = scope.repo.defaultBranch ?? scope.assignment.branches[0] ?? "main";
       try {
         await client.octokit.request(
           "POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches",
-          { owner: owned.org.login, repo: repoName, workflow_id: "grading.yml", ref },
+          { owner: scope.org.login, repo: repoName, workflow_id: "grading.yml", ref },
         );
       } catch (err) {
         const status = (err as { status?: number }).status;
@@ -219,8 +219,8 @@ export async function assignmentActionRoutes(
         actorType: "user",
         action: "repo.grade_now",
         subjectType: "student_repo",
-        subjectId: owned.repo.id,
-        payload: { repo: owned.repo.fullName, ref },
+        subjectId: scope.repo.id,
+        payload: { repo: scope.repo.fullName, ref },
       });
       return reply.code(202).send({ ok: true });
     },
@@ -237,19 +237,19 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/assignments/:aid/repos/:rid/grade",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedStudentRepo(app, req, reply);
-      if (!owned) return reply;
+      const scope = await accessibleStudentRepo(app, req, reply);
+      if (!scope) return reply;
       const body = GradeOverride.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
       }
-      if (owned.assignment.gradingMode === "none") {
+      if (scope.assignment.gradingMode === "none") {
         return reply
           .code(409)
           .send({ error: "grading_none", message: "This assignment is not graded" });
       }
       // Adjustments happen on a stable grade: after the definitive freeze.
-      if (!owned.assignment.frozenAt) {
+      if (!scope.assignment.frozenAt) {
         return reply.code(409).send({
           error: "not_frozen",
           message: "Grades can be adjusted once the deadline (and grace) has passed",
@@ -264,15 +264,15 @@ export async function assignmentActionRoutes(
           teacherGradedBy: clearing ? null : req.user!.id,
           teacherGradedAt: clearing ? null : new Date(),
         })
-        .where(eq(studentRepos.id, owned.repo.id))
+        .where(eq(studentRepos.id, scope.repo.id))
         .returning();
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "repo.grade_override",
         subjectType: "student_repo",
-        subjectId: owned.repo.id,
-        payload: { repo: owned.repo.fullName, points: body.data.points },
+        subjectId: scope.repo.id,
+        payload: { repo: scope.repo.fullName, points: body.data.points },
       });
       return updated;
     },
@@ -282,14 +282,14 @@ export async function assignmentActionRoutes(
     "/app/api/classrooms/:id/assignments/:aid/validate-grades",
     { preHandler: requireTeacher },
     async (req, reply) => {
-      const owned = await ownedAssignment(app, req, reply);
-      if (!owned) return reply;
-      if (owned.assignment.gradingMode === "none") {
+      const scope = await accessibleAssignment(app, req, reply);
+      if (!scope) return reply;
+      if (scope.assignment.gradingMode === "none") {
         return reply
           .code(409)
           .send({ error: "grading_none", message: "This assignment is not graded" });
       }
-      if (!owned.assignment.frozenAt) {
+      if (!scope.assignment.frozenAt) {
         return reply.code(409).send({
           error: "not_frozen",
           message: "Grades can be validated once the deadline (and grace) has passed",
@@ -300,14 +300,14 @@ export async function assignmentActionRoutes(
       const [updated] = await app.db
         .update(assignments)
         .set({ gradesValidatedAt: new Date(), gradesValidatedBy: req.user!.id })
-        .where(eq(assignments.id, owned.assignment.id))
+        .where(eq(assignments.id, scope.assignment.id))
         .returning();
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.grades_validated",
         subjectType: "assignment",
-        subjectId: owned.assignment.id,
+        subjectId: scope.assignment.id,
       });
       return updated;
     },

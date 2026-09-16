@@ -31,6 +31,8 @@ export type AuditAction =
   | "classroom.create"
   | "classroom.delete"
   | "classroom.rename"
+  | "classroom.staff_add"
+  | "classroom.staff_remove"
   | "classroom.unarchive"
   | "email.sent"
   | "email.unsubscribe"
