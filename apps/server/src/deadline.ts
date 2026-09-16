@@ -16,6 +16,7 @@ import { pushEmptyCommit, zurichIso } from "./github/commit.js";
 import { lockStudentRepo } from "./github/lock.js";
 import { selectGradeRun } from "./grading.js";
 import { mailRecipient, queueEmail } from "./mailer.js";
+import { isRepoGone, markRepoDeleted, repoIsLive } from "./repos.js";
 
 export interface DeadlineJob {
   assignmentId: string;
@@ -58,13 +59,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
     const repos = await app.db
       .select()
       .from(studentRepos)
-      .where(
-        and(
-          eq(studentRepos.assignmentId, a.id),
-          eq(studentRepos.provisionStatus, "ok"),
-          isNotNull(studentRepos.fullName),
-        ),
-      );
+      .where(and(eq(studentRepos.assignmentId, a.id), repoIsLive()));
 
     // Provisional freeze (GR-12): the current grade at deadline time.
     // During the grace period, runs on commits received before the deadline
@@ -88,6 +83,8 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
     const client = await installationClient(config, row.installationId);
     const message = `chore(deadline): deadline reached — ${a.name} (${zurichIso(a.deadlineAt)})`;
     const failures: string[] = [];
+    let applied = 0; // repositories actually locked or marked in this pass
+    let deleted = 0; // repositories found gone from GitHub in this pass
 
     for (const repo of repos) {
       const [org, repoName] = repo.fullName!.split("/") as [string, string];
@@ -118,6 +115,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
             .update(studentRepos)
             .set({ lockedAt: new Date(), rulesetId })
             .where(eq(studentRepos.id, repo.id));
+          applied += 1;
         } else {
           // Commit strategy: one empty bot commit per selected branch.
           const done = await app.db
@@ -147,39 +145,61 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
                 .onConflictDoNothing();
             }
           }
+          applied += 1;
         }
       } catch (err) {
+        // A deleted repository is terminal, never a retryable failure: it is
+        // marked once and dropped from every later pass (issue #10).
+        if (isRepoGone(err)) {
+          app.log.warn({ repo: repo.fullName }, "deadline: repository gone from GitHub");
+          if (await markRepoDeleted(app.db, repo.id, "deadline")) deleted += 1;
+          continue;
+        }
         app.log.error({ err, repo: repo.fullName }, "deadline apply failed for repo");
         failures.push(repo.fullName!);
       }
     }
 
-    await audit(app.db, {
-      actorType: "system",
-      action: "assignment.deadline_applied",
-      subjectType: "assignment",
-      subjectId: a.id,
-      payload: {
-        strategy: a.deadlineStrategy,
-        repos: repos.length,
-        failures,
-      },
-    });
-    publish("assignments", [`classroom:${row.classroomId}`], {
-      kind: "deadline_applied",
-      message: `Deadline enforced on “${a.name}” (${repos.length - failures.length}/${repos.length} repositories)`,
-    });
-    publish(
-      "repos",
-      [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
-    );
+    // At most one notice per outcome (issue #10): only a pass that actually
+    // enforced the deadline somewhere speaks. A pure retry — and a pass whose
+    // repositories are all already locked, or all gone — stays silent, so a
+    // repository that can never succeed no longer loops a toast every 20 s.
+    if (applied > 0) {
+      await audit(app.db, {
+        actorType: "system",
+        action: "assignment.deadline_applied",
+        subjectType: "assignment",
+        subjectId: a.id,
+        payload: {
+          strategy: a.deadlineStrategy,
+          repos: repos.length,
+          applied,
+          deleted,
+          failures,
+        },
+      });
+      publish("assignments", [`classroom:${row.classroomId}`], {
+        kind: "deadline_applied",
+        message: `Deadline enforced on “${a.name}” (${applied}/${repos.length} repositories)`,
+      });
+    } else if (claimedNow || deleted > 0) {
+      // State changed (assignment locked, repositories gone) without a
+      // deadline being enforced anywhere: refresh the views, silently.
+      publish("assignments", [`classroom:${row.classroomId}`]);
+    }
+    if (applied > 0 || deleted > 0) {
+      publish(
+        "repos",
+        [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
+      );
+    }
     if (claimedNow) {
       const teacher = await mailRecipient(app, row.teacherId);
       if (teacher) {
         await queueEmail(app, config, teacher, "deadline.applied", {
           assignmentName: a.name,
           classroomName: row.classroomName,
-          detail: `${repos.length - failures.length}/${repos.length} repositories`,
+          detail: `${applied}/${repos.length} repositories`,
         });
       }
     }

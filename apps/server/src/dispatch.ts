@@ -16,7 +16,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lte } from "drizzle-orm";
 
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
@@ -32,6 +32,7 @@ import {
 } from "./db/schema.js";
 import { publish } from "./events.js";
 import { installationClient } from "./github/app.js";
+import { isRepoGone, markRepoDeleted, repoIsLive } from "./repos.js";
 
 export interface GradeDispatchJob {
   assignmentId: string;
@@ -170,18 +171,13 @@ export function makeGradeDispatchHandler(app: FastifyInstance, config: AppConfig
       })
       .from(studentRepos)
       .leftJoin(gradeRuns, eq(gradeRuns.id, studentRepos.frozenGradeRunId))
-      .where(
-        and(
-          eq(studentRepos.assignmentId, a.id),
-          eq(studentRepos.provisionStatus, "ok"),
-          isNotNull(studentRepos.fullName),
-        ),
-      );
+      .where(and(eq(studentRepos.assignmentId, a.id), repoIsLive()));
 
     const client = await installationClient(config, row.installationId);
     const failures: string[] = [];
     let dispatched = 0;
     let skipped = 0;
+    let deleted = 0;
 
     for (const { repo, frozenSha } of repos) {
       const plan = planDispatch(a, frozenSha);
@@ -232,32 +228,53 @@ export function makeGradeDispatchHandler(app: FastifyInstance, config: AppConfig
           .where(eq(gradeDispatches.id, dispatchId));
         dispatched += 1;
       } catch (err) {
+        // Terminal: the repository is gone, no retry will ever fire the
+        // dispatch. Marking it keeps the assignment completable (issue #10).
+        if (isRepoGone(err)) {
+          app.log.warn({ repo: repo.fullName }, "grade dispatch: repository gone from GitHub");
+          if (await markRepoDeleted(app.db, repo.id, "grade-dispatch")) deleted += 1;
+          continue;
+        }
         app.log.error({ err, repo: repo.fullName }, "grade dispatch failed for repo");
         failures.push(repo.fullName!);
       }
     }
 
-    await audit(app.db, {
-      actorType: "system",
-      action: "assignment.llm_review_dispatched",
-      subjectType: "assignment",
-      subjectId: a.id,
-      payload: { repos: repos.length, dispatched, skipped, failures },
-    });
-    publish("assignments", [`classroom:${row.classroomId}`], {
-      kind: "llm_review_dispatched",
-      message: `LLM review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
-    });
+    // At most one notice per outcome (issue #10): only a pass that actually
+    // requested a review speaks. A pure retry, or a pass with nothing left to
+    // review (every repository deleted on GitHub), refreshes silently — the
+    // ticker re-enqueues every 20 s until `llm_dispatched_at` is set.
+    if (dispatched > 0) {
+      await audit(app.db, {
+        actorType: "system",
+        action: "assignment.llm_review_dispatched",
+        subjectType: "assignment",
+        subjectId: a.id,
+        payload: { repos: repos.length, dispatched, skipped, deleted, failures },
+      });
+      publish("assignments", [`classroom:${row.classroomId}`], {
+        kind: "llm_review_dispatched",
+        message: `LLM review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
+      });
+    } else if (deleted > 0) {
+      publish("repos", [`classroom:${row.classroomId}`]);
+    }
 
     // Failed repositories retry via pg-boss; already-dispatched ones are
     // skipped by the ledger on the next pass.
     if (failures.length > 0) {
       throw new Error(`grade dispatch incomplete: ${failures.join(", ")}`);
     }
-    await app.db
+    const completed = await app.db
       .update(assignments)
       .set({ llmDispatchedAt: new Date() })
-      .where(and(eq(assignments.id, a.id), isNull(assignments.llmDispatchedAt)));
+      .where(and(eq(assignments.id, a.id), isNull(assignments.llmDispatchedAt)))
+      .returning({ id: assignments.id });
+    // Completed without a single dispatch (nothing to review, every
+    // repository gone): refresh the views, silently.
+    if (completed.length > 0 && dispatched === 0) {
+      publish("assignments", [`classroom:${row.classroomId}`]);
+    }
   };
 }
 
@@ -306,18 +323,13 @@ async function dispatchMilestone(
   const repos = await app.db
     .select()
     .from(studentRepos)
-    .where(
-      and(
-        eq(studentRepos.assignmentId, a.id),
-        eq(studentRepos.provisionStatus, "ok"),
-        isNotNull(studentRepos.fullName),
-      ),
-    );
+    .where(and(eq(studentRepos.assignmentId, a.id), repoIsLive()));
 
   const client = await installationClient(config, row.installationId);
   const failures: string[] = [];
   let dispatched = 0;
   let skipped = 0;
+  let deleted = 0;
 
   for (const repo of repos) {
     const sha = await milestoneShaForRepo(app, repo.id, a.branches, milestone.dueAt);
@@ -368,29 +380,51 @@ async function dispatchMilestone(
         .where(eq(gradeDispatches.id, dispatchId));
       dispatched += 1;
     } catch (err) {
+      // Same terminal treatment as the deadline flow: gone is not retryable.
+      if (isRepoGone(err)) {
+        app.log.warn({ repo: repo.fullName }, "milestone dispatch: repository gone from GitHub");
+        if (await markRepoDeleted(app.db, repo.id, "milestone-dispatch")) deleted += 1;
+        continue;
+      }
       app.log.error({ err, repo: repo.fullName }, "milestone dispatch failed for repo");
       failures.push(repo.fullName!);
     }
   }
 
-  await audit(app.db, {
-    actorType: "system",
-    action: "assignment.milestone_dispatched",
-    subjectType: "assignment",
-    subjectId: a.id,
-    payload: { milestone: milestone.name, repos: repos.length, dispatched, skipped, failures },
-  });
-  publish("assignments", [`classroom:${row.classroomId}`], {
-    kind: "llm_review_dispatched",
-    message: `Milestone “${milestone.name}” review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
-  });
+  // Same notice rule as the deadline flow (issue #10).
+  if (dispatched > 0) {
+    await audit(app.db, {
+      actorType: "system",
+      action: "assignment.milestone_dispatched",
+      subjectType: "assignment",
+      subjectId: a.id,
+      payload: {
+        milestone: milestone.name,
+        repos: repos.length,
+        dispatched,
+        skipped,
+        deleted,
+        failures,
+      },
+    });
+    publish("assignments", [`classroom:${row.classroomId}`], {
+      kind: "llm_review_dispatched",
+      message: `Milestone “${milestone.name}” review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
+    });
+  } else if (deleted > 0) {
+    publish("repos", [`classroom:${row.classroomId}`]);
+  }
 
   // Failed repositories retry via pg-boss; the ledger skips the others.
   if (failures.length > 0) {
     throw new Error(`milestone dispatch incomplete: ${failures.join(", ")}`);
   }
-  await app.db
+  const completed = await app.db
     .update(assignmentMilestones)
     .set({ dispatchedAt: new Date() })
-    .where(and(eq(assignmentMilestones.id, milestone.id), isNull(assignmentMilestones.dispatchedAt)));
+    .where(and(eq(assignmentMilestones.id, milestone.id), isNull(assignmentMilestones.dispatchedAt)))
+    .returning({ id: assignmentMilestones.id });
+  if (completed.length > 0 && dispatched === 0) {
+    publish("assignments", [`classroom:${row.classroomId}`]);
+  }
 }

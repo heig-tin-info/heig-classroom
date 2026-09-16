@@ -314,6 +314,13 @@ function StudentRow({
       </td>
       <td className={cell}>
         {r?.provisionStatus === "ok" ? (
+          /* Repository gone from GitHub (deleted out of band, or unreachable
+             live): one state, shown instead of the acceptance badge. */
+          r.missing ? (
+            <Badge tone="red" icon={XCircle}>
+              {t("status.repoMissing")}
+            </Badge>
+          ) : (
           <span className="inline-flex items-center gap-1.5">
             <Badge tone="green" icon={CheckCircle2}>
               {t("status.accepted")}
@@ -345,12 +352,8 @@ function StudentRow({
               </a>
               </Tip>
             ) : null}
-            {r.missing ? (
-              <Badge tone="red" icon={XCircle}>
-                {t("status.repoMissing")}
-              </Badge>
-            ) : null}
           </span>
+          )
         ) : r?.provisionStatus === "error" ? (
           <Tip label={r.provisionError} className="inline-flex cursor-help">
             <Badge tone="red" icon={XCircle}>

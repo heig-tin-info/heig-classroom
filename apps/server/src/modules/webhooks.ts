@@ -23,6 +23,7 @@ import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
 import { mailRecipient, queueEmail } from "../mailer.js";
+import { markRepoDeleted } from "../repos.js";
 
 const MAX_REVERTS_PER_HOUR = 5; // anti-loop cap (H10, GH-33)
 
@@ -108,6 +109,8 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
         await handlePullRequest(app, delivery.payload as PullRequestPayload);
       } else if (delivery.event === "member") {
         await handleMember(app, delivery.payload as MemberPayload);
+      } else if (delivery.event === "repository") {
+        await handleRepository(app, delivery.payload as RepositoryPayload);
       } else if (delivery.event === "organization") {
         await handleOrganization(app, config, delivery.payload as OrganizationPayload);
       } else if (delivery.event === "installation") {
@@ -290,6 +293,38 @@ async function handleMember(app: FastifyInstance, p: MemberPayload) {
     .update(studentRepos)
     .set({ invitationStatus: "accepted" })
     .where(eq(studentRepos.id, ctx.repo.id));
+  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+}
+
+interface RepositoryPayload {
+  action?: string;
+  repository?: { id?: number; full_name?: string };
+}
+
+/**
+ * Repository lifecycle (App event `repository`, subscribed precisely for
+ * out-of-band renames and deletions of student repositories). The GitHub
+ * repo id is the stable reference: `renamed` merely refreshes `full_name`,
+ * `deleted` is the authoritative source of `student_repos.deleted_at` —
+ * without it the portal kept dispatching to a repository that no longer
+ * exists, one 404 and one notice per ticker pass (issue #10).
+ * Exported for the PGlite tests.
+ */
+export async function handleRepository(app: FastifyInstance, p: RepositoryPayload) {
+  if (!p.repository?.id) return;
+  const ctx = await repoContext(app.db, p.repository.id);
+  if (!ctx) return; // not a student repository we track
+  if (p.action === "renamed") {
+    if (!p.repository.full_name || p.repository.full_name === ctx.repo.fullName) return;
+    await app.db
+      .update(studentRepos)
+      .set({ fullName: p.repository.full_name })
+      .where(eq(studentRepos.id, ctx.repo.id));
+  } else if (p.action === "deleted") {
+    if (!(await markRepoDeleted(app.db, ctx.repo.id, "webhook"))) return; // replayed
+  } else {
+    return;
+  }
   publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
 }
 

@@ -24,6 +24,7 @@ import { githubApp, installationClient } from "./github/app.js";
 import { fetchRepoLiveState } from "./github/metrics.js";
 import { ingestCompletedRun, type RepoCtx } from "./grading.js";
 import { WEBHOOK_QUEUE } from "./jobs.js";
+import { repoIsLive } from "./repos.js";
 
 export interface TaskDef {
   key: string;
@@ -133,8 +134,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
     .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
     .where(
       and(
-        eq(studentRepos.provisionStatus, "ok"),
-        isNotNull(studentRepos.fullName),
+        repoIsLive(),
         isNotNull(organizations.installationId),
         isNull(assignments.archivedAt),
         ne(assignments.state, "draft"),
@@ -210,8 +210,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
     .innerJoin(users, eq(studentRepos.userId, users.id))
     .where(
       and(
-        eq(studentRepos.provisionStatus, "ok"),
-        isNotNull(studentRepos.fullName),
+        repoIsLive(),
         isNotNull(organizations.installationId),
         isNull(assignments.archivedAt),
       ),

@@ -287,6 +287,10 @@ export const studentRepos = pgTable(
       .notNull()
       .default("pending"),
     provisionError: text("provision_error"),
+    /** Repository gone from GitHub: set by the `repository` webhook (action
+        `deleted`) or by a 404 on a write path (deadline, review dispatch).
+        Terminal — a deleted repository is never retried (issue #10). */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }).notNull().defaultNow(),
     invitationStatus: text("invitation_status", { enum: ["none", "pending", "accepted"] })
       .notNull()
