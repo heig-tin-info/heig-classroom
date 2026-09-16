@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -15,6 +15,20 @@ describe("app (without a database)", () => {
 
   beforeAll(async () => {
     app = await buildApp({ config });
+    // Shape of a Drizzle failure: the SQL and its params in the message, the
+    // pg error (SQLSTATE and all) in `cause`. Registered here because routes
+    // cannot be added once the app is ready.
+    app.get("/__boom", async () => {
+      throw new Error(
+        'Failed query: select "users"."id" from "sessions" where "sid_hash" = $1 limit $2\nparams: 8ae4ab,1',
+        {
+          cause: Object.assign(
+            new Error("terminating connection due to administrator command"),
+            { code: "57P01" },
+          ),
+        },
+      );
+    });
   });
   afterAll(async () => {
     await app.close();
@@ -27,6 +41,32 @@ describe("app (without a database)", () => {
       status: "degraded",
       checks: { database: "down" },
     });
+  });
+
+  it("a failing route answers a generic 500 and logs the cause", async () => {
+    // Fastify logs through a per-request child logger: intercept its creation.
+    const logged: Array<{ cause?: { code?: string } }> = [];
+    const makeChild = app.log.child.bind(app.log);
+    const spy = vi
+      .spyOn(app.log, "child")
+      .mockImplementation((...args: Parameters<typeof makeChild>) => {
+        const child = makeChild(...args);
+        child.error = ((entry: { cause?: { code?: string } }) => {
+          logged.push(entry);
+        }) as typeof child.error;
+        return child;
+      });
+
+    const res = await app.inject({ method: "GET", url: "/__boom" });
+    spy.mockRestore();
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "internal_error" });
+    // Neither the SQL nor the params reach the browser.
+    expect(res.body).not.toContain("Failed query");
+    expect(res.body).not.toContain("sid_hash");
+    // ... while the pg error behind the Drizzle wrapper is kept in the logs.
+    expect(logged.at(-1)?.cause?.code).toBe("57P01");
   });
 
   it("metrics exposes hgc_database_up", async () => {

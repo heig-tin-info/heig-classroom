@@ -94,6 +94,12 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
   app.addHook("preHandler", async (req, reply) => {
     const token = req.cookies[SESSION_COOKIE];
     if (!token) return;
+    // A database failure here propagates on purpose: a lookup that cannot run
+    // is an outage, not an anonymous visitor. Falling back to "anonymous"
+    // would sign every teacher out mid-flow, turn our 5xx into 401 (the error
+    // rate would look clean while the site is down) and invite a re-login
+    // storm on the very database that is already struggling. The global error
+    // handler answers a generic 500 and logs the cause.
     const found = await findSessionUser(app.db, token, {
       renewTtlHours: config.SESSION_TTL_HOURS,
     });

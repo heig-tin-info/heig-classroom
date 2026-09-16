@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
-import Fastify, { type FastifyInstance } from "fastify";
+import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import fastifyCookie from "@fastify/cookie";
 import fastifyStatic from "@fastify/static";
 import { sql } from "drizzle-orm";
@@ -43,10 +43,29 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     trustProxy: true, // always behind Caddy (ADR-009)
   });
 
-  const { db, pool } = createDb(config.DATABASE_URL);
+  const { db, pool } = createDb(config.DATABASE_URL, app.log);
   app.decorate("db", db);
   app.addHook("onClose", async () => {
     await pool.end();
+  });
+
+  // A 5xx must never carry the failure detail to the browser: Drizzle wraps
+  // every pg failure in a `Failed query: <SQL>\nparams: <values>` message and
+  // Fastify's default handler puts that message in the body. Same `{error}`
+  // shape as the routes (docs/03 « Contrat API »), no `message`: there is
+  // nothing actionable to say to the caller.
+  // `err` alone is not enough in the logs either: pino's serializer folds the
+  // cause chain into the message and the stack as text but drops the cause's
+  // own fields — and for pg those fields (SQLSTATE `code`, `severity`) are
+  // what tells a connect timeout from a server-side disconnect. Hence `cause`
+  // logged next to `err`.
+  app.setErrorHandler((err: FastifyError, req, reply) => {
+    const status = err.statusCode ?? 500;
+    // Below 500 (schema validation, explicit 4xx) Fastify's own body is safe
+    // and already part of the API contract: delegate to the default handler.
+    if (status < 500) return reply.send(err);
+    req.log.error({ err, cause: err.cause }, "request failed");
+    return reply.code(status).send({ error: "internal_error" });
   });
 
   // Roster import: the CSV arrives as-is in req.body (AU-13).
