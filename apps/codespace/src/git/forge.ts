@@ -120,3 +120,45 @@ export function createGithubForge(opts: GithubOptions): Forge {
     },
   };
 }
+
+/**
+ * Erreur de **configuration** du relais, par opposition à une panne de la
+ * forge. `relay.ts` la distingue : une forge en panne finit par épuiser le
+ * budget de tentatives et la ligne passe `failed` ; une forge non configurée
+ * n'est pas une panne, la ligne doit rester `pending` jusqu'à ce que
+ * l'exploitant pose les identifiants, et le relais reprendra tout seul.
+ */
+export class ForgeUnconfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForgeUnconfiguredError";
+  }
+}
+
+/**
+ * GitHub **sans** identifiants d'App : tout ce qui ne demande pas de jeton
+ * fonctionne (l'URL de clonage d'un dépôt public, dont le dépôt de transit
+ * s'amorce en mode travaux pratiques), et le relais refuse explicitement.
+ *
+ * C'est l'état d'un déploiement qui n'a pas encore reçu sa GitHub App : le
+ * portail démarre, les sessions s'ouvrent, les `PushEvent` sont écrits
+ * (invariant 7) et restent `pending` avec le message ci-dessous dans
+ * `last_error`. Rien n'est perdu ; poser `GITHUB_APP_*` suffit à vider la
+ * file.
+ */
+export function createUnconfiguredGithubForge(opts: { baseUrl?: string } = {}): Forge {
+  const host = (opts.baseUrl ?? "https://github.com").replace(/\/+$/, "");
+  return {
+    kind: "github",
+    pushUrl: (repo) => `${host}/${repo.owner}/${repo.name}.git`,
+    async authorization() {
+      throw new ForgeUnconfiguredError(
+        "GitHub App non configurée : GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY et " +
+          "GITHUB_APP_INSTALLATION_ID sont absents. Le rendu est enregistré et reste en attente de relais.",
+      );
+    },
+    async ensureRepo() {
+      // Les dépôts sont provisionnés par heig-classroom (analyse.md D3).
+    },
+  };
+}

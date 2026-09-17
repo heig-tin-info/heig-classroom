@@ -6,7 +6,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { openGitDb } from "../db/client.js";
 import { FIXTURE_ENV, makeSourceRepo, tempDir } from "./fixtures.js";
-import type { Forge } from "./forge.js";
+import { createUnconfiguredGithubForge, type Forge } from "./forge.js";
 import { git, gitBare } from "./gitRunner.js";
 import { createPushEventStore, recordPush, NULL_OID, type PushEventRow } from "./pushEvents.js";
 import {
@@ -167,6 +167,31 @@ describe("createRelayWorker", () => {
     expect((await worker.runOnce()).retried).toBe(1);
     expect((await worker.runOnce()).failed).toBe(1);
     expect((await s.store.bySession(SESSION.sessionId))[0]?.state).toBe("failed");
+    s.close();
+  });
+
+  it("forge non configurée : la ligne reste pending indéfiniment, avec l'erreur nommée", async () => {
+    // Déploiement sans GitHub App (docs/deploy.md) : le rendu est enregistré,
+    // le service ne tombe pas, et la ligne ne doit **jamais** passer `failed` —
+    // elle n'a pas eu de destination, ce n'est pas une panne de la forge.
+    const s = await scenario();
+    const worker = createRelayWorker({
+      store: s.store,
+      forge: createUnconfiguredGithubForge(),
+      targets: stagingTargets(s.volumesRoot, s.repoOf),
+      backoffMs: () => 0,
+      maxAttempts: 2,
+    });
+    await recordPush({ store: s.store }, SESSION, [
+      { ref: "refs/heads/main", oldSha: null, sha: s.src.sha },
+    ]);
+    for (let i = 0; i < 4; i++) {
+      expect(await worker.runOnce()).toEqual({ relayed: 0, retried: 1, failed: 0 });
+    }
+    const row = (await s.store.bySession(SESSION.sessionId))[0] as PushEventRow;
+    expect(row.state).toBe("pending");
+    expect(row.attempts).toBe(4);
+    expect(row.lastError).toMatch(/GitHub App non configurée/);
     s.close();
   });
 

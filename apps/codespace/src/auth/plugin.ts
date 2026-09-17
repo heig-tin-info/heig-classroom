@@ -5,6 +5,19 @@
  * Les gardes sont **explicites par route** (`preHandler: app.requireStudent`),
  * jamais un crochet global qui protégerait « tout sauf » : une liste
  * d'exceptions se trompe en silence, une garde posée route par route se lit.
+ *
+ * ## `OIDC_ISSUER` vide : connexion autonome désactivée
+ *
+ * Un déploiement peut n'avoir pas encore d'IdP — c'est le cas du portail tant
+ * que Switch edu-ID n'est pas déclaré, les étudiants arrivant par le jeton de
+ * lancement de classroom (`/launch`, `classroom/routes.ts`). `OIDC_ISSUER`
+ * vide dit exactement cela : **aucune** route de connexion n'est enregistrée,
+ * `/auth/login` et `/auth/callback` répondent 404, et les pages qui exigent
+ * un utilisateur répondent 503 avec un message qui nomme la cause.
+ *
+ * Ce n'est pas un raccourci d'identité (invariant 4) : il n'existe toujours
+ * qu'une seule façon de devenir `request.user` par ce chemin, la connexion
+ * OIDC réelle. Vide, elle n'est pas remplacée : elle est absente.
  */
 import { randomUUID } from "node:crypto";
 
@@ -90,8 +103,19 @@ function wantsHtml(req: FastifyRequest): boolean {
   return accept.includes("text/html");
 }
 
+/** Page servie quand le portail n'a pas d'IdP déclaré. */
+function noIdpPage(): string {
+  return (
+    "<!doctype html><html lang=fr><meta charset=utf-8><title>Connexion indisponible</title>" +
+    "<h1>Connexion indisponible</h1>" +
+    "<p>Ce portail n'a pas de fournisseur d'identité déclaré. Les environnements " +
+    "s'ouvrent depuis heig-classroom, par le bouton <em>Démarrer</em> du devoir.</p>"
+  );
+}
+
 async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Promise<void> {
   const { config, db } = opts;
+  const oidcEnabled = config.OIDC_ISSUER !== "";
   const provider = new OidcProvider(config, app.log);
   const secure = config.NODE_ENV === "production";
   const ttlMs = config.SESSION_TTL_HOURS * 3_600_000;
@@ -104,16 +128,26 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
     req.user = row ?? null;
   });
 
-  app.decorate("requireUser", async (req: FastifyRequest, reply: FastifyReply) => {
-    if (req.user) return undefined;
+  /** Sans IdP, rediriger vers `/auth/login` mènerait à un 404 : on le dit. */
+  const unauthenticated = (req: FastifyRequest, reply: FastifyReply): FastifyReply => {
+    if (!oidcEnabled) {
+      if (wantsHtml(req)) {
+        return reply.code(503).type("text/html; charset=utf-8").send(noIdpPage());
+      }
+      return reply.code(503).send({ error: "oidc_disabled" });
+    }
     if (wantsHtml(req)) return reply.redirect("/auth/login", 303);
     return reply.code(401).send({ error: "unauthenticated" });
+  };
+
+  app.decorate("requireUser", async (req: FastifyRequest, reply: FastifyReply) => {
+    if (req.user) return undefined;
+    return unauthenticated(req, reply);
   });
 
   app.decorate("requireTeacher", async (req: FastifyRequest, reply: FastifyReply) => {
     if (!req.user) {
-      if (wantsHtml(req)) return reply.redirect("/auth/login", 303);
-      return reply.code(401).send({ error: "unauthenticated" });
+      return unauthenticated(req, reply);
     }
     if (req.user.role !== ("teacher" satisfies Role)) {
       return reply.code(403).type("text/html; charset=utf-8").send(
@@ -123,6 +157,17 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
     }
     return undefined;
   });
+
+  if (!oidcEnabled) {
+    // Aucune route de connexion n'est enregistrée : 404, et non une page qui
+    // échouerait plus loin sur `new URL("")`. `/launch` reste entier.
+    app.log.warn(
+      {},
+      "OIDC_ISSUER absent : connexion autonome désactivée (/auth/* en 404). " +
+        "Les sessions s'ouvrent par le jeton de lancement de classroom.",
+    );
+    return;
+  }
 
   app.get("/auth/login", async (_req, reply) => {
     const { url, codeVerifier, state, nonce } = await provider.beginLogin();

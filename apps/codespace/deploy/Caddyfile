@@ -1,0 +1,41 @@
+# heig-codespace — frontal TLS. Installé par deploy/bootstrap.sh en
+# /etc/caddy/Caddyfile, @DOMAIN@ remplacé au passage.
+#
+# Le certificat vient de Let's Encrypt, obtenu par Caddy lui-même (HTTP-01 sur
+# le port 80, laissé ouvert par le pare-feu Hetzner).
+#
+# Les mises à niveau websocket passent **nativement** : depuis Caddy 2,
+# `reverse_proxy` relaie `Connection: Upgrade` sans directive particulière.
+# code-server en dépend entièrement (docs/v1.md, TODO(verify) sur le point de
+# terminaison `/?reconnectionToken=…`).
+#
+# Le portail écoute sur 127.0.0.1:3100 et rien d'autre : Caddy est le seul
+# chemin depuis l'extérieur. Le canal Git (9418) est lié à 10.77.0.254, côté
+# pont, et n'est pas proxifié — c'est tout le point de l'invariant 1.
+
+@DOMAIN@ {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		# Caddy annonce sa présence par défaut ; inutile de la donner.
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/codespace.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format json
+	}
+
+	reverse_proxy 127.0.0.1:3100 {
+		# code-server envoie des trames longues ; l'onglet ouvert est un
+		# battement (proxy/index.ts). Pas de tampon sur le flux.
+		flush_interval -1
+	}
+}

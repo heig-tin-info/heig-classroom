@@ -24,6 +24,7 @@ import { createEngine, type Engine } from "./engine/index.js";
 import {
   createForgejoForge,
   createGithubForge,
+  createUnconfiguredGithubForge,
   createPushEventStore,
   createRelayWorker,
   stagingTargets,
@@ -61,7 +62,12 @@ export function createForge(config: AppConfig): Forge | null {
     const appId = process.env["GITHUB_APP_ID"] ?? "";
     const privateKey = process.env["GITHUB_APP_PRIVATE_KEY"] ?? "";
     const installationId = Number(process.env["GITHUB_APP_INSTALLATION_ID"] ?? "0");
-    if (!appId || !privateKey || !installationId) return null;
+    // Sans App, la forge sert encore à ce qui ne demande pas de jeton : l'URL
+    // de clonage d'un dépôt public, dont le dépôt de transit s'amorce en mode
+    // travaux pratiques. Le relais, lui, refuse explicitement et laisse les
+    // lignes `pending` (voir `createUnconfiguredGithubForge`).
+    // `baseUrl` n'est pas passé, comme pour `createGithubForge` : github.com.
+    if (!appId || !privateKey || !installationId) return createUnconfiguredGithubForge();
     return createGithubForge({ appId, privateKey, installationId });
   }
   if (!config.FORGE_TOKEN) return null;

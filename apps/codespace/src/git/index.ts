@@ -12,6 +12,8 @@ export { CgiHeadScanner, parseCgiHead, httpMetaVariable, type CgiHead } from "./
 export {
   createForgejoForge,
   createGithubForge,
+  createUnconfiguredGithubForge,
+  ForgeUnconfiguredError,
   type Forge,
   type ForgejoOptions,
   type GithubOptions,
