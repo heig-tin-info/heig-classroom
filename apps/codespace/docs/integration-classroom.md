@@ -89,19 +89,16 @@ pnpm --filter @hgc/codespace seed
 pnpm --filter @hgc/codespace dev
 ```
 
-Les deux applications ont chacune leur Keycloak de développement, **tous deux
-sur le port 8080** : ils ne peuvent pas tourner en même temps. Pour un
-lancement conjoint, ne démarrer que celui de classroom (l'étudiant s'y
-connecte, le portail reçoit un jeton et n'a pas besoin du sien) et, côté
-portail, seulement Forgejo :
+Un seul Keycloak de développement, celui de classroom (`docker-compose.dev.yml`
+à la racine, realm `hgc-dev`). Le portail y a son propre client
+(`codespace-portal`, redirection sur `localhost:3100`) pour son usage autonome ;
+côté portail, seul Forgejo est à démarrer :
 
 ```bash
-podman compose -f apps/codespace/infra/compose.dev.yml up -d forgejo
+podman compose -f apps/codespace/infra/compose.dev.yml up -d   # Forgejo seulement
 ```
 
-Le Keycloak du portail ne sert qu'à son usage autonome (`pnpm dev` sans
-classroom, connexion OIDC directe). En production les deux applications
-partagent Switch edu-ID.
+En production, aucun Keycloak : les deux applications parlent à Switch edu-ID.
 
 Vérifier la chaîne complète sans navigateur :
 

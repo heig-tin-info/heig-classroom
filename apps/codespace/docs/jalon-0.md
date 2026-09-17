@@ -48,7 +48,6 @@ heig-codespace/
 ├── infra/
 │   ├── nft/codespace.nft      règles fixes (ICC, input pont)
 │   ├── seccomp/codespace.json profil par défaut + personality(0x40000)
-│   ├── keycloak/              realm dev (repris de heig-classroom)
 │   └── compose.dev.yml        Keycloak + Forgejo + miroirs doc
 └── seed/                      devoirs YAML, utilisateurs de test
 ```

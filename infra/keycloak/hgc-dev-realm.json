@@ -16,11 +16,77 @@
         "http://localhost:3000/app/auth/callback",
         "http://localhost:5173/app/auth/callback"
       ],
-      "webOrigins": ["http://localhost:3000", "http://localhost:5173"],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
-      "defaultClientScopes": ["openid", "profile", "email"]
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email"
+      ]
+    },
+    {
+      "clientId": "codespace-portal",
+      "name": "HEIG Codespace (dev, portail autonome)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-secret-not-for-production",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3100/auth/callback",
+        "http://localhost:3000/auth/callback",
+        "http://localhost:5173/auth/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3100",
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "protocolMappers": [
+        {
+          "name": "codespace-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "claim.name": "codespace_roles",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        },
+        {
+          "name": "codespace-username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "users": [
@@ -31,7 +97,16 @@
       "emailVerified": true,
       "firstName": "Tania",
       "lastName": "Teacher",
-      "credentials": [{ "type": "password", "value": "teacher", "temporary": false }]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "teacher",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "teacher"
+      ]
     },
     {
       "username": "student",
@@ -40,7 +115,46 @@
       "emailVerified": true,
       "firstName": "Sacha",
       "lastName": "Student",
-      "credentials": [{ "type": "password", "value": "student", "temporary": false }]
+      "credentials": [
+        {
+          "type": "password",
+          "value": "student",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "student"
+      ]
+    },
+    {
+      "username": "student2",
+      "enabled": true,
+      "email": "student2@heig-vd.ch",
+      "emailVerified": true,
+      "firstName": "Sam",
+      "lastName": "Student",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "student2",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "student"
+      ]
     }
-  ]
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "student",
+        "description": "Étudiant (portail)"
+      },
+      {
+        "name": "teacher",
+        "description": "Enseignant (portail)"
+      }
+    ]
+  }
 }

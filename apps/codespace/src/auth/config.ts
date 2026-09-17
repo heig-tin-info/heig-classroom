@@ -77,7 +77,7 @@ const EnvSchema = z.object({
   SESSION_HEALTH_TIMEOUT_MS: z.coerce.number().int().min(1000).default(30_000),
 
   // --- OIDC (invariant 4 : réel même en dev) -------------------------------
-  OIDC_ISSUER: z.string().default("http://localhost:8080/realms/codespace-dev"),
+  OIDC_ISSUER: z.string().default("http://localhost:8080/realms/hgc-dev"),
   OIDC_CLIENT_ID: z.string().default("codespace-portal"),
   OIDC_CLIENT_SECRET: z.string().default("dev-secret-not-for-production"),
   /** Nom de la revendication portant les rôles de realm (mappeur du realm dev). */
