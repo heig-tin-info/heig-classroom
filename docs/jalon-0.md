@@ -34,7 +34,7 @@ heig-codespace/
 ├── CLAUDE.md                  invariants et conventions pour les agents
 ├── project.md                 dossier de cadrage (ne pas modifier)
 ├── docs/                      analyse, jalons, ADR
-├── apps/portal/               Fastify + TypeScript, seul code applicatif
+├──                Fastify + TypeScript, seul code applicatif
 │   └── src/
 │       ├── server.ts
 │       ├── auth/              OIDC (openid-client), sélecteur d'utilisateur dev
@@ -90,7 +90,7 @@ Si la règle ICC en famille `bridge` se révèle inopérante sous netavark, solu
 
 ## P3. Canal Git : preuve C, volet Git
 
-**Sortie** : `apps/portal/src/git/` avec `httpBackend.ts` (CGI vers `git http-backend`), `staging.ts` (création et amorçage du dépôt de transit), `relay.ts` (push vers la forge avec en-tête d'autorisation), `pushEvents.ts` ; tests vitest.
+**Sortie** : `src/git/` avec `httpBackend.ts` (CGI vers `git http-backend`), `staging.ts` (création et amorçage du dépôt de transit), `relay.ts` (push vers la forge avec en-tête d'autorisation), `pushEvents.ts` ; tests vitest.
 
 Règles : le remote côté conteneur est `http://portal.internal:9418/git/<sessionId>`. L'authentification est l'IP source, comparée à celle enregistrée pour la session ; toute autre IP reçoit 403. `http.receivepack=true` sur le dépôt de transit ; `http.uploadpack` piloté par le devoir (vrai par défaut). Après chaque receive-pack réussi, `for-each-ref` puis insertion d'un `PushEvent` par ref modifiée **avant** de planifier le relais. Le relais utilise `git push` avec `-c http.extraHeader=Authorization: ...` ; le jeton ne va jamais sur disque ni dans une ligne de commande visible dans `ps` (le passer par variable d'environnement `GIT_CONFIG_PARAMETERS` ou fichier temporaire 0600 en mémoire).
 
@@ -106,7 +106,7 @@ En développement, la forge cible est Forgejo dans `compose.dev.yml` avec un jet
 
 ## P4. Vérification SEB : preuve B
 
-**Sortie** : `apps/portal/src/seb/` avec `configKey.ts` (normalisation et hachage, porté de `quizaccess_seb`), `verify.ts` (interface `SebVerifier`, implémentations `real` et `simulated`), `sebFile.ts` (génération du `.seb` : `startURL`, `URLFilterRules`, `allowDownUploads: false`, `enablePrivateClipboard: true`, kiosque, `sendBrowserExamKey: true`), route `GET /exam/<assignment>.seb` et lien `sebs://`.
+**Sortie** : `src/seb/` avec `configKey.ts` (normalisation et hachage, porté de `quizaccess_seb`), `verify.ts` (interface `SebVerifier`, implémentations `real` et `simulated`), `sebFile.ts` (génération du `.seb` : `startURL`, `URLFilterRules`, `allowDownUploads: false`, `enablePrivateClipboard: true`, kiosque, `sendBrowserExamKey: true`), route `GET /exam/<assignment>.seb` et lien `sebs://`.
 
 Sémantique de vérification : sur `GET /exam/<assignment>/start`, exiger `X-SafeExamBrowser-ConfigKeyHash == sha256(urlSansFragment + configKey)` et `X-SafeExamBrowser-RequestHash == sha256(urlSansFragment + bek)` pour **un** des BEK acceptés du devoir. Succès : cookie `exam_session` signé, lié à l'identifiant de devoir et à l'adresse client. Le proxy `/s/<session>/*` n'examine **jamais** d'en-tête SEB : il exige le cookie, vérifie l'adresse, et refuse sinon avec une page explicite "session hors SEB". Le mode `simulated` accepte un en-tête `X-Dev-SEB: ok` en développement seulement, et est **impossible à activer** si `NODE_ENV=production` (test qui l'affirme).
 

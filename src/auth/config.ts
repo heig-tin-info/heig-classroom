@@ -14,10 +14,10 @@ import { z } from "zod";
 
 /**
  * Racine du dépôt : le premier ancêtre de ce module qui porte
- * `pnpm-workspace.yaml`. Les chemins relatifs de la configuration s'y
+ * `package.json` de l'application. Les chemins relatifs de la configuration s'y
  * rapportent, et non au répertoire de lancement : `infra/seccomp/...` doit
  * désigner le même fichier qu'on démarre depuis la racine, depuis
- * `apps/portal` (ce que fait `pnpm --filter`) ou depuis un script.
+ * `apps/codespace` (ce que fait `pnpm --filter`) ou depuis un script.
  *
  * La remontée est cherchée plutôt que comptée : le module compilé vit dans
  * `dist/auth/`, pas dans `src/auth/`, et un nombre fixe de `..` désignerait
@@ -26,12 +26,12 @@ import { z } from "zod";
 export function repoRoot(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 10; i++) {
-    if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) return dir;
+    if (existsSync(resolve(dir, "package.json"))) return dir;
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("racine du dépôt introuvable (pnpm-workspace.yaml absent des ancêtres)");
+  throw new Error("racine de l'application introuvable (package.json absent des ancêtres)");
 }
 
 function fromRepoRoot(path: string): string {

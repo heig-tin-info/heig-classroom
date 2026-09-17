@@ -129,7 +129,7 @@ impossible.
 ## Lancer les tests
 
 ```bash
-pnpm --filter @codespace/portal test
+pnpm --filter @hgc/codespace test
 pnpm typecheck
 ```
 
@@ -146,7 +146,7 @@ cd apps/portal && ./node_modules/.bin/tsc --noEmit \
 
 - `db.ts` a disparu : la base est celle du portail
   ([`db/client.ts`](../db/client.ts)), avec les migrations drizzle-kit de
-  `apps/portal/drizzle/`. `openGitDb` y survit sous le même nom, pour les
+  `drizzle/`. `openGitDb` y survit sous le même nom, pour les
   tests de ce module.
 - `SessionLookup` est branché sur la table `sessions`
   ([`sessions/manager.ts`](../sessions/manager.ts), champ `lookup`) : l'adresse

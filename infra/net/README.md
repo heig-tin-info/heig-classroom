@@ -41,7 +41,7 @@ dépendent toutes les règles nft. **Décision : ancrage**, créé et relancé p
 `setup.sh`, nommé `codespace-anchor`, marqué `heig-codespace.role=anchor`.
 
 Conséquences à respecter ailleurs : le ramasse-miettes de sessions
-(`apps/portal/src/sessions/`) doit ignorer les conteneurs portant ce label ;
+(`src/sessions/`) doit ignorer les conteneurs portant ce label ;
 la réconciliation ne doit pas le prendre pour une session orpheline ;
 `teardown.sh` est le seul endroit qui le supprime. `--restart always` est posé,
 mais il ne suffit pas après un redémarrage de l'hôte si

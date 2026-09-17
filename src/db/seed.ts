@@ -152,7 +152,7 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
   const { config } = opts;
   const log = opts.log ?? ((line: string) => console.log(line));
   if (!config.FORGE_TOKEN) {
-    throw new Error("FORGE_TOKEN absent : voir apps/portal/src/git/README.md");
+    throw new Error("FORGE_TOKEN absent : voir src/git/README.md");
   }
   const spec = SeedSpec.parse(
     parse(await readFile(join(opts.seedDir, "assignments.yaml"), "utf8")),

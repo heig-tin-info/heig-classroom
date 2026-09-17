@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { SESSION_LABEL, createEngine } from "./index.js";
 
-const REPO_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
+const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const RUN_HARDENED = readFileSync(`${REPO_ROOT}images/c-dev/run-hardened.sh`, "utf8");
 
 const engine = createEngine({

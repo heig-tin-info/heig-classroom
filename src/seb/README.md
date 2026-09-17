@@ -1,7 +1,7 @@
 # `seb/` — volet examen : Config Key, Browser Exam Key, fichier `.seb`
 
 Tâche P4 de [docs/jalon-0.md](../../../../docs/jalon-0.md). Ce module ne dépend
-de rien d'autre dans `apps/portal/src/` : les devoirs, le vérificateur et la
+de rien d'autre dans `src/` : les devoirs, le vérificateur et la
 création de session lui sont injectés.
 
 | Fichier | Rôle |
@@ -244,7 +244,7 @@ existe pour lever ces points.
 ## Tests
 
 ```bash
-pnpm --filter @codespace/portal test
+pnpm --filter @hgc/codespace test
 ```
 
 `configKey.test.ts` (vecteurs et règles de normalisation), `verify.test.ts`

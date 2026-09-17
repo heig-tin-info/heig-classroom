@@ -44,7 +44,7 @@ const execFileAsync = promisify(execFile);
 
 // --- environment ------------------------------------------------------------
 
-const REPO_ROOT = new URL("../../../../", import.meta.url).pathname;
+const REPO_ROOT = new URL("../../", import.meta.url).pathname;
 const PODMAN_URL = "unix:///run/podman/podman.sock";
 const NETWORK = "codespace";
 const SUBNET = "10.77.0.0/24";

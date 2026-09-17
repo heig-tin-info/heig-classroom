@@ -39,7 +39,7 @@
  * conteneur, sous le même utilisateur `student`, avec le même durcissement.
  * C'est le même shell, ouvert par une autre porte.
  *
- * Lancement :  pnpm --filter @codespace/portal e2e
+ * Lancement :  pnpm --filter @hgc/codespace e2e
  */
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -70,10 +70,10 @@ process.env["SEB_VERIFIER"] = "simulated";
 // sans second poste. `loadConfig()` refuse ce réglage en production.
 process.env["TRUST_PROXY"] = "1";
 
-const { loadConfig } = await import("../apps/portal/src/auth/config.js");
-const { buildPortal } = await import("../apps/portal/src/server.js");
-const { runSeed } = await import("../apps/portal/src/db/seed.js");
-const { containerNameFor } = await import("../apps/portal/src/sessions/manager.js");
+const { loadConfig } = await import("../src/auth/config.js");
+const { buildPortal } = await import("../src/server.js");
+const { runSeed } = await import("../src/db/seed.js");
+const { containerNameFor } = await import("../src/sessions/manager.js");
 
 const config = loadConfig();
 const BASE = `http://localhost:${config.PORT}`;

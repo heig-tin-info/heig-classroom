@@ -3,7 +3,7 @@
  *
  * Remplace `git/db.ts`, qui n'existait que le temps que P3 tourne seul : il y
  * a maintenant un seul endroit qui ouvre la base, et les migrations
- * drizzle-kit de `apps/portal/drizzle/` sont la seule source du schéma
+ * drizzle-kit de `drizzle/` sont la seule source du schéma
  * physique.
  *
  * `:memory:` est accepté pour les tests ; le fichier est créé avec son
@@ -28,7 +28,7 @@ export interface DbHandle {
 }
 
 /**
- * `apps/portal/drizzle`, quel que soit le répertoire de lancement **et** que
+ * `drizzle`, quel que soit le répertoire de lancement **et** que
  * l'on tourne depuis `src/` (tsx, vitest) ou depuis `dist/` (`pnpm start`) :
  * la profondeur n'est pas la même, donc le répertoire est cherché, pas compté.
  */

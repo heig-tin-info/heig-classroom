@@ -1,7 +1,7 @@
 # Preuve B, partie manuelle : un vrai Safe Exam Browser
 
 La partie automatisée de la preuve B est dans
-[`apps/portal/src/seb/`](../apps/portal/src/seb/README.md) : elle prouve que le
+[`src/seb/`](../src/seb/README.md) : elle prouve que le
 portail calcule la même Config Key que l'implémentation de référence et qu'il
 refuse tout ce qui n'est pas une requête SEB valide. Elle ne peut pas prouver
 qu'un **vrai** SEB accepte la configuration générée et envoie les en-têtes

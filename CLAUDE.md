@@ -8,7 +8,7 @@ Projet frère : `~/heig-classroom` (même auteur, même pile, même IdP, même G
 
 Node 22, TypeScript strict, Fastify 5, Zod, Drizzle sur SQLite, `openid-client`, `octokit`, vitest, pnpm. Pas d'injection de dépendances, pas de décorateurs, pas de framework front en v0 (HTML servi par Fastify). Code et identifiants en anglais, documentation et commits en français.
 
-Moteur de conteneurs : Podman **rootful**, piloté par la CLI depuis le seul module `apps/portal/src/engine/`, toujours sous la forme `podman --remote --url unix:///run/podman/podman.sock ... --format json`. Sans `--remote`, le binaire bascule silencieusement en rootless local et tous les tests réseau mesurent autre chose. Jamais Docker, jamais Docker Desktop, jamais rootless.
+Moteur de conteneurs : Podman **rootful**, piloté par la CLI depuis le seul module `src/engine/`, toujours sous la forme `podman --remote --url unix:///run/podman/podman.sock ... --format json`. Sans `--remote`, le binaire bascule silencieusement en rootless local et tous les tests réseau mesurent autre chose. Jamais Docker, jamais Docker Desktop, jamais rootless.
 
 ## Invariants (ne jamais contourner, même "temporairement")
 
