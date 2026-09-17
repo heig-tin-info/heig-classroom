@@ -1,0 +1,22 @@
+{
+  "name": "heig-codespace",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Portail d'environnements de développement supervisés (code-server, Podman, SEB)",
+  "packageManager": "pnpm@10.34.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "pnpm --filter @codespace/portal dev"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

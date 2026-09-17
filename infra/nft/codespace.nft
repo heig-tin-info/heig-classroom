@@ -1,0 +1,102 @@
+#!/usr/sbin/nft -f
+#
+# Règles nftables FIXES du réseau `codespace` (jalon 0, tâche P2).
+# Chargées une fois au démarrage par infra/net/setup.sh. Aucune règle par
+# session : rien ici ne mentionne un conteneur, une IP d'étudiant ou un veth.
+#
+# Les deux règles de l'invariant 2 (CLAUDE.md) :
+#   1. pas de trafic conteneur <-> conteneur sur le pont cs0        -> chain forward
+#   2. seul le port Git (9418) est joignable sur l'hôte depuis cs0  -> chain input
+#
+# ----------------------------------------------------------------------------
+# Pourquoi la famille `inet` et pas la famille `bridge`
+# ----------------------------------------------------------------------------
+# analyse.md D1 prescrit `bridge` + `meta ibrname`. Mesuré le 2026-09-17 sur ce
+# poste : le noyau WSL2 6.18.33.2-microsoft-standard n'a PAS la famille bridge
+# (`CONFIG_NF_TABLES_BRIDGE` absent : ni nf_tables_bridge.ko dans
+# /lib/modules/$(uname -r), ni dans modules.builtin ; `modinfo nf_tables_bridge`
+# -> "Module not found"). Une table `bridge` serait acceptée par l'analyseur de
+# nft puis refusée par le noyau au chargement.
+#
+# Équivalent retenu : `br_netfilter` fait traverser les paquets IP pontés par
+# les hooks IP normaux, avec iifname/oifname = le pont (le port veth n'est
+# visible que par le match `physdev`). C'est exactement le mécanisme de
+# `docker --icc=false` (`-i docker0 -o docker0 -j DROP`). Le module est chargé
+# et bridge-nf-call-iptables / -ip6tables valent 1 sur ce poste ; setup.sh le
+# garantit explicitement, parce que sans ça la règle 1 est silencieusement
+# inopérante.
+#
+# La variante famille `bridge` est dans codespace-bridge.nft : setup.sh la
+# charge en plus, en défense en profondeur, sur un noyau qui la supporte
+# (une vraie VM Ubuntu). Elle n'est jamais nécessaire au test.
+#
+# ----------------------------------------------------------------------------
+# Cohabitation avec netavark
+# ----------------------------------------------------------------------------
+# netavark pose ses propres chaînes dans `table inet netavark` (priorité filter,
+# soit 0). On se place à `filter - 10` : nos chaînes voient le paquet en premier.
+# Ça ne change pas le résultat — un `drop` dans n'importe quelle chaîne d'un
+# hook est terminal pour le paquet, un `accept` n'est terminal que dans sa
+# propre chaîne — mais ça évite de dépendre de l'ordre.
+# Nos deux chaînes de base ont `policy accept` : elles ne peuvent donc pas
+# casser un autre réseau Podman. Toutes les règles sont gardées par
+# `iifname "cs0"`, donc le pont `podman` par défaut et les réseaux de
+# compose.dev.yml ne sont jamais touchés.
+# TODO(verify) nftables 1.1.6 / netavark 1.x : relire `nft list table inet
+# netavark` une fois la table chargée (lecture du ruleset impossible sans root
+# au moment de l'écriture de ce fichier) et confirmer la priorité 0.
+#
+# ----------------------------------------------------------------------------
+# Idempotence
+# ----------------------------------------------------------------------------
+# `table` puis `delete table` : crée la table vide si elle n'existe pas, la
+# supprime, puis la recrée entièrement. `nft -f` sur ce fichier est rejouable.
+
+table inet codespace
+delete table inet codespace
+
+table inet codespace {
+
+	# <<<ICC (marqueur pour le test de régression, ne pas renommer)
+	chain forward {
+		type filter hook forward priority filter - 10; policy accept;
+
+		# Règle 1 : deux conteneurs du réseau codespace ne se parlent pas.
+		# Couvre IPv4 et IPv6 (famille inet) : les conteneurs reçoivent une
+		# adresse lien-local fe80::/64 même sur un réseau sans IPv6, et
+		# bridge-nf-call-ip6tables=1 fait passer ce trafic ici aussi.
+		# Le trafic hôte <-> conteneur ne passe PAS par forward (l'adresse
+		# 10.77.0.254 est portée par cs0, donc c'est de l'input/output local).
+		iifname "cs0" oifname "cs0" drop comment "ICC: pas de conteneur<->conteneur"
+	}
+	# ICC>>>
+
+	# <<<INPUT (marqueur pour le test de régression, ne pas renommer)
+	chain input {
+		type filter hook input priority filter - 10; policy accept;
+
+		# Tout ce qui n'arrive pas par le pont codespace ne nous regarde pas.
+		iifname != "cs0" return
+
+		# Réponses aux connexions ouvertes par l'HÔTE vers un conteneur
+		# (le proxy du portail vers code-server sur 8080). Sans cette règle,
+		# le portail ne peut plus parler à code-server : les paquets retour
+		# arrivent bien sur cs0, avec un port destination éphémère.
+		# Un conteneur ne peut rien "établir" par là : l'état established
+		# suppose que l'hôte a initié.
+		ct state established,related accept
+
+		# Règle 2 : seule surface de l'hôte exposée au conteneur, le proxy Git
+		# (apps/portal/src/git, lié à 10.77.0.254:9418 et à rien d'autre).
+		tcp dport 9418 accept comment "canal Git, auth par IP source"
+
+		# Pas d'exception ICMP echo : un ping vers la passerelle n'apporte
+		# aucune fonctionnalité à l'étudiant (le diagnostic se fait depuis
+		# l'hôte) et donne un oracle de présence. Les erreurs ICMP utiles
+		# (fragmentation, TTL) sont déjà couvertes par `related` ci-dessus.
+		# ARP n'est pas concerné : la famille inet ne voit pas l'ARP, la
+		# résolution hôte <-> conteneur sur le pont continue de fonctionner.
+		drop comment "tout le reste depuis cs0 est jete"
+	}
+	# INPUT>>>
+}
