@@ -149,6 +149,11 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
     // dans le conteneur ; le remote écrit dans l'espace de travail l'utilise.
     gitRemoteHost: "portal.internal",
     gitRemotePort: config.CODESPACE_GIT_PORT,
+    // Origines de retour du bouton « Fermer » de l'extension de barre d'état
+    // (images/c-dev/extension) : classroom pour une session venue d'un jeton
+    // de lancement, le portail sinon.
+    classroomUrl: config.CLASSROOM_URL,
+    publicUrl: config.PUBLIC_URL,
     log: app.log,
     ...(forge
       ? {

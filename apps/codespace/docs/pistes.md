@@ -48,6 +48,19 @@ Session ouverte depuis classroom par un vrai compte, VS Code servi, push relayé
 2. **Disposition clavier détectée « Swiss German »** : VS Code Web n'a pas de disposition suisse romande. La frappe n'est pas affectée, seuls certains raccourcis le sont ; poser `keyboard.dispatch: keyCode` dans l'image.
 3. **Extension de barre d'état** (déjà en piste 4 ci-dessus, désormais prioritaire) : compte à rebours jusqu'à l'échéance du devoir et bouton « Fermer » qui ramène vers classroom. Le portail transmet l'échéance et l'URL de retour au conteneur au démarrage (variables d'environnement ou fichier de réglages machine) ; l'extension est cuite dans l'image et dans la liste blanche.
 
+### Traités le 2026-09-18 (branche `feat/codespace-image-ux`)
+
+Les trois points ci-dessus sont faits. Détail, preuves et limites dans
+[images/c-dev/README.md](../images/c-dev/README.md).
+
+1. **Fait.** `workbench.secondarySideBar.defaultVisibility: "hidden"` dans les réglages machine. Le nom, l'énumération et le défaut amont (`visibleInWorkspace`) ont été relevés par `grep` dans le paquet VS Code 1.137.0 embarqué ; `test.sh` § 7 rejoue la recherche. Effet visuel à constater au navigateur : `TODO(verify)`.
+2. **Fait.** `keyboard.dispatch: "keyCode"`, même méthode de vérification (`enum:["code","keyCode"]`, défaut `code`). La frappe n'est pas affectée, c'est noté dans le README de l'image. Réserve relevée et notée `TODO(verify)` : la déclaration porte `included: jo===2||jo===3`, donc la clé n'est enregistrée que pour macOS et Linux — à vérifier sur un poste Windows, qui est la plateforme de la salle.
+3. **Fait.** Extension `heig.codespace-statusbar` 0.1.0, JavaScript pur, empaquetée en `.vsix` par une étape multi-stage (`node:22-slim` + `@vscode/vsce` 4.0.0) puis installée comme les deux autres extensions, donc listée par `--list-extensions` et ajoutée à `extensions.allowed`. Le portail pose trois variables au `podman run` — `CODESPACE_DEADLINE` (l'échéance du devoir), `CODESPACE_RETURN_URL` (classroom si la session vient d'un jeton de lancement, le portail sinon), `CODESPACE_ASSIGNMENT_NAME` — et **rien d'autre** : un test unitaire et `test.sh` § 9 l'affirment, invariant 1 oblige.
+
+Ce que cela ne règle pas, et qui reste en piste 2 ci-dessus : « Fermer » ouvre
+un onglet vers l'URL de retour, il ne termine pas la session. Une vraie route
+« terminer » (arrêt du conteneur, volume conservé) reste à écrire côté portail.
+
 ## Correction au cadrage relevée par le test SEB
 
 Le filtre d'URL de SEB doit autoriser le domaine du fournisseur d'identité (Switch edu-ID) en plus de celui du portail, sinon la page de connexion est bloquée. Le cadrage parlait d'une règle de domaine unique.

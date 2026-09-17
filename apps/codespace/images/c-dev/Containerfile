@@ -3,6 +3,24 @@
 #                    build -t codespace/c-dev images/c-dev
 # Lancee par images/c-dev/run-hardened.sh (durcissement obligatoire, CLAUDE.md invariant 3).
 
+# --- Etape 1 : fabrication du .vsix de l'extension de barre d'etat ----------
+# Empaquetage seulement : l'extension est du JavaScript pur, sans dependance ni
+# bundler. `@vscode/vsce` est epingle ; c'est le seul acces reseau de cette
+# etape et il ne laisse rien dans l'image finale, qui ne recoit que le .vsix.
+FROM docker.io/library/node:22-slim@sha256:4d676821dff059fd00d277ee4261ef34ea712317fed0737c03941481b5760c96 AS vsix
+ARG VSCE_VERSION=4.0.0
+ARG EXT_STATUSBAR_ID=heig.codespace-statusbar
+ARG EXT_STATUSBAR_VERSION=0.1.0
+WORKDIR /ext
+COPY extension/ /ext/
+# `--allow-missing-repository` : l'extension n'est pas publiee, elle n'a pas de
+# depot propre. Sans ce drapeau vsce refuse d'empaqueter.
+RUN npx --yes "@vscode/vsce@${VSCE_VERSION}" package \
+        --allow-missing-repository \
+        --out "/${EXT_STATUSBAR_ID}-${EXT_STATUSBAR_VERSION}.vsix" && \
+    test -s "/${EXT_STATUSBAR_ID}-${EXT_STATUSBAR_VERSION}.vsix"
+
+# --- Etape 2 : l'image etudiante --------------------------------------------
 # Debian 13 « trixie », stable au 2026-09-17, epinglee par empreinte.
 FROM docker.io/library/debian:trixie-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
 
@@ -13,6 +31,11 @@ ARG CS_VERSION=4.137.0
 # au build est inscrite dans /etc/code-server/extensions.lock.
 ARG EXT_CLANGD=llvm-vs-code-extensions.vscode-clangd
 ARG EXT_DEBUG=webfreak.debug
+# Extension locale, fabriquee par l'etape `vsix` ci-dessus : barre d'etat du
+# portail (compte a rebours de l'echeance, bouton de retour). Elle n'est pas
+# publiee, donc elle s'installe depuis le .vsix et pas depuis Open VSX.
+ARG EXT_STATUSBAR=heig.codespace-statusbar
+ARG EXT_STATUSBAR_VERSION=0.1.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -66,19 +89,23 @@ RUN useradd --uid 1000 --create-home --shell /bin/bash student && \
 #    code-server). Le repertoire est sur la racine, donc en lecture seule a
 #    l'execution : c'est la seule barriere qui tienne contre un .vsix apporte
 #    par l'etudiant (docs/analyse.md 3.2).
+COPY --from=vsix /heig.codespace-statusbar-0.1.0.vsix /tmp/codespace-statusbar.vsix
 RUN mkdir -p /opt/code-server/extensions /tmp/cs-build /etc/code-server && \
     code-server \
         --extensions-dir /opt/code-server/extensions \
         --user-data-dir /tmp/cs-build \
         --force \
         --install-extension "${EXT_CLANGD}" \
-        --install-extension "${EXT_DEBUG}" && \
+        --install-extension "${EXT_DEBUG}" \
+        --install-extension /tmp/codespace-statusbar.vsix && \
     code-server \
         --extensions-dir /opt/code-server/extensions \
         --user-data-dir /tmp/cs-build \
         --list-extensions --show-versions | tee /etc/code-server/extensions.lock && \
     grep -qi "^${EXT_CLANGD}@" /etc/code-server/extensions.lock && \
     grep -qi "^${EXT_DEBUG}@" /etc/code-server/extensions.lock && \
+    grep -qi "^${EXT_STATUSBAR}@${EXT_STATUSBAR_VERSION}$" /etc/code-server/extensions.lock && \
+    rm -f /tmp/codespace-statusbar.vsix && \
     rm -rf /tmp/cs-build /root/.config/code-server /root/.local && \
     chown -R root:root /opt/code-server && \
     chmod -R a-w /opt/code-server

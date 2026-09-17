@@ -506,6 +506,25 @@ sans risque.
 
 L'image étudiante est reconstruite automatiquement (1 à 2 min) si elle manque.
 
+### Changer l'image sans changer son étiquette
+
+`push.sh` ne reconstruit l'image que si `podman image exists` la dit absente :
+une modification de `images/c-dev/` qui garde l'étiquette
+`codespace/c-dev:4.137.0` **ne serait pas prise**. Dans ce cas, et c'est le
+cas courant (réglages machine, extension cuite dans l'image), le déploiement
+est :
+
+```bash
+apps/codespace/deploy/push.sh --rebuild-image
+```
+
+Le `rsync` de `images/` vers `/srv/codespace/src` a lieu de toute façon ; seule
+la reconstruction est conditionnelle. Depuis le 2026-09-18, le build de l'image
+comporte une étape multi-stage `node:22-slim` qui empaquette l'extension de
+barre d'état : la VM télécharge cette image de base la première fois (~80 Mo)
+et `npx @vscode/vsce` va chercher son paquet sur npm. Les deux demandent du
+réseau sortant sur la VM, qui l'a.
+
 ### Redémarrage de l'hôte
 
 Rien n'est à faire : vérifié par un redémarrage réel. `podman.socket`,

@@ -49,6 +49,14 @@ export interface RunRequest {
   workDir: string;
   /** Écrase `EngineOptions.image` quand le devoir impose une autre image. */
   image?: string;
+  /**
+   * Variables d'environnement posées sur le conteneur, en plus de celles de
+   * l'image. **Invariant 1** : aucun secret n'y entre jamais. Le seul appelant
+   * est `sessions/manager.ts`, qui n'y met que les trois variables de
+   * `CONTAINER_ENV_KEYS` (échéance, URL de retour, titre du devoir) — un test
+   * unitaire l'affirme.
+   */
+  env?: Record<string, string>;
 }
 
 export interface ContainerInfo {
@@ -167,6 +175,11 @@ export function createEngine(opts: EngineOptions): Engine {
       "--dns=none",
       "--add-host",
       `portal.internal:${opts.gateway}`,
+      // --- environnement du conteneur, invariant 1 -------------------------
+      // Rien d'autre que ce que l'appelant a posé, et lui n'y met aucun
+      // secret. `-e CLE=valeur` plutôt que `--env-file` : la liste doit être
+      // lisible dans `podman inspect` et dans les arguments rendus ici.
+      ...Object.entries(req.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
       // --- volume, analyse.md D6 -------------------------------------------
       // `:U` : avec --userns=auto l'UID mappé change à chaque démarrage, donc
       // Podman rechown l'arborescence vers la plage du conteneur. Ne jamais
