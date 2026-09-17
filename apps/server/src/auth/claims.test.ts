@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addressesOf,
   affiliationKinds,
   affiliationsOf,
   claimList,
@@ -54,8 +55,51 @@ describe("affiliationsOf", () => {
     ).toEqual(["student", "student@heig-vd.ch", "member@heig-vd.ch", "staff@hes-so.ch"]);
   });
 
+  it("reads eduPersonAffiliation, which edu-ID does release", () => {
+    // Production releases the unscoped claim alongside the scoped one and
+    // does NOT release eduPersonPrimaryAffiliation.
+    expect(
+      affiliationsOf({
+        eduPersonAffiliation: ["member", "staff"],
+        eduPersonScopedAffiliation: ["staff@hes-so.ch"],
+      }),
+    ).toEqual(["member", "staff", "staff@hes-so.ch"]);
+  });
+
   it("is empty when the IdP releases no affiliation", () => {
     expect(affiliationsOf({ email: "who@example.test" })).toEqual([]);
+  });
+});
+
+describe("addressesOf", () => {
+  it("puts the login address first, then the institutional ones", () => {
+    // Shape observed on production: a private login address, one @heig-vd.ch
+    // affiliation address.
+    expect(
+      addressesOf({
+        email: "Willy.TK89@gmail.test",
+        swissEduIDLinkedAffiliationMail: ["William.Ammann@heig-vd.ch"],
+      }),
+    ).toEqual([
+      { email: "willy.tk89@gmail.test", source: "login" },
+      { email: "william.ammann@heig-vd.ch", source: "swissEduIDLinkedAffiliationMail" },
+    ]);
+  });
+
+  it("keeps the first source of an address released twice", () => {
+    const found = addressesOf({
+      email: "a@heig.test",
+      swissEduIDLinkedAffiliationMail: ["a@heig.test"],
+      swissEduIDAssociatedMail: ["b@heig.test"],
+    });
+    expect(found).toEqual([
+      { email: "a@heig.test", source: "login" },
+      { email: "b@heig.test", source: "swissEduIDAssociatedMail" },
+    ]);
+  });
+
+  it("is empty when the IdP released nothing usable", () => {
+    expect(addressesOf({ sub: "abc" })).toEqual([]);
   });
 });
 

@@ -12,8 +12,8 @@ import { isDateFormat, isEmailKind, type DateFormat } from "@hgc/contracts";
 import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { claimStaffSeats } from "../modules/staff.js";
-import { roleForEmail } from "../roles.js";
-import { recordIdpClaims } from "./claims.js";
+import { roleForIdentity } from "../roles.js";
+import { addressesOf, affiliationsOf, recordIdpClaims, syncUserEmails } from "./claims.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
   CSRF_COOKIE,
@@ -43,7 +43,13 @@ async function upsertUser(
   config: AppConfig,
   claims: OidcClaims,
 ): Promise<SessionUser> {
-  const role = await roleForEmail(app.db, config, claims.email);
+  // GH-11: the role is computed on every address the IdP revealed, and on
+  // the affiliations it asserts — a grant issued on an institutional address
+  // must reach someone signing in under a private one.
+  const role = await roleForIdentity(app.db, config, {
+    emails: addressesOf(claims.raw).map((a) => a.email),
+    affiliations: affiliationsOf(claims.raw),
+  });
   const now = new Date();
   const [row] = await app.db
     .insert(users)
@@ -168,18 +174,21 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     }
 
     const user = await upsertUser(app, config, claims);
-    // Snapshot of what the IdP released (GH-11): diagnostic material for the
-    // roster matching, and never a reason to refuse a session.
+    // Snapshot of what the IdP released (GH-11): diagnostic material, and
+    // never a reason to refuse a session.
     try {
       await recordIdpClaims(app.db, user.id, claims.raw);
     } catch (err) {
       req.log.warn({ err }, "Could not record the IdP claims");
     }
+    // The address set, on the other hand, IS load-bearing: the roster and
+    // staff matching below read it, so a failure here must surface.
+    await syncUserEmails(app.db, user.id, claims.raw, claims.emailVerified);
     // Automatic roster claim on verified email (AU-18, H3); staff seats
     // invited by e-mail (GH-9) are attached under the same condition.
     if (claims.emailVerified) {
-      await claimEnrollments(app.db, { id: user.id, email: user.email });
-      await claimStaffSeats(app.db, { id: user.id, email: user.email });
+      await claimEnrollments(app.db, { id: user.id });
+      await claimStaffSeats(app.db, { id: user.id });
     }
     const session = await createSession(app.db, user.id, config.SESSION_TTL_HOURS);
     await audit(app.db, {

@@ -52,6 +52,24 @@ passe local (NFR-01).
   un incident d'authentification coûte cher à diagnostiquer après coup. En contrepartie, la
   table MUST rester confinée au serveur — jamais jointe à une vue utilisateur, jamais
   affichée, jamais exposée par l'API.
+- **AU-02d** — (GH-11) Un compte est identifié par un **ensemble d'adresses** :
+  l'adresse de login (`email`) et les adresses institutionnelles portées par
+  `swissEduIDLinkedAffiliationMail`. Elles sont enregistrées dans `user_emails` à
+  chaque connexion et ne sont jamais retirées — une affiliation qui se termine ne doit
+  pas détacher un étudiant en cours de semestre. Tout rattachement (roster, sièges
+  staff, teacher grants, rôle) MUST se faire sur cet ensemble, jamais sur la seule
+  adresse de login. Seules les adresses vérifiées comptent : celle du login porte le
+  `email_verified` de l'IdP, celles affirmées par l'organisation sont vérifiées par
+  construction.
+- **AU-02e** — (GH-11) Un rattachement ambigu MUST être signalé, jamais deviné. Trois
+  cas : l'adresse d'une ligne de roster est détenue par deux comptes ; plusieurs lignes
+  d'une même classroom correspondent au même compte ; le compte détient déjà une ligne
+  dans cette classroom. Les trois lèvent `conflict_flag` (AU-21) et n'écrivent aucun
+  rattachement. Un siège staff ambigu reste non réclamé.
+- **AU-02f** — (GH-11) Le rôle `teacher` est accordé, en plus des `teacher_grants` et des
+  sièges staff (GH-9), à un compte dont les affiliations edu-ID contiennent `staff` sans
+  `student`. Un·e assistant·e étudiant·e porte les deux et reste `student`. Les gardes de
+  classroom sont inchangées : ce rôle ne donne accès à aucune classroom d'autrui.
 - **AU-03** — À la première connexion réussie, le backend MUST créer un compte local :
   `{ oidc_sub, email, email_verified, given_name, family_name, role, created_at }`.
   Le compte est identifié par `oidc_sub`, jamais par l'e-mail (l'e-mail edu-ID peut

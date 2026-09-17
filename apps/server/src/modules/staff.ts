@@ -17,11 +17,12 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import type { AppConfig } from "../config.js";
 import type { Db } from "../db/client.js";
 import { classroomStaff, users } from "../db/schema.js";
+import { emailIn, knownEmails, ownersOf } from "../identity.js";
 import { syncUserRole } from "../roles.js";
 
 export type StaffRole = (typeof classroomStaff.$inferSelect)["role"];
@@ -50,28 +51,28 @@ export async function staffView(db: Db, classroomId: string) {
  * (mirror of roster.ts `claimEnrollments`). Gated on the verified e-mail by
  * the caller: an unverified address must never inherit someone's seat.
  */
-export async function claimStaffSeats(db: Db, user: { id: string; email: string }) {
+export async function claimStaffSeats(db: Db, user: { id: string }) {
+  // GH-11: a colleague invited on their @heig-vd.ch address but signing in
+  // under a private one is the same bug as for the students — the seat is
+  // matched against every address known for the account.
+  const emails = await knownEmails(db, user.id);
+  if (emails.length === 0) return 0;
   const claimed = await db
     .update(classroomStaff)
     .set({ userId: user.id })
-    .where(
-      and(
-        isNull(classroomStaff.userId),
-        sql`lower(${classroomStaff.email}) = ${user.email.toLowerCase()}`,
-      ),
-    )
+    .where(and(isNull(classroomStaff.userId), emailIn(classroomStaff.email, emails)))
     .returning({ id: classroomStaff.id });
   return claimed.length;
 }
 
-/** Existing verified account for that e-mail, if any (same rule as the roster claim). */
+/**
+ * Existing verified account holding that address, if any (same rule as the
+ * roster claim). Two accounts holding it is a collision: the seat stays
+ * unclaimed rather than landing on the wrong person (GH-11).
+ */
 async function resolveUserId(db: Db, email: string): Promise<string | null> {
-  const [row] = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(and(sql`lower(${users.email}) = ${email}`, eq(users.emailVerified, true)))
-    .limit(1);
-  return row?.id ?? null;
+  const owners = await ownersOf(db, email);
+  return owners.length === 1 ? owners[0]! : null;
 }
 
 export type AddStaffResult =

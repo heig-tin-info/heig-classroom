@@ -16,6 +16,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -72,6 +73,43 @@ const bytea = customType<{ data: Buffer }>({
     return "bytea";
   },
 });
+
+/**
+ * Every e-mail address known for an account (GH-11). Switch edu-ID lets a
+ * person sign in under a self-chosen preferred address — often a private
+ * mailbox — while GAPS exports the institutional one, so matching a roster
+ * line against `users.email` alone misses them. The institutional addresses
+ * come from the `swissEduIDLinkedAffiliationMail` claim and land here at
+ * every login; `users.email` stays the login address, used for display.
+ *
+ * Addresses are kept once seen, even if the affiliation later ends: losing
+ * one would silently unmatch a student mid-semester.
+ */
+export const userEmails = pgTable(
+  "user_emails",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Normalized (trim + lowercase), like the roster (AU-14). */
+    email: text("email").notNull(),
+    /** `login`, or the name of the claim it came from — plain text, so a
+     *  change in what edu-ID releases needs no migration. */
+    source: text("source").notNull(),
+    /**
+     * An address asserted by the home organization is verified by
+     * construction; only the login claim carries `email_verified`. Matching
+     * reads verified addresses exclusively (AU-18).
+     */
+    verified: boolean("verified").notNull().default(true),
+    firstSeenAt: timestamp("first_seen_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.email] }),
+    // Reverse lookup: which account owns this address (roster, staff seats).
+    index("user_emails_email_idx").on(t.email),
+  ],
+);
 
 /**
  * Raw claim set released by the IdP at the last login (GH-11). Diagnostic
