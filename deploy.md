@@ -177,10 +177,28 @@ IMAGE_TAG=<sha du commit sain> docker compose -f compose.prod.yml \
 
 ## 8. Sauvegardes (NFR-16 : RPO 24 h, RTO 4 h)
 
-- Le service `backup` du compose fait un `pg_dump -Fc` quotidien dans `./backups/`
-  (rétention 30 jours). **À câbler** : copie hors droplet, p. ex.
-  `rclone copy backups remote:hgc-backups` en cron (DigitalOcean Spaces, stockage
-  SWITCH…).
+Deux niveaux, complémentaires :
+
+- **Snapshot DigitalOcean quotidien du droplet** (géré par DO, hors VM). Couvre la
+  perte totale de la machine : on restaure le droplet entier, secrets et volumes
+  compris. C'est une image disque d'un Postgres en fonctionnement, donc *crash
+  consistent* : au redémarrage Postgres rejoue son WAL. C'est correct, mais ce n'est
+  pas l'équivalent d'un dump propre, et la granularité est la journée.
+- **`pg_dump -Fc` quotidien** par le service `backup` du compose, dans `./backups/`
+  (rétention 30 jours). Dump logique, restaurable table par table — le bon outil pour
+  revenir en arrière sur une migration ou récupérer des données précises. Vit **sur la
+  VM qu'il protège** : en cas de perte du droplet, c'est le snapshot DO qui sert.
+- **Avant toute migration**, prendre un dump frais plutôt que de se fier au quotidien :
+
+```bash
+cd /opt/heig-classroom && docker compose -f compose.prod.yml --env-file .env.prod \
+  exec -T postgres pg_dump -Fc -U hgc hgc > "backups/pre-<migration>-$(date +%F-%H%M).dump"
+```
+
+- **Reste à câbler** si on veut un dump logique hors VM : `rclone copy backups
+  remote:hgc-backups` en cron (DigitalOcean Spaces, stockage SWITCH…). Le snapshot DO
+  couvre déjà le sinistre machine, donc ce n'est plus un trou béant — mais restaurer
+  une seule table depuis un snapshot reste laborieux.
 - Restauration :
 
 ```bash
