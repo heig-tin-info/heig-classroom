@@ -18,6 +18,19 @@ import { pushWithRetry } from "./retry.js";
 
 const PROTECT_RULESET = "hgc-protect";
 
+/**
+ * GitHub Free serves no repository ruleset on a private repository and answers
+ * 403 "Upgrade to GitHub Pro or make this repository public to enable this
+ * feature." Recognised by its wording so that a genuine permission 403 (App
+ * scope revoked, SAML enforcement) keeps failing the provisioning loudly.
+ */
+const PLAN_RESTRICTION = /upgrade to github|make this repository public/i;
+
+function isPlanRestriction(err: unknown): boolean {
+  const { status, message } = err as { status?: number; message?: string };
+  return status === 403 && PLAN_RESTRICTION.test(String(message ?? ""));
+}
+
 // Provisioning only clones and pushes existing refs: no bot identity needed.
 const { git, gitBare } = gitRunner();
 
@@ -121,24 +134,33 @@ export async function provisionStudentRepo(opts: {
     // Best effort: a failed alignment must not fail the provisioning.
   }
 
-  // 3. Ruleset against force-push / deletion (GH-21..23).
-  const { data: rulesets } = await octokit.request("GET /repos/{owner}/{repo}/rulesets", {
-    owner: org,
-    repo: targetRepo,
-  });
-  let rulesetId =
-    rulesets.find((r: { name: string; id: number }) => r.name === PROTECT_RULESET)?.id ?? null;
-  if (rulesetId === null) {
-    const { data } = await octokit.request("POST /repos/{owner}/{repo}/rulesets", {
+  // 3. Ruleset against force-push / deletion (GH-21..23). On a plan without
+  // rulesets the repository stays unprotected rather than being denied to the
+  // student: same degraded mode as the deadline (fallback H8), which archives
+  // when it cannot lock. The teacher is warned on the classroom page.
+  let rulesetId: number | null = null;
+  try {
+    const { data: rulesets } = await octokit.request("GET /repos/{owner}/{repo}/rulesets", {
       owner: org,
       repo: targetRepo,
-      name: PROTECT_RULESET,
-      target: "branch",
-      enforcement: "active",
-      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
-      rules: [{ type: "non_fast_forward" }, { type: "deletion" }],
     });
-    rulesetId = data.id;
+    rulesetId =
+      rulesets.find((r: { name: string; id: number }) => r.name === PROTECT_RULESET)?.id ?? null;
+    if (rulesetId === null) {
+      const { data } = await octokit.request("POST /repos/{owner}/{repo}/rulesets", {
+        owner: org,
+        repo: targetRepo,
+        name: PROTECT_RULESET,
+        target: "branch",
+        enforcement: "active",
+        conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+        rules: [{ type: "non_fast_forward" }, { type: "deletion" }],
+      });
+      rulesetId = data.id;
+    }
+  } catch (err) {
+    if (!isPlanRestriction(err)) throw err;
+    rulesetId = null;
   }
 
   // 4. Invite the student with push permission (idempotent: 204 = already a collaborator).
