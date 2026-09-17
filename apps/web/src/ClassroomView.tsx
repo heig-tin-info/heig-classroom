@@ -281,10 +281,13 @@ function FreePlanWarning({ orgLogin }: { orgLogin: string }) {
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
       <AlertTriangle className="size-4 shrink-0" />
       <span>
-        <span className="font-medium">{orgLogin}</span> is on the GitHub <span className="font-medium">Free</span> plan:
-        organization secrets are not delivered to private repositories, so the automatic LLM
-        review will fail silently. As a teacher you can upgrade the organization to GitHub Team
-        for free through GitHub Education.
+        <span className="font-medium">{orgLogin}</span> is on the GitHub <span className="font-medium">Free</span> plan,
+        which restricts what private repositories can do. Student repositories are created and
+        handed over as usual, but they get no branch protection — a student can force-push or
+        delete their history — and the deadline falls back to archiving instead of locking.
+        Organization secrets are not delivered either, so the automatic LLM review fails
+        silently. As a teacher you can upgrade the organization to GitHub Team for free through
+        GitHub Education.
       </span>
       <span className="flex-1" />
       <a

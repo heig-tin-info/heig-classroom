@@ -306,7 +306,13 @@ export async function studentPlugin(
           action: "assignment.accept",
           subjectType: "student_repo",
           subjectId: repoRow!.id,
-          payload: { repo: result.fullName, invitation: result.invitationStatus },
+          // `protected: false` = plan without rulesets, the repository is
+          // provisioned but not shielded from force-push (degraded mode H8).
+          payload: {
+            repo: result.fullName,
+            invitation: result.invitationStatus,
+            protected: result.rulesetId !== null,
+          },
         });
         publish("repos", [`classroom:${row.assignment.classroomId}`, `user:${me.id}`], {
           kind: "assignment_accepted",
