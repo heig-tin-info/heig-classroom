@@ -10,6 +10,27 @@ import * as oidc from "openid-client";
 
 import type { AppConfig } from "../config.js";
 
+/**
+ * Switch edu-ID publishes ALL of its attributes behind this single scope —
+ * the e-mail addresses of the institutional affiliations in particular
+ * (GH-11) — and the older `.../authz/User.Read` is deprecated. Asking for an
+ * unknown scope makes an IdP answer `invalid_scope`, so it is only added
+ * when the issuer is edu-ID itself; the dev Keycloak keeps the plain set.
+ */
+const EDUID_SCOPE = "https://eduid.ch/scope/userinfo.read";
+
+/** Scope string for an issuer. Exported for the tests. */
+export function scopeFor(issuer: string): string {
+  const base = "openid profile email";
+  let host: string;
+  try {
+    host = new URL(issuer).hostname;
+  } catch {
+    return base;
+  }
+  return host === "eduid.ch" || host.endsWith(".eduid.ch") ? `${base} ${EDUID_SCOPE}` : base;
+}
+
 export interface OidcClaims {
   sub: string;
   email: string;
@@ -19,12 +40,17 @@ export interface OidcClaims {
   swissEduId: string | null;
   /** OIDC `picture` claim (URL), if the IdP provides it. */
   picture: string | null;
+  /** Everything the IdP released, ID token and userinfo merged (GH-11). */
+  raw: Record<string, unknown>;
 }
 
 export class OidcProvider {
   private config: oidc.Configuration | null = null;
 
-  constructor(private readonly app: AppConfig) {}
+  constructor(
+    private readonly app: AppConfig,
+    private readonly log?: { warn: (obj: unknown, msg: string) => void },
+  ) {}
 
   /** Lazy discovery with caching: an IdP unreachable at boot must not
    *  prevent the server (and /healthz) from starting. */
@@ -73,7 +99,7 @@ export class OidcProvider {
     const nonce = oidc.randomNonce();
     const url = oidc.buildAuthorizationUrl(config, {
       redirect_uri: this.redirectUri,
-      scope: "openid profile email",
+      scope: scopeFor(this.app.OIDC_ISSUER),
       code_challenge: codeChallenge,
       code_challenge_method: "S256",
       state,
@@ -96,16 +122,27 @@ export class OidcProvider {
     // identity claims leave this function.
     const idClaims = tokens.claims();
     if (!idClaims) throw new Error("ID token has no claims");
-    // Depending on the IdP configuration (edu-ID in particular), attributes
-    // may only be delivered by the userinfo endpoint: fall back when the ID
-    // token does not carry the email.
-    let claims: Record<string, unknown> = idClaims;
-    if (typeof claims.email !== "string") {
-      const userinfo = await oidc.fetchUserInfo(config, tokens.access_token, idClaims.sub);
-      claims = { ...userinfo, ...idClaims, email: userinfo.email, email_verified: userinfo.email_verified, given_name: userinfo.given_name, family_name: userinfo.family_name };
+    // edu-ID releases its claims on the userinfo endpoint by DEFAULT (only
+    // the ID token content is configurable in the Resource Registry), so
+    // userinfo is queried on every login instead of only as a fallback
+    // (GH-11). A failure there must not deny a session the ID token is
+    // otherwise enough for: the extra attributes are a bonus, the login is
+    // not.
+    let userinfo: Record<string, unknown> = {};
+    try {
+      userinfo = (await oidc.fetchUserInfo(
+        config,
+        tokens.access_token,
+        idClaims.sub,
+      )) as unknown as Record<string, unknown>;
+    } catch (err) {
+      this.log?.warn({ err }, "OIDC userinfo unavailable, falling back to the ID token");
     }
+    // The ID token wins on the claims it carries (it is signed and bound to
+    // the nonce); userinfo fills in the rest.
+    const claims: Record<string, unknown> = { ...userinfo, ...idClaims };
     const email = typeof claims.email === "string" ? claims.email : "";
-    if (!email) throw new Error("Claim email absente (ID token et userinfo)");
+    if (!email) throw new Error("No email claim (neither in the ID token nor in userinfo)");
     return {
       sub: idClaims.sub,
       email: email.trim().toLowerCase(),
@@ -117,6 +154,7 @@ export class OidcProvider {
           ? claims.swissEduPersonUniqueID
           : null,
       picture: typeof claims.picture === "string" ? claims.picture : null,
+      raw: claims,
     };
   }
 }

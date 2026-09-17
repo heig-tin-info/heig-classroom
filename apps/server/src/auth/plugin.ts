@@ -13,6 +13,7 @@ import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { claimStaffSeats } from "../modules/staff.js";
 import { roleForEmail } from "../roles.js";
+import { recordIdpClaims } from "./claims.js";
 import { OidcProvider, type OidcClaims } from "./oidc.js";
 import {
   CSRF_COOKIE,
@@ -78,7 +79,7 @@ async function upsertUser(
 
 async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig }) {
   const { config } = opts;
-  const provider = new OidcProvider(config);
+  const provider = new OidcProvider(config, app.log);
   const secure = config.NODE_ENV === "production";
 
   // --- Session resolution on every request ---
@@ -167,6 +168,13 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     }
 
     const user = await upsertUser(app, config, claims);
+    // Snapshot of what the IdP released (GH-11): diagnostic material for the
+    // roster matching, and never a reason to refuse a session.
+    try {
+      await recordIdpClaims(app.db, user.id, claims.raw);
+    } catch (err) {
+      req.log.warn({ err }, "Could not record the IdP claims");
+    }
     // Automatic roster claim on verified email (AU-18, H3); staff seats
     // invited by e-mail (GH-9) are attached under the same condition.
     if (claims.emailVerified) {
