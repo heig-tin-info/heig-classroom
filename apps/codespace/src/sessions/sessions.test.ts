@@ -15,7 +15,12 @@ import { assignments, users, type AssignmentRow, type UserRow } from "../db/sche
 import type { ContainerInfo, Engine, RunRequest } from "../engine/index.js";
 import { gitBare } from "../git/index.js";
 
-import { containerNameFor, createSessionManager, stagingSourceFor } from "./manager.js";
+import {
+  containerNameFor,
+  createSessionManager,
+  stagingSourceFor,
+  type ManagerDeps,
+} from "./manager.js";
 import { snapshot } from "./shadow.js";
 import { findAnySession, isOpen, targetRepoFor } from "./store.js";
 import { remoteUrl } from "./workspace.js";
@@ -57,7 +62,9 @@ class FakeEngine implements Engine {
   async waitHealthy(): Promise<number> {
     return 1;
   }
-  async exec(): Promise<string> {
+  readonly execs: Array<{ name: string; argv: string[] }> = [];
+  async exec(name: string, argv: string[]): Promise<string> {
+    this.execs.push({ name, argv });
     return "";
   }
   /** Simule un `podman kill` : le conteneur disparaît sous le portail. */
@@ -74,8 +81,9 @@ let root: string;
 let engine: FakeEngine;
 let user: UserRow;
 
-function makeManager(graceMs = 60_000) {
+function makeManager(graceMs = 60_000, extra: Partial<ManagerDeps> = {}) {
   return createSessionManager({
+    ...extra,
     db,
     engine,
     volumesRoot: root,

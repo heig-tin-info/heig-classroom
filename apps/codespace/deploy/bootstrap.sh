@@ -22,6 +22,7 @@
 #   6. arborescence /srv/codespace   et /etc/codespace
 #   7. br_netfilter persistant       (sans lui la règle ICC est inopérante)
 #   8. /etc/codespace/env            (secrets tirés de /dev/urandom, une seule fois)
+#  8bis. clé privée de la GitHub App (vérifiée et remise d'aplomb, jamais créée)
 #   9. unités systemd                (portail, réseau, dépôt fantôme root)
 #  10. Caddy                         (TLS Let's Encrypt, proxy vers 127.0.0.1:3100)
 #  11. infra/net/setup.sh            (réseau codespace, ancrage, table nft)
@@ -135,7 +136,12 @@ ok "$SVC_USER dans le groupe podman"
 step "arborescence"
 install -d -m 0755 "$PREFIX" "$PREFIX/releases" "$PREFIX/src"
 install -d -m 0750 -o "$SVC_USER" -g "$SVC_USER" "$PREFIX/volumes" "$PREFIX/var" "$PREFIX/var/home"
-install -d -m 0750 "$ETC"
+# Groupe `codespace` et 0750 : le portail doit **traverser** ce répertoire pour
+# lire /etc/codespace/github-app.pem. `env` lui, est lu par systemd (en root)
+# avant le démarrage, donc un répertoire root:root 0750 suffisait jusqu'à
+# l'arrivée de la GitHub App — et la clé était alors illisible avec un simple
+# EACCES. Mesuré sur la VM le 2026-09-17.
+install -d -m 0750 -o root -g "$SVC_USER" "$ETC"
 install -d -m 0755 /var/log/caddy
 chown caddy:caddy /var/log/caddy 2>/dev/null || true
 ok "$PREFIX/{app,releases,src,volumes,var} et $ETC"
@@ -206,13 +212,19 @@ COOKIE_SECRET=$(rand48)
 SESSION_TTL_HOURS=12
 
 # --- forge ------------------------------------------------------------------
-# GitHub sans App : l'URL de clonage publique sert au miroir du dépôt de
-# transit, et le relais laisse les PushEvent en « pending » avec un message
-# explicite jusqu'à ce que GITHUB_APP_* soient posés (docs/deploy.md).
+# GitHub par App, la MÊME que heig-classroom, mêmes noms de variables. Les
+# dépôts des étudiants sont PRIVÉS : sans App, ni l'amorçage de l'espace de
+# travail ni le relais ne fonctionnent, et la session est refusée avec une
+# cause nommée plutôt qu'ouverte sur un répertoire vide.
+# L'identifiant se recopie depuis le .env.prod de classroom ; la clé PEM se
+# copie de droplet à droplet sans toucher le disque du poste, voir
+# docs/deploy.md § 5.
 FORGE_KIND=github
 FORGE_URL=https://github.com
 FORGE_TOKEN=
 FORGE_USER=heig-tin-info
+GITHUB_APP_ID=
+GITHUB_APP_PRIVATE_KEY_PATH=${ETC}/github-app.pem
 
 # --- intégration heig-classroom ---------------------------------------------
 # Le même secret, mot pour mot, doit être posé côté classroom.
@@ -240,6 +252,40 @@ fi
 chown root:"$SVC_USER" "$ETC/env"
 chmod 0640 "$ETC/env"
 ok "$ETC/env en $(stat -c '%a %U:%G' "$ETC/env")"
+
+# Un fichier écrit avant que la GitHub App n'entre dans la recette n'a pas les
+# deux clés. Elles ne portent aucun secret : on les ajoute, sans rien écraser.
+for pair in "GITHUB_APP_ID=" "GITHUB_APP_PRIVATE_KEY_PATH=$ETC/github-app.pem"; do
+	key="${pair%%=*}"
+	if grep -q "^${key}=" "$ETC/env"; then
+		ok "$key déjà dans $ETC/env"
+	else
+		printf '%s\n' "$pair" >> "$ETC/env"
+		ok "$key ajouté à $ETC/env (à compléter, voir docs/deploy.md § 5)"
+	fi
+done
+
+# ------------------------------------------- 8bis. clé privée de la GitHub App
+# Le fichier ne peut pas être produit ici : il vient du droplet de classroom,
+# c'est la même App. Ce script ne fait que vérifier sa présence et ses droits,
+# et dire quoi faire s'il manque. La procédure de copie, sans passer par le
+# disque du poste, est dans docs/deploy.md § 5.
+step "clé privée de la GitHub App"
+PEM="$ETC/github-app.pem"
+if [ -f "$PEM" ]; then
+	chown root:"$SVC_USER" "$PEM"
+	chmod 0640 "$PEM"
+	ok "$PEM en $(stat -c '%a %U:%G' "$PEM")"
+	if grep -q '^GITHUB_APP_ID=.\+' "$ETC/env"; then
+		ok "GITHUB_APP_ID renseigné"
+	else
+		info "GITHUB_APP_ID vide dans $ETC/env : la forge reste non configurée"
+	fi
+else
+	info "$PEM absent : seuls les dépôts publics seront accessibles (docs/deploy.md § 5)"
+	info "  ssh root@<classroom> cat /opt/heig-classroom/secrets/heig-classroom.private-key.pem \\"
+	info "    | ssh root@<vm> 'cat > $PEM && chown root:$SVC_USER $PEM && chmod 0640 $PEM'"
+fi
 
 # --------------------------------------------------------- 9. unités systemd -
 step "unités systemd"

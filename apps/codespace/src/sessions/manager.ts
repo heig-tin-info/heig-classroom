@@ -19,15 +19,19 @@ import type { Db } from "../db/client.js";
 import type { AssignmentRepoRef, AssignmentRow, SessionRow, UserRow } from "../db/schema.js";
 import { sessions } from "../db/schema.js";
 import {
+  ForgeUnconfiguredError,
   ensureStagingRepo,
+  redactSecrets,
+  refSnapshot,
   stagingPaths,
   type RepoRef,
   type SessionLookup,
+  type StagingResult,
   type StagingSession,
   type StagingSource,
 } from "../git/index.js";
 
-import { ensureWorkspace } from "./workspace.js";
+import { completionScript, ensureWorkspace, type EnsureWorkspaceResult } from "./workspace.js";
 import { snapshot } from "./shadow.js";
 import {
   findAnySession,
@@ -133,6 +137,82 @@ export function stagingSourceFor(
 export interface ManagerDeps extends ManagerOptions {
   /** URL de clonage du dépôt cible d'un étudiant, pour le miroir en mode TP. */
   forgeUrlOf?: (repo: RepoRef) => string;
+  /**
+   * En-tête `Authorization` de la forge pour le dépôt donné. Un dépôt
+   * d'étudiant provisionné par classroom est **privé** : sans elle, le `git
+   * fetch` d'amorçage est refusé et l'espace de travail s'ouvre vide. Lève
+   * `ForgeUnconfiguredError` quand la forge n'a pas d'identifiants : on tente
+   * alors le fetch en anonyme, ce qui suffit pour un dépôt public, et la cause
+   * est conservée pour la page d'erreur si le fetch échoue.
+   */
+  forgeAuthorization?: (repo: RepoRef) => Promise<string>;
+}
+
+/**
+ * L'espace de travail de la session n'a pas pu être préparé. **La session ne
+ * démarre pas** : aucun conteneur n'est lancé et l'étudiant reçoit une page
+ * qui nomme la cause. Ouvrir un éditeur sur un répertoire vide, comme le
+ * portail le faisait jusqu'au 2026-09-17, est le pire des comportements — rien
+ * ne signale que le dépôt manque et l'étudiant travaille à côté de son rendu.
+ *
+ * `shortCause` est la phrase montrée à l'étudiant ; `message` porte le détail
+ * (déjà expurgé de tout jeton) pour le journal `warn`.
+ */
+export class WorkspaceBootstrapError extends Error {
+  constructor(
+    readonly shortCause: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "WorkspaceBootstrapError";
+  }
+}
+
+/**
+ * Branche par défaut du dépôt de l'étudiant, telle que classroom l'annonce
+ * dans le jeton de lancement. Elle décide de deux choses : le `HEAD` du dépôt
+ * de transit, donc ce que `git clone` sortirait, et la branche locale de
+ * `work/` avec son suivi.
+ *
+ * Ce n'est **pas** `main` par convention. Mesuré en production : le dépôt
+ * `heig-test-classroom2/labo-02-quadratic-yves-chevallier` est sur `master`,
+ * et il porte aussi une branche `grading` écrite par la CI de classroom.
+ * Sans cette valeur, `pickHead` ne trouvait pas `main` et retombait sur la
+ * première branche venue — `grading`, c'est-à-dire le rapport de correction
+ * plutôt que le travail.
+ */
+export function defaultBranchOf(
+  session: Pick<SessionRow, "targetRepo">,
+  assignment: Pick<AssignmentRow, "mode" | "sourceRepo">,
+): string {
+  // Invariant 6 : en mode examen la source est le modèle de l'enseignant, donc
+  // sa branche à lui, pas celle du dépôt de l'étudiant.
+  if (assignment.mode === "exam") return assignment.sourceRepo?.defaultBranch ?? "main";
+  return session.targetRepo?.defaultBranch ?? assignment.sourceRepo?.defaultBranch ?? "main";
+}
+
+/** `https://github.com/org/depot.git` → `{ owner: "org", name: "depot" }`. */
+export function repoRefFromUrl(url: string): RepoRef | undefined {
+  const m = /^[a-z][a-z0-9+.-]*:\/\/[^/]+\/([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(url);
+  const owner = m?.[1];
+  const name = m?.[2];
+  return owner && name ? { owner, name } : undefined;
+}
+
+/** Ce que l'étudiant lit sur la page de refus. Court, et sans jargon de git. */
+export function shortCauseOf(err: unknown, repo: RepoRef | undefined): string {
+  const where = repo ? `${repo.owner}/${repo.name}` : "le dépôt source";
+  if (err instanceof ForgeUnconfiguredError) {
+    return `le portail n'a pas les accès à ${where}`;
+  }
+  const text = String((err as Error | undefined)?.message ?? err);
+  if (/not found|n'existe pas|does not exist|\b404\b/i.test(text)) {
+    return `dépôt ${where} introuvable`;
+  }
+  if (/authentication|denied|forbidden|unauthorized|\b401\b|\b403\b/i.test(text)) {
+    return `accès refusé au dépôt ${where}`;
+  }
+  return `récupération de ${where} impossible`;
 }
 
 export function createSessionManager(opts: ManagerDeps): SessionManager {
@@ -148,33 +228,133 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     return row;
   }
 
-  async function seedStaging(session: SessionRow, assignment: AssignmentRow): Promise<void> {
+  /**
+   * Amorce le dépôt de transit. **Échec bruyant** : plus de repli silencieux
+   * sur un dépôt vide. Un miroir injoignable, un dépôt inexistant ou une forge
+   * sans identifiants font refuser la session, avec une cause nommée.
+   *
+   * Deux nuances, toutes deux documentées dans `docs/deploy.md` § 5 :
+   *
+   *  - un **dépôt cible sans aucune branche** en mode travaux pratiques est
+   *    légitime (classroom vient de le créer) : le `fetch` réussit, rapporte
+   *    zéro référence, l'espace de travail s'ouvre vide et le journal le dit en
+   *    `info`. En mode examen c'est au contraire une erreur : l'étudiant
+   *    n'aurait pas l'énoncé ;
+   *  - le miroir du mode travaux pratiques n'est récupéré **qu'au premier
+   *    amorçage**, tant que le dépôt de transit n'a aucune référence. Le
+   *    reprendre à chaque ouverture ramènerait les références de la forge par
+   *    dessus celles que l'étudiant a poussées mais que le relais n'a pas
+   *    encore transmises. En mode examen il l'est toujours : c'est ainsi qu'un
+   *    correctif d'énoncé se propage (invariant 6).
+   */
+  async function seedStaging(
+    session: SessionRow,
+    assignment: AssignmentRow,
+  ): Promise<StagingResult> {
+    const paths = stagingPaths(opts.volumesRoot, session.student, assignment.id);
     const repo = targetRepoOfSession(session, assignment);
     const targetUrl = repo && opts.forgeUrlOf ? opts.forgeUrlOf(repo) : undefined;
-    const source = stagingSourceFor(assignment, targetUrl);
+    const wanted = stagingSourceFor(assignment, targetUrl);
+
+    const already = await refSnapshot(paths.gitDir).catch(() => new Map<string, string>());
+    const source: StagingSource =
+      wanted.mode === "lab" && already.size > 0 ? { mode: "empty" } : wanted;
+    const from =
+      source.mode === "lab" ? source.mirrorFrom : source.mode === "exam" ? source.templateFrom : null;
+    const sourceRepo = from ? repoRefFromUrl(from) : undefined;
+
+    // La forge peut n'avoir aucun identifiant : on tente alors le fetch en
+    // anonyme (un dépôt public marche), et on garde la cause sous le coude.
+    let authorization: string | undefined;
+    let authError: unknown;
+    if (sourceRepo && opts.forgeAuthorization) {
+      try {
+        authorization = await opts.forgeAuthorization(sourceRepo);
+      } catch (err) {
+        authError = err;
+      }
+    }
+
     try {
-      await ensureStagingRepo({
+      const result = await ensureStagingRepo({
         volumesRoot: opts.volumesRoot,
         student: session.student,
         assignment: assignment.id,
         source,
         uploadPack: assignment.uploadPack,
+        defaultBranch: defaultBranchOf(session, assignment),
+        ...(authorization ? { authorization } : {}),
       });
+      if (result.refs === 0 && wanted.mode === "exam") {
+        throw new WorkspaceBootstrapError(
+          "le modèle de l'enseignant ne contient aucune branche",
+          `modèle ${from ?? "?"} sans référence : l'épreuve n'a pas d'énoncé à distribuer`,
+        );
+      }
+      if (result.refs === 0 && wanted.mode === "lab") {
+        log.info(
+          { sessionId: session.id, repo: sourceRepo ?? null },
+          "dépôt cible sans aucune branche : espace de travail vide, c'est normal en travaux pratiques",
+        );
+      }
+      return result;
     } catch (err) {
-      // Un miroir injoignable (forge éteinte) ne doit pas empêcher la session :
-      // le dépôt de transit existe alors, simplement vide ou tel qu'il était.
-      if (source.mode === "exam") throw err;
+      if (err instanceof WorkspaceBootstrapError) {
+        log.warn({ sessionId: session.id, err: err.message }, "amorçage du dépôt de transit refusé");
+        throw err;
+      }
+      const detail = redactSecrets(String((err as Error).message ?? err));
+      const cause = shortCauseOf(authError ?? err, sourceRepo ?? repo);
       log.warn(
-        { sessionId: session.id, err: String((err as Error).message ?? err) },
-        "amorçage du dépôt de transit incomplet, la session continue",
+        {
+          sessionId: session.id,
+          student: session.student,
+          assignment: assignment.id,
+          repo: sourceRepo ?? repo ?? null,
+          mode: wanted.mode,
+          forge: authError ? redactSecrets(String((authError as Error).message ?? authError)) : null,
+          err: detail,
+        },
+        "amorçage du dépôt de transit impossible : la session ne démarre pas",
       );
-      await ensureStagingRepo({
-        volumesRoot: opts.volumesRoot,
-        student: session.student,
-        assignment: assignment.id,
-        source: { mode: "empty" },
-        uploadPack: assignment.uploadPack,
-      });
+      throw new WorkspaceBootstrapError(cause, detail);
+    }
+  }
+
+  /**
+   * Achève l'espace de travail **depuis le conteneur**, quand `:U` en a donné
+   * la propriété à la plage d'UID de celui-ci et que le portail n'y écrit plus
+   * (reprise d'une session dont le premier amorçage avait échoué).
+   *
+   * Aucun secret n'y entre : le `fetch` va sur `portal.internal:9418`, que
+   * l'adresse IP source authentifie (invariant 1).
+   *
+   * Un échec est journalisé en `warn` mais **ne ferme pas la session** : si
+   * l'étudiant a déjà écrit un fichier que le dépôt apporte, `checkout` refuse
+   * — mieux vaut un espace de travail incomplet qu'un étudiant privé de ce
+   * qu'il a écrit.
+   */
+  async function finishWorkspace(
+    session: SessionRow,
+    workspace: EnsureWorkspaceResult,
+  ): Promise<void> {
+    if (!workspace.needsContainer || !workspace.branch) return;
+    const name = session.containerName ?? containerNameFor(session.id);
+    try {
+      const out = await engine.exec(name, ["sh", "-lc", completionScript(workspace.branch)]);
+      log.info(
+        { sessionId: session.id, branch: workspace.branch, head: out.trim().split("\n").pop() },
+        "espace de travail complété dans le conteneur (reprise)",
+      );
+    } catch (err) {
+      log.warn(
+        {
+          sessionId: session.id,
+          branch: workspace.branch,
+          err: redactSecrets(String((err as Error).message ?? err)),
+        },
+        "achèvement de l'espace de travail dans le conteneur impossible",
+      );
     }
   }
 
@@ -186,7 +366,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     const paths = stagingPaths(opts.volumesRoot, session.student, assignment.id);
     // **Avant** le `podman run` : après lui, `:U` a donné `work/` à la plage
     // d'UID du conteneur et le portail n'y écrit plus (voir workspace.ts).
-    await ensureWorkspace({
+    const workspace = await ensureWorkspace({
       paths,
       sessionId: session.id,
       gitRemoteHost: opts.gitRemoteHost,
@@ -213,6 +393,9 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       state: "running",
       lastSeen: new Date(),
     });
+    // Reprise d'un volume dont `work/` appartient déjà au conteneur : c'est le
+    // seul moment où l'achèvement est possible, le conteneur venant de naître.
+    await finishWorkspace(updated, workspace);
     return { session: updated, healthyInMs };
   }
 
@@ -247,6 +430,24 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         existing.containerName !== null &&
         (await engine.inspect(existing.containerName))?.state === "running";
       if (alive) {
+        // Le conteneur tourne déjà : on ne le relance pas (invariant 10). Mais
+        // un dépôt de transit **sans aucune référence** est le symptôme d'un
+        // amorçage manqué, et c'est exactement l'état laissé par le premier
+        // essai réel du 2026-09-17. On le refait, et on complète l'espace de
+        // travail dans le conteneur vivant. Rien ne peut être écrasé : par
+        // construction, il n'y avait rien.
+        const refs = await refSnapshot(paths.gitDir).catch(() => new Map<string, string>());
+        if (refs.size === 0) {
+          await seedStaging(existing, assignment);
+          const workspace = await ensureWorkspace({
+            paths,
+            sessionId: existing.id,
+            gitRemoteHost: opts.gitRemoteHost,
+            gitRemotePort: opts.gitRemotePort,
+            log: opts.log,
+          });
+          await finishWorkspace(existing, workspace);
+        }
         const touched = updateSession(db, existing.id, { ...patch, lastSeen: new Date() });
         return {
           session: touched,
@@ -261,10 +462,18 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         sebVerified: sebVerified || existing.sebVerified,
         lastSeen: new Date(),
       });
-      await seedStaging(revived, assignment);
-      const { session, healthyInMs } = await launch(revived, assignment);
-      log.info({ sessionId: session.id, student: user.login }, "session reprise sur son volume");
-      return { session, launched: true, healthyInMs, cookieToken: revived.cookieToken };
+      try {
+        await seedStaging(revived, assignment);
+        const { session, healthyInMs } = await launch(revived, assignment);
+        log.info({ sessionId: session.id, student: user.login }, "session reprise sur son volume");
+        return { session, launched: true, healthyInMs, cookieToken: revived.cookieToken };
+      } catch (err) {
+        // La session reste reprenable : son volume est intact et rien n'a été
+        // lancé. `stopped` la garde vivante au sens de D5, contrairement à
+        // `failed` qui la sortirait du couple (étudiant, devoir).
+        updateSession(db, existing.id, { state: "stopped", containerIp: null, containerId: null });
+        throw err;
+      }
     }
 
     const id = randomUUID();

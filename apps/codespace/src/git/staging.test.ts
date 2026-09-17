@@ -1,11 +1,11 @@
-import { rm } from "node:fs/promises";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
 import { FIXTURE_ENV, makeSourceRepo, tempDir } from "./fixtures.js";
-import { git, gitBare } from "./gitRunner.js";
-import { ensureStagingRepo, refSnapshot, stagingPaths } from "./staging.js";
+import { git, gitAuthEnv, gitBare } from "./gitRunner.js";
+import { ensureStagingRepo, refSnapshot, stagingHeadBranch, stagingPaths } from "./staging.js";
 
 const roots: string[] = [];
 async function root(): Promise<string> {
@@ -124,6 +124,101 @@ describe("ensureStagingRepo", () => {
     });
     expect(await refSnapshot(staging.gitDir)).toEqual(new Map());
     expect((await gitBare(staging.gitDir, ["config", "http.receivepack"])).trim()).toBe("true");
+  });
+
+  it("rend le nombre de références, et zéro n'est pas une erreur", async () => {
+    const base = await root();
+    const vide = await ensureStagingRepo({
+      volumesRoot: join(base, "volumes"),
+      student: "e1234567",
+      assignment: "libre",
+      source: { mode: "empty" },
+    });
+    expect(vide).toMatchObject({ refs: 0, fetched: false, created: true });
+    expect(await stagingHeadBranch(vide.gitDir)).toBeNull();
+
+    const src = await makeSourceRepo({
+      dir: join(base, "src"),
+      branch: "master",
+      files: { "a.c": "int main(void){}\n" },
+    });
+    const plein = await ensureStagingRepo({
+      volumesRoot: join(base, "volumes"),
+      student: "e1234567",
+      assignment: "tp",
+      source: { mode: "lab", mirrorFrom: src.gitDir },
+    });
+    expect(plein).toMatchObject({ refs: 1, fetched: true });
+    // `master` aussi bien que `main` : c'est la branche du dépôt de
+    // l'étudiant qui décide, pas une convention du portail.
+    expect(await stagingHeadBranch(plein.gitDir)).toBe("master");
+  });
+
+  it("un dépôt source injoignable lève : plus de repli silencieux sur un dépôt vide", async () => {
+    const base = await root();
+    await expect(
+      ensureStagingRepo({
+        volumesRoot: join(base, "volumes"),
+        student: "e1234567",
+        assignment: "tp",
+        source: { mode: "lab", mirrorFrom: join(base, "jamais-cree.git") },
+      }),
+    ).rejects.toThrow();
+  });
+
+  /**
+   * Le point du correctif du 2026-09-17 : le dépôt d'un étudiant provisionné
+   * par classroom est **privé**, et le `fetch` d'amorçage doit porter
+   * l'autorisation de la forge — dans l'environnement, jamais dans argv ni sur
+   * disque. Un vrai serveur privé serait un test d'intégration ; ici un `git`
+   * postiche intercepte le `fetch` et écrit ce qu'il a reçu.
+   */
+  it("passe l'autorisation par l'environnement, jamais par argv", async () => {
+    const base = await root();
+    const bin = join(base, "bin");
+    const trace = join(base, "trace.txt");
+    await mkdir(bin, { recursive: true });
+    const realPath = process.env["PATH"] ?? "/usr/bin:/bin";
+    await writeFile(
+      join(bin, "git"),
+      [
+        "#!/bin/sh",
+        "for a in \"$@\"; do",
+        '  if [ "$a" = "fetch" ]; then',
+        `    printf 'ARGV=%s\\nCOUNT=%s\\nKEY0=%s\\nVALUE0=%s\\n' "$*" "$GIT_CONFIG_COUNT" "$GIT_CONFIG_KEY_0" "$GIT_CONFIG_VALUE_0" > ${JSON.stringify(trace)}`,
+        "    exit 0",
+        "  fi",
+        "done",
+        // Tout le reste (`init`, `config`, `for-each-ref`…) va au vrai git,
+        // retrouvé par le PATH d'origine.
+        `exec env PATH=${JSON.stringify(realPath)} git "$@"`,
+      ].join("\n"),
+      "utf8",
+    );
+    await chmod(join(bin, "git"), 0o755);
+
+    const previous = process.env["PATH"];
+    process.env["PATH"] = `${bin}:${previous ?? ""}`;
+    try {
+      await ensureStagingRepo({
+        volumesRoot: join(base, "volumes"),
+        student: "e1234567",
+        assignment: "tp",
+        source: { mode: "lab", mirrorFrom: "https://github.com/org/prive.git" },
+        authorization: "Bearer ghs_jetondinstallation",
+      });
+    } finally {
+      process.env["PATH"] = previous;
+    }
+
+    const seen = await readFile(trace, "utf8");
+    expect(seen).toContain("COUNT=1");
+    expect(seen).toContain("KEY0=http.extraHeader");
+    expect(seen).toContain("VALUE0=Authorization: Bearer ghs_jetondinstallation");
+    const argv = /^ARGV=(.*)$/m.exec(seen)?.[1] ?? "";
+    expect(argv).toContain("https://github.com/org/prive.git");
+    expect(argv).not.toContain("ghs_");
+    expect(argv).not.toContain("Authorization");
   });
 
   it("uploadPack: false se traduit par http.uploadpack=false dans le dépôt", async () => {

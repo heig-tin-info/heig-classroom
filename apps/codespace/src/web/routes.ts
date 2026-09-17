@@ -11,7 +11,7 @@ import fp from "fastify-plugin";
 import type { AppConfig } from "../auth/config.js";
 import type { Db } from "../db/client.js";
 import { SESSION_COOKIE, cookieValue } from "../proxy/index.js";
-import type { SessionManager } from "../sessions/manager.js";
+import { WorkspaceBootstrapError, type SessionManager } from "../sessions/manager.js";
 import {
   findAssignment,
   findLiveSession,
@@ -20,7 +20,13 @@ import {
   teacherSessionRows,
 } from "../sessions/store.js";
 
-import { errorPage, homePage, teacherSessionsPage, type HomeAssignment } from "./pages.js";
+import {
+  errorPage,
+  homePage,
+  teacherSessionsPage,
+  workspaceErrorPage,
+  type HomeAssignment,
+} from "./pages.js";
 
 export interface WebRoutesOptions {
   config: AppConfig;
@@ -91,7 +97,22 @@ async function webRoutesImpl(app: FastifyInstance, opts: WebRoutesOptions): Prom
           );
       }
       const started = Date.now();
-      const result = await manager.start(user, assignment);
+      let result: Awaited<ReturnType<SessionManager["start"]>>;
+      try {
+        result = await manager.start(user, assignment);
+      } catch (err) {
+        // L'espace de travail n'a pas pu être préparé : aucun conteneur n'a
+        // été lancé, et l'étudiant doit le savoir (voir `seedStaging`).
+        if (!(err instanceof WorkspaceBootstrapError)) throw err;
+        req.log.warn(
+          { assignmentId: assignment.id, login: user.login, cause: err.shortCause },
+          "démarrage refusé : espace de travail impossible à préparer",
+        );
+        return reply
+          .code(503)
+          .type("text/html; charset=utf-8")
+          .send(workspaceErrorPage(err.shortCause));
+      }
       req.log.info(
         {
           sessionId: result.session.id,

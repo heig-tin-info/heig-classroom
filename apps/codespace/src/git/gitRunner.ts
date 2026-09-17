@@ -17,8 +17,31 @@ const execFileAsync = promisify(execFile);
 export function redactSecrets(text: string): string {
   return text
     .replace(/(Authorization:\s*\S+\s+)\S+/gi, "$1***")
+    .replace(/(GIT_CONFIG_VALUE_\d+\s*=\s*)\S+/g, "$1***")
     .replace(/(https?:\/\/)[^/\s@]+@/g, "$1***@")
     .replace(/\bgh[pousr]_[A-Za-z0-9_]+/g, "gh*_***");
+}
+
+/**
+ * Le seul véhicule d'une autorisation jusqu'à `git`.
+ *
+ * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` est la façon
+ * documentée de poser `http.extraHeader` sans fichier de configuration
+ * (git ≥ 2.31). Le jeton est alors lisible dans `/proc/<pid>/environ` (root ou
+ * le même uid) mais **pas** dans `cmdline`, et rien n'est écrit sur disque :
+ * les deux propriétés que jalon-0 P3 demande.
+ *
+ * Utilisé par le relais (push vers la forge) **et** par l'amorçage du dépôt de
+ * transit (fetch du dépôt de l'étudiant en mode TP, du modèle en mode examen).
+ * Le second manquait, et c'est ce qui a rendu l'espace de travail vide au
+ * premier essai réel en production : le dépôt de l'étudiant est privé.
+ */
+export function gitAuthEnv(authorization: string): NodeJS.ProcessEnv {
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.extraHeader",
+    GIT_CONFIG_VALUE_0: `Authorization: ${authorization}`,
+  };
 }
 
 export interface GitRunOptions {

@@ -35,6 +35,18 @@ Variables d'environnement reconnues par les deux scripts :
 `CODESPACE_SSH` (défaut `root@code.chevallier.io`), `CODESPACE_DOMAIN`,
 `CODESPACE_CLASSROOM_URL`, `CODESPACE_IMAGE_TAG`.
 
+Un pas manuel subsiste, et il ne s'automatise pas : la clé privée de la
+GitHub App, qui vient du droplet de classroom (§ 5). Sans elle, les dépôts des
+étudiants — privés — sont inaccessibles.
+
+Deux outils accompagnent la recette, tous deux jouant le rôle de classroom en
+signant un jeton de lancement avec le secret partagé :
+
+| commande | ce qu'elle fait |
+| --- | --- |
+| `deploy/smoke.ts` | preuve fonctionnelle complète sur un devoir de fumée (§ 10) |
+| `deploy/resume.ts` | rouvre **une session existante**, par son `sub`, son devoir et son dépôt (§ 5) |
+
 ### Ce que `bootstrap.sh` pose
 
 | # | Élément | Détail |
@@ -127,6 +139,13 @@ rejoué :
 | `COOKIE_SECRET` | signature du cookie de connexion du portail |
 | `EXAM_COOKIE_SECRET` | HMAC du cookie `exam_session` |
 
+Un quatrième secret n'est **pas** dans ce fichier et ne s'invente pas : la clé
+privée de la GitHub App, `/etc/codespace/github-app.pem`, en `0640
+root:codespace`. Elle est copiée depuis le droplet de classroom — c'est la
+même App — et `GITHUB_APP_PRIVATE_KEY_PATH` la désigne. Procédure en § 5. Une
+PEM tient sur plusieurs lignes : elle ne pourrait pas vivre dans un
+`EnvironmentFile=`.
+
 Le secret de lancement se lit sur la VM, et nulle part ailleurs :
 
 ```bash
@@ -149,6 +168,7 @@ CODESPACE_IMAGE=codespace/c-dev:4.137.0  CODESPACE_MEMORY=1536m  CODESPACE_CPUS=
 SESSION_GRACE_MS=600000  SESSION_GC_INTERVAL_MS=60000  SHADOW_INTERVAL_MS=86400000
 OIDC_ISSUER=            (vide : voir § 4)
 FORGE_KIND=github  FORGE_URL=https://github.com  FORGE_TOKEN=   (voir § 5)
+GITHUB_APP_ID=<identifiant de l'App>  GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
 TRUST_PROXY=            (interdit en production : voir § 6)
 ```
 
@@ -206,29 +226,167 @@ bloquerait la page de connexion (analyse.md, docs/pistes.md).
 
 ---
 
-## 5. Pas de GitHub App non plus
+## 5. La GitHub App, et ce qui arrive sans elle
 
-`FORGE_KIND=github` sans `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` /
-`GITHUB_APP_INSTALLATION_ID`. Le portail construit alors une forge **partielle** :
-tout ce qui ne demande pas de jeton fonctionne — en particulier l'URL de clonage
-publique, dont le dépôt de transit s'amorce en mode travaux pratiques — et le
-relais refuse explicitement.
+C'est **la même App que heig-classroom** — mêmes noms de variables, même
+fichier PEM — parce que c'est elle qui a créé les dépôts des étudiants et que
+personne d'autre n'y a accès.
 
-Conséquence, vérifiée sur la VM avec un vrai `git push` depuis le conteneur :
+| Clé de `/etc/codespace/env` | Valeur |
+| --- | --- |
+| `FORGE_KIND` | `github` |
+| `FORGE_URL` | `https://github.com` |
+| `GITHUB_APP_ID` | l'identifiant numérique de l'App, recopié du `.env.prod` de classroom |
+| `GITHUB_APP_PRIVATE_KEY_PATH` | `/etc/codespace/github-app.pem` |
 
-- le push de l'étudiant **réussit** et le `PushEvent` est écrit (invariant 7) ;
-- la ligne reste `pending`, avec dans `last_error` :
-  « GitHub App non configurée : GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY et
-  GITHUB_APP_INSTALLATION_ID sont absents. Le rendu est enregistré et reste en
-  attente de relais. » ;
-- elle ne passe **jamais** `failed` : une forge non configurée n'est pas une
+L'installation n'est **pas** un réglage : le portail la résout par
+`GET /orgs/{org}/installation`, organisation par organisation, à partir du
+`owner` du dépôt — un portail sert plusieurs classes, donc plusieurs
+organisations GitHub. Le jeton d'installation vaut une heure ; il est mis en
+cache par installation et renouvelé une minute avant son expiration.
+
+### Copier la clé privée, sans la poser sur le disque du poste
+
+La PEM vit déjà sur le droplet de classroom. Elle passe d'un droplet à l'autre
+en un seul tuyau, sans jamais toucher le poste :
+
+```bash
+ssh root@classroom.chevallier.io 'cat /opt/heig-classroom/secrets/heig-classroom.private-key.pem' \
+  | ssh root@code.chevallier.io 'cat > /etc/codespace/github-app.pem \
+      && chown root:codespace /etc/codespace/github-app.pem \
+      && chmod 0640 /etc/codespace/github-app.pem'
+
+# /etc/codespace doit être TRAVERSABLE par le portail : `env` est lu par
+# systemd (en root) avant le démarrage, mais la PEM est lue par le processus.
+ssh root@code.chevallier.io 'chgrp codespace /etc/codespace && chmod 0750 /etc/codespace'
+
+# l'identifiant, lui, n'est pas un secret
+ssh root@classroom.chevallier.io "sed -n 's/^GITHUB_APP_ID=//p' /opt/heig-classroom/.env.prod"
+# … puis, sur la VM du portail, dans /etc/codespace/env :
+#   GITHUB_APP_ID=<la valeur lue>
+#   GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
+systemctl restart codespace.service
+```
+
+`deploy/bootstrap.sh` fait partie de la recette : il écrit les deux clés dans
+un `/etc/codespace/env` neuf, **les ajoute** à un fichier existant qui ne les
+a pas (elles ne portent aucun secret), remet la PEM en `0640 root:codespace`
+si elle est là, et rappelle la commande de copie si elle manque. Il ne crée
+jamais la clé : elle ne s'invente pas.
+
+### Ce qui arrive sans App
+
+Le portail construit une forge **partielle** : tout ce qui ne demande pas de
+jeton fonctionne — l'URL de clonage d'un dépôt **public** —, et tout le reste
+refuse explicitement.
+
+- Le relais : le push de l'étudiant **réussit** et le `PushEvent` est écrit
+  (invariant 7) ; la ligne reste `pending` avec, dans `last_error`, « GitHub
+  App non configurée : GITHUB_APP_ID et GITHUB_APP_PRIVATE_KEY_PATH sont
+  absents de /etc/codespace/env. Seuls les dépôts publics sont accessibles. »
+  Elle ne passe **jamais** `failed` : une forge non configurée n'est pas une
   panne, et épuiser le budget de tentatives ferait perdre un rendu qui n'a
   jamais eu de destination. Poser les identifiants suffit à vider la file, le
-  relais reprend seul.
-- le service n'est pas affecté : une tentative toutes les minutes, sans appel
-  réseau (l'erreur est levée avant).
+  relais reprend seul. Le service n'est pas affecté : une tentative toutes les
+  minutes, sans appel réseau (l'erreur est levée avant).
+- L'amorçage de l'espace de travail : le dépôt d'un étudiant provisionné par
+  classroom est **privé**, le `git fetch` est refusé, et **la session ne
+  démarre pas**. Voir la section suivante.
 
-Le branchement réel de la GitHub App est hors périmètre de ce déploiement.
+### Échec d'amorçage : la session ne démarre pas
+
+Mesuré en production le 2026-09-17, et c'est ce que ce correctif change : le
+portail ouvrait l'éditeur sur un `work/` vide, sans un mot, et l'étudiant
+travaillait à côté de son rendu. Désormais :
+
+- aucun conteneur n'est lancé ;
+- l'étudiant reçoit une page 503 « Espace de travail impossible à préparer :
+  &lt;cause courte&gt; ; signalez-le à votre enseignant. » — `dépôt org/x
+  introuvable`, `accès refusé au dépôt org/x`, `le portail n'a pas les accès à
+  org/x` ;
+- le journal porte un `warn` avec la cause complète, le dépôt, le mode et
+  l'identifiant de session. Le jeton n'y figure jamais : il ne passe que par
+  `GIT_CONFIG_VALUE_0`, et `redactSecrets` le retire des messages d'erreur.
+
+**Une exception, et une seule** : un dépôt cible **sans aucune branche** en
+mode travaux pratiques. C'est l'état d'un dépôt que classroom vient de créer
+et que l'étudiant n'a jamais poussé. Le `fetch` réussit, rapporte zéro
+référence, l'espace de travail s'ouvre légitimement vide et le journal le dit
+en `info` (« dépôt cible sans aucune branche »). En mode examen, au contraire,
+un modèle sans branche refuse la session : l'étudiant n'aurait pas l'énoncé.
+
+### Mesuré sur la VM le 2026-09-17
+
+Session réelle `21ad5a11-…` (dépôt privé
+`heig-test-classroom2/labo-02-quadratic-yves-chevallier`, branche `master`),
+reprise par un jeton de lancement signé depuis le poste
+(`deploy/resume.ts`) :
+
+- `/launch` répond `303` en 4,9 s, aucun conteneur supplémentaire ;
+- `/work` contient les 15 entrées du dépôt (`quadratic.c`, `Makefile`,
+  `tests/`, `.vscode/`, …) et le fichier `test` que l'étudiant avait écrit,
+  toujours non suivi ;
+- `git status` : `## master...origin/master`, arbre propre ;
+- `git push` **sans argument** depuis le conteneur arrive dans `staging.git`,
+  le `PushEvent` passe `relayed` en 2,2 s, et `heads/master` du dépôt GitHub
+  privé pointe sur le commit poussé. C'est la première preuve du relais réel
+  vers GitHub.
+
+Trois choses se sont vues à cette occasion, et sont corrigées ici :
+
+1. `/etc/codespace` était en `0750 root:root` : le portail ne pouvait pas le
+   **traverser** pour lire la PEM (`EACCES`). Le répertoire est désormais en
+   `0750 root:codespace`, posé par `bootstrap.sh`.
+2. Le transport git de github.com refuse un jeton d'installation en `Bearer`
+   (« remote: invalid credentials ») : il faut `Basic x-access-token:<jeton>`.
+   Voir `git/forge.ts`.
+3. `ensureStagingRepo` ne recevait pas la branche par défaut du dépôt et
+   retombait sur la première branche venue — `grading`, écrite par la CI de
+   classroom, au lieu de `master`. La branche vient maintenant du jeton de
+   lancement (`defaultBranchOf`).
+
+**Reste ouvert** : la GitHub App n'est pas installée sur l'organisation
+`heig-tin-info`. Le `PushEvent` de la session de fumée reste donc `pending`
+avec « GitHub App non installée sur l'organisation heig-tin-info ». C'est le
+comportement voulu — installer l'App sur cette organisation suffit à vider la
+file.
+
+### Le miroir n'est repris qu'au premier amorçage
+
+En mode travaux pratiques, le dépôt de transit est amorcé depuis le dépôt de
+l'étudiant **tant qu'il n'a aucune référence**. Ensuite, il ne l'est plus : un
+`fetch --prune` de force ramènerait les références de GitHub par dessus celles
+que l'étudiant a poussées mais que le relais n'a pas encore transmises. En
+mode examen le modèle est repris à chaque ouverture, et c'est voulu — c'est
+ainsi qu'un correctif d'énoncé se propage en cours d'épreuve (invariant 6).
+
+### Reprise d'une session dont l'espace de travail est resté vide
+
+À l'ouverture d'une session existante dont `staging.git` n'a **aucune
+référence**, le portail réamorce avant de relancer le conteneur, puis met
+`work/` en état : branche locale sur la branche par défaut du dépôt (`master`
+aussi bien que `main`), avec suivi de `origin/<branche>` — sans quoi `git
+pull` et `git push` sans argument ne marchent pas dans le conteneur.
+
+Un détail de propriété commande la manœuvre : après le premier `podman run`,
+l'option `:U` a donné `work/` à la plage d'UID du conteneur et le portail
+**n'y écrit plus**. L'achèvement passe alors par `podman exec` dans le
+conteneur qui vient de démarrer (`sessions/workspace.ts`,
+`completionScript`) : `git fetch origin`, `git checkout -B <branche>
+origin/<branche>`, `git branch --set-upstream-to`. Le `fetch` va sur
+`portal.internal:9418`, authentifié par l'adresse IP source : **aucun secret
+n'entre dans le conteneur** (invariant 1).
+
+Deux garde-fous :
+
+- un `work/` qui porte déjà **un commit** n'est jamais retouché : l'étudiant
+  est maître de son dépôt ;
+- les fichiers **non suivis** qu'il a écrits dans un espace de travail vide
+  sont conservés — `checkout -B` depuis une branche non née n'y touche pas. Si
+  l'un d'eux porte le nom d'un fichier qu'apporte le dépôt, `checkout` refuse
+  plutôt que de l'écraser : le journal le dit en `warn` et la session s'ouvre
+  quand même, avec un espace de travail incomplet. C'est le seul cas où le
+  dépôt n'est pas récupéré, et il vaut mieux que la perte du travail.
 
 ---
 
@@ -565,19 +723,16 @@ Par ordre de dette.
 
 1. **Adresse du client en mode examen** (§ 6). Bloquant avant la première
    épreuve, pas avant les travaux pratiques.
-2. **GitHub App** (§ 5) : `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
-   `GITHUB_APP_INSTALLATION_ID` dans `/etc/codespace/env`. Le relais vide alors
-   la file tout seul. La même App que classroom.
-3. **Switch edu-ID** (§ 4) : `OIDC_*`, plus les hôtes d'edu-ID dans
+2. **Switch edu-ID** (§ 4) : `OIDC_*`, plus les hôtes d'edu-ID dans
    `SEB_EXTRA_ALLOWED_HOSTS`.
-4. **Image depuis GHCR.** Aujourd'hui l'image est construite sur la VM, 113 s de
+3. **Image depuis GHCR.** Aujourd'hui l'image est construite sur la VM, 113 s de
    2 vCPU pendant lesquels le portail n'a plus grand-chose. En régime de
    croisière elle doit venir d'un registre, comme celle de classroom : la CI la
    construit et la pousse sur `ghcr.io/heig-tin-info/codespace-c-dev:4.137.0`,
    `push.sh` fait un `pd pull` au lieu d'un `pd build`, et le `deploy.sh` de
    classroom montre le modèle de jeton éphémère passé par SSH pour le `login`
    d'un paquet privé — aucun identifiant de registre n'est stocké sur la VM.
-5. **Pare-feu de l'hôte, en complément de celui de Hetzner.** Le pare-feu du
+4. **Pare-feu de l'hôte, en complément de celui de Hetzner.** Le pare-feu du
    fournisseur est aujourd'hui la seule barrière sur les ports d'écoute ; il est
    correct, mais il est hors de la recette et une modification dans la console
    web ne laisse pas de trace dans le dépôt. `table inet filter` existe sur la
@@ -587,9 +742,9 @@ Par ordre de dette.
    `cs0` — c'est le rôle de `table inet codespace`, qui doit rester le seul
    endroit qui parle du pont. À écrire dans `infra/nft/` avec son test, pas dans
    `deploy/`.
-6. **Sauvegarde automatique** (§ 9).
-7. **Correction de la régression ICC de `infra/net/test.sh`** (§ 10).
-8. **Rotation des journaux du portail** : ils vont au `journal`, dont la taille
+5. **Sauvegarde automatique** (§ 9).
+6. **Correction de la régression ICC de `infra/net/test.sh`** (§ 10).
+7. **Rotation des journaux du portail** : ils vont au `journal`, dont la taille
    est bornée par défaut. À vérifier (`journalctl --disk-usage`) avant une
    séance chargée.
 
