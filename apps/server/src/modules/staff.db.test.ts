@@ -4,18 +4,29 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 
 import type { AppConfig } from "../config.js";
-import { classroomStaff, classrooms, organizations, teacherGrants, users } from "../db/schema.js";
+import {
+  classroomStaff,
+  classrooms,
+  organizations,
+  teacherGrants,
+  userEmails,
+  users,
+} from "../db/schema.js";
 import { testDb, type TestDb } from "../test/db.js";
 import { staffAccess } from "./guards.js";
 import { addStaffMember, claimStaffSeats, removeStaffMember } from "./staff.js";
 
 const config = { SUPER_ADMIN_EMAIL: "boss@heig.test" } as AppConfig;
 
+/** An account with its address set, as a login writes it (GH-11). */
 async function seedUser(db: TestDb, email: string, role: "student" | "teacher" = "student") {
   const id = randomUUID();
   await db
     .insert(users)
     .values({ id, oidcSub: `u-${id}`, email, emailVerified: true, role });
+  await db
+    .insert(userEmails)
+    .values({ userId: id, email: email.toLowerCase(), source: "login", verified: true });
   return id;
 }
 
@@ -178,7 +189,7 @@ describe("classroom staff (GH-9)", () => {
 
     // The colleague signs in for the first time.
     const lateId = await seedUser(db, email.toUpperCase());
-    expect(await claimStaffSeats(db, { id: lateId, email: email.toUpperCase() })).toBe(1);
+    expect(await claimStaffSeats(db, { id: lateId })).toBe(1);
     expect(await reachable(db, lateId, classroomId)).toBe(true);
   });
 });

@@ -40,7 +40,7 @@ export async function studentPlugin(
     async (req) => {
       const me = req.user!;
       if (me.emailVerified) {
-        await claimEnrollments(app.db, { id: me.id, email: me.email });
+        await claimEnrollments(app.db, { id: me.id });
       }
 
       const rooms = await app.db

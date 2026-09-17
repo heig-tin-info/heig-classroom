@@ -20,7 +20,8 @@
 import { sql } from "drizzle-orm";
 
 import type { Db } from "../db/client.js";
-import { userIdpClaims } from "../db/schema.js";
+import { userEmails, userIdpClaims } from "../db/schema.js";
+import { normalizeEmail } from "../identity.js";
 
 /** Claims whose value only means something inside the token exchange. */
 const TOKEN_ONLY = new Set([
@@ -50,14 +51,55 @@ export function claimList(value: unknown): string[] {
     .filter((v) => v !== "");
 }
 
-/** The three affiliation claims, merged, lowercased, deduplicated. */
+/**
+ * The affiliation claims, merged, lowercased, deduplicated. edu-ID releases
+ * `eduPersonAffiliation` (unscoped) alongside the scoped ones and does NOT
+ * release `eduPersonPrimaryAffiliation` — observed on production, not
+ * guessed; the latter is read anyway in case that ever changes.
+ */
 export function affiliationsOf(claims: Record<string, unknown>): string[] {
   const all = [
     ...claimList(claims.eduPersonPrimaryAffiliation),
+    ...claimList(claims.eduPersonAffiliation),
     ...claimList(claims.eduPersonScopedAffiliation),
     ...claimList(claims.swissEduIDLinkedAffiliation),
   ].map((v) => v.toLowerCase());
   return [...new Set(all)];
+}
+
+/**
+ * Claims carrying e-mail addresses, most trustworthy first. Only
+ * `swissEduIDLinkedAffiliationMail` is released to us today; the others cost
+ * nothing to read and cover a change in the Resource Registry entry.
+ */
+const MAIL_CLAIMS = [
+  "swissEduIDLinkedAffiliationMail",
+  "swissEduPersonOrganizationalMail",
+  "swissEduIDAssociatedMail",
+  "swissEduPersonPrivateMail",
+] as const;
+
+export interface KnownAddress {
+  email: string;
+  /** `login`, or the claim the address came from. */
+  source: string;
+}
+
+/**
+ * Every address a login reveals: the `email` claim, then those asserted by
+ * the institution. Deduplicated on the address, first source wins.
+ */
+export function addressesOf(claims: Record<string, unknown>): KnownAddress[] {
+  const found = new Map<string, KnownAddress>();
+  const add = (raw: string, source: string) => {
+    const email = normalizeEmail(raw);
+    if (email !== "" && !found.has(email)) found.set(email, { email, source });
+  };
+  if (typeof claims.email === "string") add(claims.email, "login");
+  for (const claim of MAIL_CLAIMS) {
+    for (const value of claimList(claims[claim])) add(value, claim);
+  }
+  return [...found.values()];
 }
 
 /**
@@ -100,4 +142,36 @@ export async function recordIdpClaims(
         updatedAt: sql`excluded.updated_at`,
       },
     });
+}
+
+/**
+ * Records the addresses a login revealed. Purely additive: an address seen
+ * once is never removed, and `first_seen_at` keeps the date of the login
+ * that revealed it.
+ *
+ * Only the login address carries the IdP's `email_verified`; an address
+ * asserted by the home organization is verified by construction — that is
+ * precisely why it is worth more than the preferred address the user chose.
+ */
+export async function syncUserEmails(
+  db: Db,
+  userId: string,
+  claims: Record<string, unknown>,
+  loginVerified: boolean,
+): Promise<number> {
+  const addresses = addressesOf(claims);
+  if (addresses.length === 0) return 0;
+  const inserted = await db
+    .insert(userEmails)
+    .values(
+      addresses.map((a) => ({
+        userId,
+        email: a.email,
+        source: a.source,
+        verified: a.source === "login" ? loginVerified : true,
+      })),
+    )
+    .onConflictDoNothing({ target: [userEmails.userId, userEmails.email] })
+    .returning({ email: userEmails.email });
+  return inserted.length;
 }

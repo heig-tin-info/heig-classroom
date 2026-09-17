@@ -590,6 +590,10 @@ export async function classroomsPlugin(
           subjectId: entry.id,
           payload: { ...body.data, emailChanged },
         });
+        // A corrected address must attach right away if the account already
+        // exists — until GH-11 the student had to sign in again for a fix
+        // the teacher had just made.
+        if (emailChanged) await claimForExistingUsers(app.db, entry.classroomId);
         return updated;
       } catch {
         // UNIQUE(classroom_id, email)
