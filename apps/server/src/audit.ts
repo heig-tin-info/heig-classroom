@@ -34,6 +34,9 @@ export type AuditAction =
   | "classroom.staff_add"
   | "classroom.staff_remove"
   | "classroom.unarchive"
+  | "codespace.assignment_synced"
+  | "codespace.launch_issued"
+  | "codespace.sync_requested"
   | "email.sent"
   | "email.unsubscribe"
   | "github.link"
@@ -61,6 +64,7 @@ export type AuditAction =
   | "roster.update"
   | "task.configure"
   | "task.run_now"
+  | "teacher.codespace_grant"
   | "teacher.grant"
   | "teacher.revoke";
 

@@ -6,6 +6,12 @@ import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../../audit.js";
+import {
+  codespaceConfigured,
+  codespaceGrantFor,
+  isOnlineMode,
+  queueCodespaceSync,
+} from "../../codespace.js";
 import type { AppConfig } from "../../config.js";
 import {
   assignmentMilestones,
@@ -28,6 +34,18 @@ import { clientFor } from "./shared.js";
 /** Manual mode: 15 min to 400 days after publication. */
 const Duration = z.number().int().min(15).max(400 * 1440);
 
+/** ADR-013 work-mode fields, shared by create and patch. */
+const WorkModeEnum = z.enum(["free", "online", "online_seb"]);
+/** Portal catalogue image; "" means "the portal's default image" (stored null). */
+const CodespaceImage = z.string().max(200);
+/** One Browser Exam Key per platform/version, 64 hex characters each. */
+const BrowserExamKeys = z.array(z.string().regex(/^[0-9a-fA-F]{64}$/)).max(20);
+
+const emptyToNull = (v: string | undefined) => {
+  const trimmed = (v ?? "").trim();
+  return trimmed === "" ? null : trimmed;
+};
+
 const AssignmentCreate = z
   .object({
     name: z.string().min(1).max(200),
@@ -42,6 +60,9 @@ const AssignmentCreate = z
     gradingMode: z.enum(["none", "auto"]).default("auto"),
     branches: z.array(z.string().min(1)).min(1).max(10).optional(),
     protectedFiles: z.array(z.string().min(1).max(300)).max(50).default([]),
+    workMode: WorkModeEnum.default("free"),
+    codespaceImage: CodespaceImage.optional(),
+    browserExamKeys: BrowserExamKeys.default([]),
   })
   .superRefine((b, ctx) => {
     if (b.publishMode === "scheduled") {
@@ -102,6 +123,26 @@ export async function assignmentLifecycleRoutes(
   const { config } = opts;
   const requireTeacher = teacherGuard(app);
 
+  /**
+   * ADR-013: an online mode is only available to a teacher the administrator
+   * granted it to. Returns an error string to send as a 403, or null when the
+   * choice is allowed. The form hides the section on the same information
+   * (`Me.codespace`), this is the check that actually enforces it.
+   */
+  async function refuseOnlineMode(
+    req: { user: { id: string; role: string } | null },
+    mode: string,
+  ): Promise<string | null> {
+    if (!isOnlineMode(mode as never)) return null;
+    if (!codespaceConfigured(config)) {
+      return "The online workspace is not available on this instance";
+    }
+    const grant = await codespaceGrantFor(app.db, config, req.user!);
+    return grant?.enabled
+      ? null
+      : "Your account is not allowed to use the online workspace — ask the administrator";
+  }
+
   // --- Assignments ---
   app.get(
     "/app/api/classrooms/:id/assignments",
@@ -135,6 +176,9 @@ export async function assignmentLifecycleRoutes(
       deadlineStrategy: z.enum(["lock", "commit"]).optional(),
       gradingMode: z.enum(["none", "auto"]).optional(),
       protectedFiles: z.array(z.string().min(1).max(300)).max(100).optional(),
+      workMode: WorkModeEnum.optional(),
+      codespaceImage: CodespaceImage.optional(),
+      browserExamKeys: BrowserExamKeys.optional(),
     })
     .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update" });
 
@@ -172,7 +216,37 @@ export async function assignmentLifecycleRoutes(
           message: "The publication mode cannot be changed after publication",
         });
       }
-      const patch = { ...body.data };
+      const refusal = await refuseOnlineMode(req, body.data.workMode ?? "free");
+      if (refusal) return reply.code(403).send({ error: "codespace_forbidden", message: refusal });
+      // One-way door (ADR-013): the student repositories of an online
+      // assignment were provisioned WITHOUT write access (and, in exam mode,
+      // without an invitation at all). Going back to `free` would leave every
+      // student staring at a repository they cannot push to, and re-granting
+      // write access after the fact is exactly the credential-free invariant
+      // we are protecting. Create a new assignment instead.
+      if (
+        body.data.workMode === "free" &&
+        isOnlineMode(scope.assignment.workMode) &&
+        scope.assignment.state !== "draft"
+      ) {
+        return reply.code(409).send({
+          error: "work_mode_frozen",
+          message:
+            "A published online assignment cannot go back to free: its repositories were provisioned without write access",
+        });
+      }
+      const patch: Omit<typeof body.data, "codespaceImage"> & {
+        codespaceImage?: string | null | undefined;
+      } = {
+        ...body.data,
+        // "" = the portal's default image.
+        ...(body.data.codespaceImage !== undefined
+          ? { codespaceImage: emptyToNull(body.data.codespaceImage) }
+          : {}),
+        ...(body.data.browserExamKeys
+          ? { browserExamKeys: body.data.browserExamKeys.map((k) => k.toLowerCase()) }
+          : {}),
+      };
       // A duration on a draft keeps a provisional deadline (now + duration)
       // so lists and the timeline stay meaningful; Publish recomputes it.
       if (patch.durationMinutes != null && scope.assignment.state === "draft") {
@@ -201,6 +275,11 @@ export async function assignmentLifecycleRoutes(
 
       if (updated && patch.deadlineAt) {
         await retargetOffsetMilestones(app, updated.id, updated.deadlineAt);
+      }
+      // ADR-013: the portal is told about every change of an online
+      // assignment (dates, image, keys) through the idempotent job.
+      if (updated && isOnlineMode(updated.workMode)) {
+        await queueCodespaceSync(app, updated.id);
       }
 
       // Rescheduling (US-08, GH-43): pushing back the deadline of an already
@@ -450,6 +529,8 @@ export async function assignmentLifecycleRoutes(
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
       }
+      const refusal = await refuseOnlineMode(req, body.data.workMode);
+      if (refusal) return reply.code(403).send({ error: "codespace_forbidden", message: refusal });
       const client = await clientFor(config, reply, scope.org);
       if (!client) return reply;
 
@@ -570,6 +651,14 @@ export async function assignmentLifecycleRoutes(
             gradingMode: body.data.gradingMode,
             branches,
             protectedFiles: body.data.protectedFiles,
+            workMode: body.data.workMode,
+            codespaceImage: emptyToNull(body.data.codespaceImage),
+            // Keys only mean something in exam mode; normalized to lowercase
+            // so the portal compares two identical strings.
+            browserExamKeys:
+              body.data.workMode === "online_seb"
+                ? body.data.browserExamKeys.map((k) => k.toLowerCase())
+                : [],
           })
           .returning();
         await audit(app.db, {
@@ -578,8 +667,14 @@ export async function assignmentLifecycleRoutes(
           action: "assignment.create",
           subjectType: "assignment",
           subjectId: row!.id,
-          payload: { slug, source: source.full_name, squashed: squashed.fullName },
+          payload: {
+            slug,
+            source: source.full_name,
+            squashed: squashed.fullName,
+            workMode: body.data.workMode,
+          },
         });
+        if (isOnlineMode(body.data.workMode)) await queueCodespaceSync(app, row!.id);
         return reply.code(201).send(row);
       } catch (err) {
         // UNIQUE(classroom_id, slug): name already taken; the squashed repo

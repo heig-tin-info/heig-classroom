@@ -2,12 +2,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ClipboardList,
   Loader2,
+  MonitorPlay,
   School,
   ShieldCheck,
   Trash2,
   UserPlus,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import type { TeacherCodespaceGrant } from "@hgc/contracts";
 
 import { api, ApiError, apiErrorMessage } from "./api";
 import { ScheduledTasksCard } from "./ScheduledTasks";
@@ -23,6 +26,74 @@ interface TeacherRow {
   signedUp: boolean;
   classrooms: number;
   assignments: number;
+  /** Online workspace grant (ADR-013); null = no portal on this instance. */
+  codespace: TeacherCodespaceGrant | null;
+}
+
+/**
+ * Online workspace switch + session quota of one teacher (ADR-013). The
+ * switch writes immediately; the quota writes on Enter or on the Save that
+ * appears once the number changed — same shape as the task intervals.
+ */
+function CodespaceCell({
+  row,
+  onSave,
+  saving,
+}: {
+  row: TeacherRow;
+  onSave: (codespace: Partial<TeacherCodespaceGrant>) => void;
+  saving: boolean;
+}) {
+  const grant = row.codespace!;
+  const [quota, setQuota] = useState(String(grant.maxActiveSessions));
+  useEffect(() => {
+    setQuota(String(grant.maxActiveSessions));
+  }, [grant.maxActiveSessions]);
+  const parsed = Number(quota);
+  const valid = Number.isInteger(parsed) && parsed >= 0 && parsed <= 100;
+  const dirty = valid && parsed !== grant.maxActiveSessions;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <label className="inline-flex cursor-pointer items-center gap-1.5">
+        <input
+          type="checkbox"
+          className="accent-accent"
+          checked={grant.enabled}
+          disabled={saving}
+          onChange={(e) => onSave({ enabled: e.target.checked })}
+          aria-label={`Online workspace for ${row.email}`}
+        />
+        <span className="text-xs text-zinc-500 dark:text-zinc-400">
+          {grant.enabled ? "enabled" : "off"}
+        </span>
+      </label>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        value={quota}
+        onChange={(e) => setQuota(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && dirty) onSave({ maxActiveSessions: parsed });
+        }}
+        className="w-16 rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm tabular-nums focus:border-accent focus:outline-none disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-900"
+        aria-label={`Concurrent sessions allowed for ${row.email}`}
+        disabled={saving || !grant.enabled}
+      />
+      {dirty ? (
+        <button
+          type="button"
+          onClick={() => onSave({ maxActiveSessions: parsed })}
+          disabled={saving}
+          className="rounded-md px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
+        >
+          {saving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
+        </button>
+      ) : (
+        <span className="text-xs text-zinc-400">sessions</span>
+      )}
+    </span>
+  );
 }
 
 type SortKey = "email" | "name" | "lastLoginAt" | "classrooms" | "assignments";
@@ -51,6 +122,17 @@ export function AdminPanel() {
     mutationFn: (id: string) => api(`/app/api/admin/teachers/${id}`, { method: "DELETE" }),
     onSuccess: invalidate,
   });
+  // ADR-013: the column only exists when a portal is configured — the rows
+  // then carry a grant, otherwise `codespace` is null everywhere.
+  const setCodespace = useMutation({
+    mutationFn: ({ id, codespace }: { id: string; codespace: Partial<TeacherCodespaceGrant> }) =>
+      api(`/app/api/admin/teachers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ codespace }),
+      }),
+    onSuccess: invalidate,
+  });
+  const showCodespace = (teachers.data ?? []).some((r) => r.codespace !== null);
 
   const rank = (r: TeacherRow, key: SortKey): string | number => {
     switch (key) {
@@ -139,6 +221,13 @@ export function AdminPanel() {
                   <Th k="lastLoginAt">Last sign-in</Th>
                   <Th k="classrooms">Classrooms</Th>
                   <Th k="assignments">Assignments</Th>
+                  {showCodespace ? (
+                    <th className={`${cell} font-medium`}>
+                      <span className="inline-flex items-center gap-1">
+                        <MonitorPlay className="size-3.5 text-zinc-400" /> Online workspace
+                      </span>
+                    </th>
+                  ) : null}
                   <th className={cell} aria-label="Actions" />
                 </tr>
               </thead>
@@ -166,6 +255,17 @@ export function AdminPanel() {
                         <ClipboardList className="size-3.5 text-zinc-400" /> {r.assignments}
                       </span>
                     </td>
+                    {showCodespace ? (
+                      <td className={cell}>
+                        {r.codespace ? (
+                          <CodespaceCell
+                            row={r}
+                            saving={setCodespace.isPending}
+                            onSave={(codespace) => setCodespace.mutate({ id: r.id, codespace })}
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
                     <td className={`${cell} text-right`}>
                       <IconButton
                         danger

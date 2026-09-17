@@ -183,6 +183,13 @@
       "when": 1789640566854,
       "tag": "0025_user-email-set",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789672190389,
+      "tag": "0026_codespace-work-mode",
+      "breakpoints": true
     }
   ]
 }

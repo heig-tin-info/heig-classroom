@@ -68,6 +68,7 @@ is documented in [deploy.md](deploy.md).
 | `packages/domain` | Pure business rules (GR-02 grade parsing, freezing...), framework-free |
 | `packages/contracts` | Zod schemas shared across front, back and CLI |
 | `apps/server` | Fastify monolith: API, webhooks, SSE, jobs (pg-boss), `WORKER_MODE` |
+| `apps/codespace` | Supervised dev-environment portal (code-server, rootful Podman, SEB exam mode); separate deployment, see its `CLAUDE.md` and `docs/` |
 | `docs/` | Specifications (TeXSmith) and ADRs |
 
 ## PDF documentation

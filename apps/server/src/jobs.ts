@@ -13,6 +13,8 @@ export const TASK_QUEUE = "task.run";
 export const SYNC_QUEUE = "sync.apply";
 export const GRADE_DISPATCH_QUEUE = "grade.dispatch";
 export const EMAIL_QUEUE = "email.send";
+/** ADR-013: push an online assignment to the codespace portal. */
+export const CODESPACE_SYNC_QUEUE = "codespace.sync";
 
 export interface WebhookJob {
   deliveryId: string;
@@ -46,6 +48,7 @@ export async function startJobs(
     gradeDispatchHandler: (job: { assignmentId: string }) => Promise<void>;
     taskRunner: (key: string) => Promise<void>;
     emailHandler: (job: EmailJobData) => Promise<void>;
+    codespaceSyncHandler: (job: { assignmentId: string }) => Promise<void>;
   },
 ) {
   const boss = new PgBoss({
@@ -82,6 +85,13 @@ export async function startJobs(
     retryBackoff: true,
     retryDelay: 30,
   });
+  // The portal may be restarting or down (separate VM): retry generously,
+  // the assignment row keeps the last error for the teacher to see.
+  await boss.createQueue(CODESPACE_SYNC_QUEUE, {
+    retryLimit: 10,
+    retryBackoff: true,
+    retryDelay: 15,
+  });
 
   if (opts.runWorkers) {
     await boss.work<WebhookJob>(WEBHOOK_QUEUE, async (jobs) => {
@@ -101,6 +111,9 @@ export async function startJobs(
     });
     await boss.work<EmailJobData>(EMAIL_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.emailHandler(job.data);
+    });
+    await boss.work<{ assignmentId: string }>(CODESPACE_SYNC_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.codespaceSyncHandler(job.data);
     });
   }
 

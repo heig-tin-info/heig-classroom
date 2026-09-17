@@ -10,6 +10,8 @@ import {
   List,
   Loader2,
   Lock,
+  MonitorPlay,
+  Play,
   Search,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -138,9 +140,12 @@ function RepoMetrics({
 function StudentAssignmentRow({
   a,
   githubLinked,
+  codespaceHost,
 }: {
   a: StudentAssignment;
   githubLinked: boolean;
+  /** Portal host, for the `sebs://` deep link; null = no portal configured. */
+  codespaceHost: string | null;
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -155,13 +160,19 @@ function StudentAssignmentRow({
   const locked = a.state === "locked" || a.repo?.lockedAt != null;
   const accepted = a.repo?.provisionStatus === "ok" && a.repo.fullName;
   const cell = "px-4 py-2.5 align-middle";
+  // ADR-013. In exam mode the student has no access to the repository at all,
+  // so the GitHub link disappears entirely and the Start button takes its
+  // place; in plain online mode both are shown.
+  const online = a.workMode !== "free";
+  const examOnly = a.workMode === "online_seb";
+  const showRepoLink = accepted && !examOnly;
 
   return (
     <tr className={`text-sm ${locked ? "opacity-60" : ""}`}>
       <td className={`${cell} font-medium`}>
         <span className="inline-flex items-center gap-1.5">
           {locked ? <Lock className="size-3.5 shrink-0 text-zinc-400" /> : null}
-          {accepted ? (
+          {showRepoLink ? (
             <a
               href={`https://github.com/${a.repo!.fullName}`}
               target="_blank"
@@ -173,6 +184,11 @@ function StudentAssignmentRow({
           ) : (
             a.name
           )}
+          {online ? (
+            <Badge tone="zinc" icon={MonitorPlay}>
+              {t("student.workspace")}
+            </Badge>
+          ) : null}
         </span>
       </td>
       <td className={cell}>
@@ -215,14 +231,43 @@ function StudentAssignmentRow({
       </td>
       <td className={`${cell} text-right`}>
         {accepted ? (
-          <a
-            href={`https://github.com/${a.repo!.fullName}`}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
-          >
-            <GithubIcon className="size-4" /> {t("student.openRepo")}
-          </a>
+          <div className="flex flex-col items-end gap-1.5">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {showRepoLink ? (
+                <a
+                  href={`https://github.com/${a.repo!.fullName}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-zinc-100 px-3 py-1.5 text-sm font-medium text-zinc-800 transition-all duration-150 hover:-translate-y-px hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                >
+                  <GithubIcon className="size-4" /> {t("student.openRepo")}
+                </a>
+              ) : null}
+              {online && !locked ? (
+                // Plain navigation: this URL is also the SEB startURL, so it
+                // must work as a link, not as a fetch.
+                <a
+                  href={`/app/codespace/start/${a.id}`}
+                  className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
+                >
+                  <Play className="size-4" /> {t("student.start")}
+                </a>
+              ) : null}
+            </div>
+            {examOnly && codespaceHost ? (
+              <>
+                <a
+                  href={`sebs://${codespaceHost}/exam/${a.id}.seb`}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-accent hover:underline"
+                >
+                  <MonitorPlay className="size-4" /> {t("student.openSeb")}
+                </a>
+                <p className="max-w-xs text-right text-xs text-zinc-500 dark:text-zinc-400">
+                  {t("student.sebOnly")}
+                </p>
+              </>
+            ) : null}
+          </div>
         ) : (
           <>
             <Tip label={githubLinked ? null : t("student.linkPrompt")}>
@@ -262,10 +307,12 @@ function StudentClassroomCard({
   room,
   githubLinked,
   query,
+  codespaceHost,
 }: {
   room: StudentClassroom;
   githubLinked: boolean;
   query: string;
+  codespaceHost: string | null;
 }) {
   const t = useT();
   const roomHit = query === "" || fuzzyFilter(query, [room], (r) => r.name).length > 0;
@@ -326,7 +373,12 @@ function StudentClassroomCard({
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
               {sorted.map((a) => (
-                <StudentAssignmentRow key={a.id} a={a} githubLinked={githubLinked} />
+                <StudentAssignmentRow
+                  key={a.id}
+                  a={a}
+                  githubLinked={githubLinked}
+                  codespaceHost={codespaceHost}
+                />
               ))}
             </tbody>
           </table>
@@ -439,7 +491,9 @@ export function StudentHome({ me }: { me: Me }) {
                       <td className={`${cell} font-medium`}>
                         <span className="inline-flex items-center gap-1.5">
                           {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
-                          {a.repo?.provisionStatus === "ok" && a.repo.fullName ? (
+                          {a.repo?.provisionStatus === "ok" &&
+                          a.repo.fullName &&
+                          a.workMode !== "online_seb" ? (
                             <a
                               href={`https://github.com/${a.repo.fullName}`}
                               target="_blank"
@@ -504,7 +558,13 @@ export function StudentHome({ me }: { me: Me }) {
       ) : (
         <div className="space-y-4">
           {(rooms.data ?? []).map((room) => (
-            <StudentClassroomCard key={room.id} room={room} githubLinked={linked} query={query} />
+            <StudentClassroomCard
+              key={room.id}
+              room={room}
+              githubLinked={linked}
+              query={query}
+              codespaceHost={me.codespaceHost}
+            />
           ))}
         </div>
       )}

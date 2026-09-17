@@ -137,6 +137,11 @@ const en = {
   "student.testsPassing": "{passed}/{total} passing",
   "student.noTests": "No tests reported yet.",
   "student.locked": "locked",
+  "student.workspace": "Online workspace",
+  "student.start": "Start",
+  "student.openSeb": "Open in Safe Exam Browser",
+  "student.sebOnly":
+    "This assignment runs in an exam session: it only opens from Safe Exam Browser, never from an ordinary browser.",
   "student.deadlineCol": "Deadline",
   "student.due": "due {date}",
   "student.until": "in {duration}",
@@ -345,6 +350,11 @@ const fr: Record<keyof Dict, string> = {
   "student.testsPassing": "{passed}/{total} réussis",
   "student.noTests": "Aucun test rapporté pour l'instant.",
   "student.locked": "verrouillé",
+  "student.workspace": "Environnement en ligne",
+  "student.start": "Démarrer",
+  "student.openSeb": "Ouvrir dans Safe Exam Browser",
+  "student.sebOnly":
+    "Ce devoir se déroule en session d'examen : elle ne s'ouvre que depuis Safe Exam Browser, jamais depuis un navigateur ordinaire.",
   "student.deadlineCol": "Échéance",
   "student.due": "échéance {date}",
   "student.until": "dans {duration}",
