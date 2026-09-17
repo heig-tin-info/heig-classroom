@@ -38,6 +38,20 @@ passe local (NFR-01).
 | `family_name` | Nom | Oui |
 | `swissEduPersonUniqueID` | Identifiant académique, stocké si présent (déduplication) | Non |
 
+- **AU-02b** — (GH-11) Face à Switch edu-ID, le scope `https://eduid.ch/scope/userinfo.read`
+  MUST être demandé en plus : c'est derrière lui que vivent les adresses des affiliations
+  institutionnelles (`swissEduIDLinkedAffiliationMail`) et les affiliations elles-mêmes,
+  sans lesquelles un étudiant inscrit avec une adresse privée reste introuvable dans le
+  roster. Le scope n'est ajouté que pour un issuer edu-ID — un IdP qui ne le connaît pas
+  répondrait `invalid_scope`. edu-ID ne libère ces claims **par défaut que sur le endpoint
+  userinfo** : celui-ci MUST donc être interrogé à chaque connexion, et un échec de cet
+  appel MUST rester sans effet sur la session tant que l'ID token suffit. Ce que edu-ID
+  libère réellement dépend de la configuration du client dans la Resource Registry.
+- **AU-02c** — (GH-11) L'ensemble des claims libérés MUST être persisté à chaque connexion
+  (`user_idp_claims`, une ligne par compte, écrasée). Dérogation assumée à la minimisation :
+  un incident d'authentification coûte cher à diagnostiquer après coup. En contrepartie, la
+  table MUST rester confinée au serveur — jamais jointe à une vue utilisateur, jamais
+  affichée, jamais exposée par l'API.
 - **AU-03** — À la première connexion réussie, le backend MUST créer un compte local :
   `{ oidc_sub, email, email_verified, given_name, family_name, role, created_at }`.
   Le compte est identifié par `oidc_sub`, jamais par l'e-mail (l'e-mail edu-ID peut

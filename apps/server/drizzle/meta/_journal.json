@@ -169,6 +169,13 @@
       "when": 1789551032466,
       "tag": "0023_classroom-staff",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789631252593,
+      "tag": "0024_eduid-claims",
+      "breakpoints": true
     }
   ]
 }

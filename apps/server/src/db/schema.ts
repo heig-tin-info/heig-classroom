@@ -73,6 +73,27 @@ const bytea = customType<{ data: Buffer }>({
   },
 });
 
+/**
+ * Raw claim set released by the IdP at the last login (GH-11). Diagnostic
+ * and matching material only: edu-ID hands out several e-mail addresses and
+ * the affiliations behind them, and what it actually releases depends on its
+ * Resource Registry configuration. Deliberately NOT minimized (see
+ * auth/claims.ts); in exchange the table is never read by a user-facing
+ * view and never leaves the server.
+ */
+export const userIdpClaims = pgTable("user_idp_claims", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  claims: jsonb("claims").$type<Record<string, unknown>>().notNull(),
+  /** Affiliation claims merged and normalized (`student`, `staff@heig-vd.ch`, …). */
+  affiliations: text("affiliations")
+    .array()
+    .notNull()
+    .default(sql`'{}'::text[]`),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 /** Uploaded avatar (cropped to 256×256 client-side), takes priority over `picture_url`. */
 export const avatars = pgTable("avatars", {
   userId: uuid("user_id")
