@@ -6,6 +6,7 @@ dist/
 *.tsbuildinfo
 .env
 .env.*
+!.env.prod.example
 !.env.example
 coverage/
 

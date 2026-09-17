@@ -9,6 +9,7 @@ import type { AppConfig } from "../config.js";
 import { avatars, users } from "../db/schema.js";
 import { isDateFormat, isEmailKind, type DateFormat } from "@hgc/contracts";
 
+import { codespaceGrantFor, codespaceHost } from "../codespace.js";
 import { resolvedPrefs } from "../mailer.js";
 import { claimEnrollments } from "../modules/roster.js";
 import { claimStaffSeats } from "../modules/staff.js";
@@ -138,9 +139,22 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
   );
 
   // --- Routes ---
-  app.get("/app/auth/login", async (_req, reply) => {
+  /**
+   * Where to land after the login round trip. Only a same-origin, absolute
+   * PATH is accepted ("/app/codespace/start/…"): anything else — a full URL,
+   * a protocol-relative "//evil.example" — falls back to the home page, so
+   * the parameter can never become an open redirect.
+   */
+  function safeReturnTo(raw: unknown): string {
+    if (typeof raw !== "string") return "/";
+    if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return "/";
+    return raw;
+  }
+
+  app.get("/app/auth/login", async (req, reply) => {
     const { url, codeVerifier, state, nonce } = await provider.beginLogin();
-    reply.setCookie(LOGIN_STASH_COOKIE, JSON.stringify({ codeVerifier, state, nonce }), {
+    const returnTo = safeReturnTo((req.query as { returnTo?: unknown }).returnTo);
+    reply.setCookie(LOGIN_STASH_COOKIE, JSON.stringify({ codeVerifier, state, nonce, returnTo }), {
       path: "/app/auth",
       httpOnly: true,
       sameSite: "lax",
@@ -161,6 +175,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
       codeVerifier: string;
       state: string;
       nonce: string;
+      returnTo?: string;
     };
     reply.clearCookie(LOGIN_STASH_COOKIE, { path: "/app/auth" });
 
@@ -211,7 +226,10 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
       httpOnly: false,
       expires: session.expiresAt,
     });
-    return reply.redirect("/", 303);
+    // Deep link the user asked for before signing in (the student Start
+    // button of ADR-013 goes through here), re-validated after the cookie
+    // round trip.
+    return reply.redirect(safeReturnTo(stash.returnTo), 303);
   });
 
   app.post(
@@ -260,6 +278,11 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
         locale: u.locale,
         dateFormat: u.dateFormat,
         emailPrefs: resolvedPrefs(u.emailPrefs),
+        // ADR-013: the single place the front learns whether the online
+        // workspace exists at all (null) and whether this account may pick
+        // it. Every write path re-checks server-side.
+        codespace: await codespaceGrantFor(app.db, config, u),
+        codespaceHost: codespaceHost(config),
       };
     },
   );

@@ -115,7 +115,7 @@ masquée ? Le presse-papiers est-il isolé ?
 **Si l'étape 4 échoue en 403**, la cause est presque toujours l'une de trois :
 
 - **URL reconstruite à tort derrière le frontal.** Le portail a haché
-  `http://127.0.0.1:3000/exam/…` là où SEB a haché
+  `http://127.0.0.1:3100/exam/…` là où SEB a haché
   `https://<portail>/exam/…`. Corrigez en fixant `publicOrigin` sur l'origine
   publique du portail plutôt qu'en faisant confiance à `Host`. La journalisation
   du refus imprime l'URL retenue : comparez-la à ce que la barre d'adresse de

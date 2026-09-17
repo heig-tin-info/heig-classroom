@@ -12,6 +12,7 @@ import {
   users,
   type AssignmentRow,
   type SessionRow,
+  type UserRow,
 } from "../db/schema.js";
 import type { RepoRef } from "../git/index.js";
 
@@ -100,6 +101,13 @@ export function updateSession(db: Db, id: string, patch: Partial<SessionRow>): S
   return row;
 }
 
+/** `<owner>/<name>` → `RepoRef`. Undefined si la forme n'y est pas. */
+export function splitRepoRef(full: string): RepoRef | undefined {
+  const slash = full.indexOf("/");
+  if (slash <= 0 || slash === full.length - 1) return undefined;
+  return { owner: full.slice(0, slash), name: full.slice(slash + 1) };
+}
+
 /** Dépôt cible du relais : valeur fixe, ou convention `{student}`. */
 export function targetRepoFor(
   assignment: Pick<AssignmentRow, "targetRepo" | "targetRepoPattern">,
@@ -107,10 +115,63 @@ export function targetRepoFor(
 ): RepoRef | undefined {
   const raw = assignment.targetRepo ?? assignment.targetRepoPattern;
   if (!raw) return undefined;
-  const full = raw.replace(/\{student\}/g, student);
-  const slash = full.indexOf("/");
-  if (slash <= 0 || slash === full.length - 1) return undefined;
-  return { owner: full.slice(0, slash), name: full.slice(slash + 1) };
+  return splitRepoRef(raw.replace(/\{student\}/g, student));
+}
+
+/**
+ * Dépôt cible **de la session**. Le jeton de lancement de classroom apporte
+ * le dépôt de l'étudiant, qui fait foi ; la convention du devoir n'est plus
+ * qu'un repli pour la graine YAML autonome, dont les sessions n'ont pas de
+ * `targetRepo`.
+ */
+export function targetRepoOfSession(
+  session: Pick<SessionRow, "targetRepo" | "student">,
+  assignment: Pick<AssignmentRow, "targetRepo" | "targetRepoPattern"> | undefined,
+): RepoRef | undefined {
+  if (session.targetRepo) return splitRepoRef(session.targetRepo.fullName);
+  return assignment ? targetRepoFor(assignment, session.student) : undefined;
+}
+
+/**
+ * Sessions vivantes d'un enseignant, **tous devoirs confondus** : c'est
+ * l'unité du quota posé par l'administrateur (docs/pistes.md, « quota de
+ * sessions actives par enseignant »). `sessions.teacherId` est recopié du
+ * devoir à la création, donc le comptage tient en une requête.
+ */
+export function countLiveSessionsForTeacher(db: Db, teacherId: string): number {
+  const rows = db
+    .select({ id: sessions.id })
+    .from(sessions)
+    .where(and(eq(sessions.teacherId, teacherId), inArray(sessions.state, [...LIVE_STATES])))
+    .all();
+  return rows.length;
+}
+
+/** Sessions d'un devoir, avec leur utilisateur : tableau enseignant de classroom. */
+export function assignmentSessionRows(
+  db: Db,
+  assignmentId: string,
+): Array<{ session: SessionRow; user: UserRow; lastPushAt: Date | null }> {
+  const rows = db
+    .select({ session: sessions, user: users })
+    .from(sessions)
+    .innerJoin(users, eq(sessions.userId, users.id))
+    .where(eq(sessions.assignmentId, assignmentId))
+    .orderBy(desc(sessions.createdAt))
+    .all();
+  const lastPush = new Map<string, Date>();
+  for (const p of db
+    .select({ sessionId: pushEvents.sessionId, receivedAt: pushEvents.receivedAt })
+    .from(pushEvents)
+    .all()) {
+    const current = lastPush.get(p.sessionId);
+    if (!current || p.receivedAt > current) lastPush.set(p.sessionId, p.receivedAt);
+  }
+  return rows.map((r) => ({
+    session: r.session,
+    user: r.user,
+    lastPushAt: lastPush.get(r.session.id) ?? null,
+  }));
 }
 
 export interface TeacherSessionRow {

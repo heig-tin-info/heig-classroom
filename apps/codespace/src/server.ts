@@ -18,6 +18,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 
 import { loadConfig, type AppConfig } from "./auth/config.js";
 import { authPlugin } from "./auth/plugin.js";
+import { classroomRoutes } from "./classroom/routes.js";
 import { openDb, type Db, type DbHandle } from "./db/client.js";
 import { createEngine, type Engine } from "./engine/index.js";
 import {
@@ -157,7 +158,11 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
         id: row.id,
         configKey: row.configKey ?? "",
         beks: row.beks,
-        startUrl: new URL(sebStartPath(row.id), publicOrigin).href,
+        // Un devoir synchronisé depuis classroom porte sa `startURL` : c'est
+        // classroom qui authentifie l'étudiant puis redirige vers `/launch`.
+        // La Config Key a été calculée sur cette URL-là, donc le `.seb` servi
+        // ici doit la reprendre telle quelle.
+        startUrl: seb.startUrl ?? new URL(sebStartPath(row.id), publicOrigin).href,
         quitUrl: seb.quitUrl ?? new URL("/", publicOrigin).href,
         examKeySalt: seb.examKeySalt,
         ...(seb.extraAllowedHosts ? { extraAllowedHosts: seb.extraAllowedHosts } : {}),
@@ -221,6 +226,24 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
       return { sessionId: result.session.id, redirectTo: `/s/${result.session.id}/` };
     },
   });
+
+  // --- frontière avec heig-classroom --------------------------------------
+  // Sans secret partagé, le greffon n'est pas enregistré : `/launch` et
+  // `/api/assignments/*` répondent 404 et le portail reste autonome.
+  if (config.CODESPACE_LAUNCH_SECRET !== "") {
+    await app.register(classroomRoutes, {
+      config,
+      db,
+      manager,
+      verifier,
+      ...(forge ? { repoUrl: (repo) => forge.pushUrl(repo) } : {}),
+    });
+  } else {
+    app.log.info(
+      {},
+      "CODESPACE_LAUNCH_SECRET absent : intégration classroom désactivée (portail autonome)",
+    );
+  }
 
   await app.register(webRoutes, { config, db, manager });
   await app.register(proxyPlugin, {

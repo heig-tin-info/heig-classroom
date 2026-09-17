@@ -12,9 +12,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { Assignment, OrgRepo, RepoTree } from "@hgc/contracts";
+import type { Assignment, OrgRepo, RepoTree, WorkMode } from "@hgc/contracts";
 
-import { api, ApiError, apiErrorMessage } from "./api";
+import { api, ApiError, apiErrorMessage, useMe } from "./api";
 import { HelpIcon } from "./help";
 import { useToast } from "./notify";
 import {
@@ -183,6 +183,32 @@ function SettingRow({
   );
 }
 
+/**
+ * Work modes (ADR-013), one line each — the wording follows
+ * `packages/contracts/src/codespace.ts`, which is the contract with the
+ * portal. Teacher surfaces stay in English (i18n.tsx scope rule).
+ */
+const WORK_MODE_LABELS: Record<WorkMode, string> = {
+  free: "Free",
+  online: "Online workspace",
+  online_seb: "Online workspace, SEB only",
+};
+const WORK_MODE_DESC: Record<WorkMode, string> = {
+  free: "Students clone and push with their own GitHub account",
+  online:
+    "Work happens in the portal; students only read their repository and the portal pushes for them",
+  online_seb:
+    "Same, but the session only opens from Safe Exam Browser and students get no repository access before grading",
+};
+
+/** One Browser Exam Key per line, 64 hex characters (portal invariant). */
+const BEK_RE = /^[0-9a-fA-F]{64}$/;
+const parseKeys = (raw: string): string[] =>
+  raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
+
 /** Compact duration: "45 min", "1 h 30 min", "3 d 4 h", "26 d". */
 export function compactDuration(ms: number): string {
   const min = Math.round(ms / 60_000);
@@ -268,6 +294,23 @@ export function AssignmentForm({
   const [protectedFiles, setProtectedFiles] = useState<Set<string>>(
     new Set(existing?.protectedFiles ?? []),
   );
+  // --- Online workspace (ADR-013) ---
+  const me = useMe();
+  // The section only exists when the administrator granted this teacher the
+  // feature; the server refuses a non-free mode either way (403).
+  const canOnline = me.data?.codespace?.enabled === true;
+  const [workMode, setWorkMode] = useState<WorkMode>(existing?.workMode ?? "free");
+  const [codespaceImage, setCodespaceImage] = useState(existing?.codespaceImage ?? "");
+  const [examKeys, setExamKeys] = useState((existing?.browserExamKeys ?? []).join("\n"));
+  const onlineMode = workMode !== "free";
+  const keys = parseKeys(examKeys);
+  const keysValid = keys.every((k) => BEK_RE.test(k));
+  // A published online assignment cannot go back to free: its repositories
+  // were provisioned without write access (server-side 409 too).
+  const onlineLocked = livePublished && (existing?.workMode ?? "free") !== "free";
+  const workModeOptions = (["free", "online", "online_seb"] as WorkMode[])
+    .filter((m) => !(onlineLocked && m === "free"))
+    .map((m) => ({ value: m, label: WORK_MODE_LABELS[m] }));
   // Intermediate reviews authored with the assignment (creation only; the
   // detail view manages them afterwards). "n days before deadline" → J−n.
   const [milestones, setMilestones] = useState<{ name: string; days: string }[]>([]);
@@ -327,6 +370,16 @@ export function AssignmentForm({
               ...(clearDuration ? { durationMinutes: null } : {}),
             };
 
+  /** Work-mode fields, only when the teacher may actually set them. */
+  const workModeFields = () =>
+    canOnline
+      ? {
+          workMode,
+          codespaceImage: onlineMode ? codespaceImage.trim() : "",
+          browserExamKeys: workMode === "online_seb" ? keys : [],
+        }
+      : {};
+
   const save = useMutation({
     mutationFn: async () => {
       if (existing) {
@@ -338,6 +391,7 @@ export function AssignmentForm({
             deadlineStrategy,
             gradingMode,
             protectedFiles: [...protectedFiles],
+            ...workModeFields(),
           }),
         });
       }
@@ -352,6 +406,7 @@ export function AssignmentForm({
           gradingMode,
           branches: branch ? [branch] : undefined,
           protectedFiles: [...protectedFiles],
+          ...workModeFields(),
         }),
       });
       // Milestones need the assignment id: created right after, best-effort —
@@ -743,6 +798,70 @@ export function AssignmentForm({
           </SettingRow>
         </div>
 
+        {/* --- Online workspace (ADR-013), granted teachers only --- */}
+        {canOnline ? (
+          <div className="space-y-3.5 px-5 py-4">
+            <p className={eyebrow}>Work mode</p>
+            <SettingRow title="Students work" desc={WORK_MODE_DESC[workMode]}>
+              <Tip
+                label={
+                  onlineLocked
+                    ? "A published online assignment cannot go back to Free: its repositories were provisioned without write access"
+                    : null
+                }
+              >
+                <Segmented
+                  name="work-mode"
+                  value={workMode}
+                  onChange={setWorkMode}
+                  options={workModeOptions}
+                />
+              </Tip>
+            </SettingRow>
+            {onlineMode ? (
+              <div className={`${panel} space-y-3`}>
+                <Field
+                  label="Container image"
+                  placeholder="default image"
+                  value={codespaceImage}
+                  onChange={(e) => setCodespaceImage(e.target.value)}
+                  fullWidth
+                />
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Image name from the portal catalogue — leave empty for the portal's default
+                  image.
+                </p>
+                {workMode === "online_seb" ? (
+                  <label className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                      Browser Exam Keys, one per line
+                    </span>
+                    <textarea
+                      rows={3}
+                      spellCheck={false}
+                      className={`${select} w-full font-mono text-xs`}
+                      placeholder="64 hexadecimal characters per key"
+                      value={examKeys}
+                      onChange={(e) => setExamKeys(e.target.value)}
+                    />
+                    <span
+                      className={
+                        keysValid
+                          ? "text-xs text-zinc-500 dark:text-zinc-400"
+                          : "text-xs text-amber-600 dark:text-amber-400"
+                      }
+                    >
+                      {keysValid
+                        ? `${keys.length} key${keys.length === 1 ? "" : "s"} — one per Safe Exam Browser platform/version`
+                        : "Each key is exactly 64 hexadecimal characters"}
+                    </span>
+                  </label>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
         {/* --- Milestones (creation only, graded assignments) --- */}
         {!existing && gradingMode === "auto" ? (
           <div className="space-y-2.5 px-5 py-4">
@@ -840,7 +959,8 @@ export function AssignmentForm({
                 (durationOnly && durationMinutes < 15) ||
                 missingWhen ||
                 rangeInvalid ||
-                !milestonesValid
+                !milestonesValid ||
+                (workMode === "online_seb" && !keysValid)
               }
             >
               {save.isPending ? (

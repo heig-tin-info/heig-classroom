@@ -15,7 +15,11 @@
  *   7. `/s/<sid>/` sans cookie : refusé, et le tableau enseignant n'est servi
  *      qu'à un compte porteur du rôle de realm `teacher` ;
  *   8. examen : `/exam/<id>/start` refusé sans `X-Dev-SEB`, accepté avec, puis
- *      `/s/<sid>/` refusé depuis une autre adresse.
+ *      `/s/<sid>/` refusé depuis une autre adresse ;
+ *   9. lancement depuis classroom : devoir poussé par `PUT /api/assignments/<id>`
+ *      avec un jeton de service, session ouverte par `GET /launch?token=…` sans
+ *      seconde connexion, push relayé vers le dépôt **du jeton**, rejeu du
+ *      jeton refusé, quota de l'enseignant opposé à un second étudiant.
  *
  * ## Pourquoi pas Playwright
  *
@@ -74,6 +78,8 @@ const { loadConfig } = await import("../src/auth/config.js");
 const { buildPortal } = await import("../src/server.js");
 const { runSeed } = await import("../src/db/seed.js");
 const { containerNameFor } = await import("../src/sessions/manager.js");
+const { forgejoSeedForge } = await import("../src/db/seed.js");
+const { signHs256 } = await import("@hgc/domain");
 
 const config = loadConfig();
 const BASE = `http://localhost:${config.PORT}`;
@@ -399,6 +405,11 @@ async function main(): Promise<void> {
     "Keycloak joignable",
     config.OIDC_ISSUER,
   );
+  check(
+    config.CODESPACE_LAUNCH_SECRET.length >= 32,
+    "secret de lancement partagé présent dans .env (CODESPACE_LAUNCH_SECRET)",
+    `${config.CODESPACE_LAUNCH_SECRET.length} caractères`,
+  );
   if (failures > 0) throw new Error("préalables non réunis");
 
   step("banc d'essai neuf");
@@ -718,6 +729,211 @@ async function main(): Promise<void> {
       headersOnly.status === 403,
       "le proxy ne se laisse pas convaincre par un en-tête SEB (invariant 5)",
       String(headersOnly.status),
+    );
+
+    // --- 9. lancement depuis classroom -------------------------------------
+    step("9. lancement depuis classroom : PUT du devoir, puis /launch");
+
+    const nowSec = (): number => Math.floor(Date.now() / 1000);
+    const SECRET = config.CODESPACE_LAUNCH_SECRET;
+    const CLASSROOM_ASSIGNMENT = "classroom-lab";
+    const CLASSROOM_STUDENT = "e2e-classroom";
+    const CLASSROOM_TEACHER = "t-e2e";
+    const CLASSROOM_REPO = `${config.FORGE_USER}/classroom-launch-e2e`;
+    /** Marqueur de l'exécution courante, pour que le rendu diffère du précédent. */
+    const runTag = `${Date.now()}-${randomBytes(4).toString("hex")}`;
+
+    /** Jeton de service : serveur à serveur, audience `heig-codespace-api`. */
+    const makeServiceToken = (): Promise<string> =>
+      signHs256(
+        {
+          iss: "heig-classroom",
+          aud: "heig-codespace-api",
+          iat: nowSec(),
+          exp: nowSec() + 300,
+        },
+        SECRET,
+      );
+
+    /** Jeton de lancement : ce que classroom émet au clic sur Démarrer. */
+    const makeLaunchToken = (over: Record<string, unknown> = {}): Promise<string> =>
+      signHs256(
+        {
+          iss: "heig-classroom",
+          aud: "heig-codespace",
+          iat: nowSec(),
+          exp: nowSec() + 300,
+          jti: randomBytes(16).toString("hex"),
+          sub: CLASSROOM_STUDENT,
+          email: "e2e@heig-vd.ch",
+          displayName: "Élève de classroom",
+          githubLogin: "e2e-gh",
+          assignmentId: CLASSROOM_ASSIGNMENT,
+          repo: { fullName: CLASSROOM_REPO, defaultBranch: "main" },
+          ...over,
+        },
+        SECRET,
+      );
+
+    // Le dépôt de l'étudiant, tel que classroom l'aurait provisionné. Public,
+    // comme ceux de la graine : le miroir du dépôt de transit est lu par un
+    // `git fetch` sans jeton, à dessein (docs/v1.md D-V1-8).
+    const seedForge = forgejoSeedForge(config.FORGE_URL, config.FORGE_TOKEN);
+    const [repoOwner, repoName] = CLASSROOM_REPO.split("/") as [string, string];
+    await seedForge.ensure(repoOwner, repoName);
+    ok("dépôt de l'étudiant créé dans la forge", CLASSROOM_REPO);
+
+    const syncBody = (quota: number): unknown => ({
+      id: CLASSROOM_ASSIGNMENT,
+      slug: "tp-classroom",
+      name: "TP lancé depuis classroom",
+      classroomId: "c-e2e",
+      classroomName: "Classe de bout en bout",
+      mode: "online",
+      image: config.CODESPACE_IMAGE,
+      sourceRepo: { fullName: `${config.FORGE_USER}/tp-pointeurs-modele`, defaultBranch: "main" },
+      browserExamKeys: [],
+      teacher: { id: CLASSROOM_TEACHER, email: "teacher@heig-vd.ch" },
+      quota: { maxActiveSessions: quota },
+      startAt: new Date(Date.now() - 3_600_000).toISOString(),
+      deadlineAt: null,
+    });
+
+    const putAssignment = async (quota: number): Promise<Reply> =>
+      request(new Jar(), `${BASE}/api/assignments/${CLASSROOM_ASSIGNMENT}`, {
+        method: "PUT",
+        headers: {
+          authorization: `Bearer ${await makeServiceToken()}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(syncBody(quota)),
+      });
+
+    const unauthorised = await request(new Jar(), `${BASE}/api/assignments/${CLASSROOM_ASSIGNMENT}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(syncBody(2)),
+    });
+    check(unauthorised.status === 401, "PUT refusé sans jeton de service", String(unauthorised.status));
+
+    const synced = await putAssignment(2);
+    check(synced.status === 200, "devoir synchronisé depuis classroom", String(synced.status));
+    const syncedBody = JSON.parse(synced.body) as { id: string; configKey: string | null };
+    check(
+      syncedBody.id === CLASSROOM_ASSIGNMENT && syncedBody.configKey === null,
+      "réponse du PUT : identifiant, pas de Config Key en mode en ligne",
+    );
+    const again = await putAssignment(2);
+    check(again.status === 200 && again.body === synced.body, "le PUT est idempotent");
+
+    // L'étudiant arrive **sans se reconnecter** : pas de cookie OIDC dans ce
+    // bocal, seulement le jeton dans l'URL.
+    const launchJar = new Jar();
+    const launchToken = await makeLaunchToken();
+    const launchStarted = Date.now();
+    const launched = await request(launchJar, `${BASE}/launch?token=${launchToken}`);
+    check(launched.status === 303, "/launch ouvre la session", `${launched.status} ${launched.location}`);
+    const csid = /\/s\/([^/]+)\//.exec(launched.location ?? "")?.[1] ?? "";
+    check(csid !== "", "identifiant de session reçu", csid);
+    check(
+      launchJar.get("cs_session")?.startsWith(`${csid}.`) === true,
+      "cookie de session du portail posé par /launch (aucune seconde connexion)",
+    );
+    check(launchJar.get("cs_auth") === undefined, "aucun cookie de connexion OIDC n'est requis");
+
+    const classroomWorkbench = await follow(launchJar, new URL(launched.location as string, BASE).href);
+    check(
+      classroomWorkbench.status === 200 &&
+        classroomWorkbench.body.includes("vscode-workbench-web-configuration"),
+      "l'éditeur s'ouvre pour la session lancée depuis classroom",
+      `${classroomWorkbench.status}`,
+    );
+    measure(
+      "jeton de lancement → page workbench",
+      `${((Date.now() - launchStarted) / 1000).toFixed(2)} s`,
+    );
+
+    const replayed = await request(new Jar(), `${BASE}/launch?token=${launchToken}`);
+    check(replayed.status === 403, "usage unique : le même jeton est refusé", String(replayed.status));
+    check(replayed.body.includes("déjà servi"), "page de refus explicite sur le rejeu");
+
+    const unknownAssignment = await request(
+      new Jar(),
+      `${BASE}/launch?token=${await makeLaunchToken({ assignmentId: "jamais-synchronise" })}`,
+    );
+    check(
+      unknownAssignment.status === 403 &&
+        unknownAssignment.body.includes("non synchronisé depuis classroom"),
+      "devoir inconnu : refus nommé",
+    );
+
+    // Le push part vers le dépôt **du jeton**, pas vers une convention du devoir.
+    const classroomPush = await inSession(
+      csid,
+      [
+        "set -e",
+        "cd /work",
+        "git config user.name etudiant",
+        "git config user.email etudiant@codespace.local",
+        // Contenu unique : le dépôt de l'étudiant survit d'une exécution à
+        // l'autre (seul `var/e2e/` est balayé), et le miroir du dépôt de
+        // transit rapporte donc le rendu précédent. Sans cela, `git commit`
+        // n'aurait rien à écrire à la seconde exécution.
+        `echo 'depuis classroom ${runTag}' > rendu.txt`,
+        "git add -A",
+        "git commit -q -m 'rendu lancé depuis classroom'",
+        "git push -q origin HEAD:main",
+        'echo "SHA=$(git rev-parse HEAD)"',
+      ].join("\n"),
+    );
+    const classroomSha = /SHA=([0-9a-f]{40})/.exec(classroomPush.out)?.[1] ?? "";
+    check(
+      classroomPush.code === 0 && classroomSha !== "",
+      "git push depuis le conteneur lancé par jeton",
+      classroomPush.out.slice(-200),
+    );
+    await waitFor(
+      "le commit dans le dépôt du jeton",
+      async () =>
+        fetch(`${config.FORGE_URL}/api/v1/repos/${CLASSROOM_REPO}/git/commits/${classroomSha}`, {
+          headers: { Authorization: `token ${config.FORGE_TOKEN}` },
+        }).then((r) => r.ok),
+      30_000,
+    );
+    ok("push relayé vers le dépôt porté par le jeton", CLASSROOM_REPO);
+
+    const summaries = await request(new Jar(), `${BASE}/api/assignments/${CLASSROOM_ASSIGNMENT}/sessions`, {
+      headers: { authorization: `Bearer ${await makeServiceToken()}` },
+    });
+    const rows = JSON.parse(summaries.body) as Array<{
+      sessionId: string;
+      userId: string;
+      lastPushAt: string | null;
+    }>;
+    check(
+      summaries.status === 200 && rows.some((r) => r.sessionId === csid && r.userId === CLASSROOM_STUDENT),
+      "le tableau des sessions est rendu à classroom avec son propre identifiant d'utilisateur",
+      `${summaries.status} · ${rows.length} ligne(s)`,
+    );
+    check(
+      rows.find((r) => r.sessionId === csid)?.lastPushAt !== null,
+      "le résumé porte la date du dernier push",
+    );
+
+    // Quota par enseignant : une session vivante, quota ramené à un, un second
+    // étudiant du même enseignant est refusé — et la reprise du premier, non.
+    check((await putAssignment(1)).status === 200, "quota de l'enseignant ramené à une session");
+    const overQuota = await request(
+      new Jar(),
+      `${BASE}/launch?token=${await makeLaunchToken({ sub: "e2e-classroom2", email: "e2e2@heig-vd.ch" })}`,
+    );
+    check(overQuota.status === 429, "second étudiant refusé : quota atteint", String(overQuota.status));
+    check(overQuota.body.includes("Quota atteint"), "page 429 explicite");
+    const resumed = await request(new Jar(), `${BASE}/launch?token=${await makeLaunchToken()}`);
+    check(
+      resumed.status === 303,
+      "la reprise de sa propre session ne consomme pas de quota",
+      String(resumed.status),
     );
 
     step("récapitulatif");

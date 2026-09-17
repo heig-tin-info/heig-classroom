@@ -77,6 +77,9 @@ export async function studentPlugin(
               graceMinutes: assignments.graceMinutes,
               gradingMode: assignments.gradingMode,
               gradesValidatedAt: assignments.gradesValidatedAt,
+              // ADR-013: drives the Start button. The Browser Exam Keys are
+              // deliberately NOT selected — they are secrets.
+              workMode: assignments.workMode,
             })
             .from(assignments)
             .where(
@@ -286,6 +289,8 @@ export async function studentPlugin(
           branches: row.assignment.branches,
           defaultBranch,
           studentLogin: me.githubLogin,
+          // ADR-013: read-only in online mode, no invitation at all in exam mode.
+          workMode: row.assignment.workMode,
         });
         const [updated] = await app.db
           .update(studentRepos)

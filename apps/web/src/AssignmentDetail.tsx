@@ -17,6 +17,7 @@ import {
   LockOpen,
   Loader2,
   Milestone as MilestoneIcon,
+  MonitorPlay,
   Pencil,
   Play,
   Plus,
@@ -600,6 +601,67 @@ function SyncBanner({
 }
 
 /**
+ * ADR-013: an online assignment lives in the codespace portal too. The portal
+ * is told about it by a pg-boss job, so the state here is "last successful
+ * push, or the error of the last attempt"; Resync re-queues the job.
+ */
+function CodespaceBanner({
+  classroomId,
+  a,
+}: {
+  classroomId: string;
+  a: AssignmentDetailPayload["assignment"];
+}) {
+  const resync = useMutation({
+    mutationFn: () =>
+      api(`/app/api/classrooms/${classroomId}/assignments/${a.id}/codespace-sync`, {
+        method: "POST",
+      }),
+  });
+  if (a.workMode === "free") return null;
+  const failed = a.codespaceSyncError !== null;
+  return (
+    <div
+      className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
+        failed
+          ? "border-red-200 bg-red-50 text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
+          : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300"
+      }`}
+    >
+      <MonitorPlay className="size-4 shrink-0" />
+      <span>
+        {a.workMode === "online_seb" ? "Online workspace, SEB only" : "Online workspace"}
+        {a.codespaceImage ? (
+          <code className="mx-1 font-mono text-xs">{a.codespaceImage}</code>
+        ) : (
+          <span className="mx-1 text-xs text-zinc-400">default image</span>
+        )}
+      </span>
+      <span className={failed ? "" : "text-zinc-500 dark:text-zinc-400"}>
+        {failed
+          ? a.codespaceSyncError
+          : a.codespaceSyncedAt
+            ? `Synced with portal at ${isoDateTime(a.codespaceSyncedAt)}`
+            : "Never synced with the portal yet"}
+      </span>
+      <span className="flex-1" />
+      <Button
+        variant="subtle"
+        onClick={() => resync.mutate()}
+        disabled={resync.isPending || resync.isSuccess}
+      >
+        {resync.isPending ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <RefreshCw className="size-4" />
+        )}
+        {resync.isSuccess ? "Resync queued" : "Resync"}
+      </Button>
+    </div>
+  );
+}
+
+/**
  * Intermediate review checkpoints: at each milestone's date the platform
  * fires one `grade-milestone` review per repository; the criteria tagged
  * `milestone: <name>` in criteria.yml are the graded subset (the barème
@@ -985,6 +1047,8 @@ export function AssignmentDetail({
       </div>
 
       <SyncBanner classroomId={classroomId} a={a} />
+
+      <CodespaceBanner classroomId={classroomId} a={a} />
 
       {showGrades ? (
         <MilestonesSection

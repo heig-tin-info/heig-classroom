@@ -16,7 +16,7 @@ import { eq } from "drizzle-orm";
 
 import type { Engine } from "../engine/index.js";
 import type { Db } from "../db/client.js";
-import type { AssignmentRow, SessionRow, UserRow } from "../db/schema.js";
+import type { AssignmentRepoRef, AssignmentRow, SessionRow, UserRow } from "../db/schema.js";
 import { sessions } from "../db/schema.js";
 import {
   ensureStagingRepo,
@@ -34,7 +34,7 @@ import {
   findAssignment,
   findSession,
   listLiveSessions,
-  targetRepoFor,
+  targetRepoOfSession,
   updateSession,
 } from "./store.js";
 
@@ -67,12 +67,24 @@ export interface StartResult {
   cookieToken: string;
 }
 
+/**
+ * Ce que l'appelant apporte en plus du couple (étudiant, devoir). Tout est
+ * facultatif : le bouton Démarrer du portail autonome n'en pose aucun, le
+ * jeton de lancement de classroom les pose tous.
+ */
+export interface StartOptions {
+  /** La session est née d'une vérification SEB (invariant 5). */
+  sebVerified?: boolean;
+  /** Enseignant porteur du quota, recopié du devoir. */
+  teacherId?: string | null;
+  /** `jti` du jeton de lancement, pour la trace. */
+  launchJti?: string | null;
+  /** Dépôt de l'étudiant apporté par le jeton ; remplace la convention du devoir. */
+  targetRepo?: AssignmentRepoRef | null;
+}
+
 export interface SessionManager {
-  start(
-    user: UserRow,
-    assignment: AssignmentRow,
-    opts?: { sebVerified?: boolean },
-  ): Promise<StartResult>;
+  start(user: UserRow, assignment: AssignmentRow, opts?: StartOptions): Promise<StartResult>;
   /** Relance le conteneur s'il a disparu ; sinon ne fait rien. */
   ensureRunning(sessionId: string): Promise<SessionRow>;
   close(sessionId: string, reason: string): Promise<void>;
@@ -86,8 +98,11 @@ export interface SessionManager {
   stopTimers(): Promise<void>;
   /** Pour `git/httpBackend.ts` : l'adresse du conteneur authentifie la session. */
   readonly lookup: SessionLookup;
-  /** Pour `git/relay.ts` : où relayer les pushes d'un événement. */
-  repoOfEvent(row: { student: string; assignment: string }): RepoRef | undefined;
+  /**
+   * Pour `git/relay.ts` : où relayer les pushes d'un événement. La session
+   * décide (elle porte le dépôt du jeton) ; le devoir n'est qu'un repli.
+   */
+  repoOfEvent(row: { sessionId?: string; student: string; assignment: string }): RepoRef | undefined;
 }
 
 /** Nom de conteneur déterministe : la réconciliation le retrouve seule. */
@@ -134,7 +149,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
   }
 
   async function seedStaging(session: SessionRow, assignment: AssignmentRow): Promise<void> {
-    const repo = targetRepoFor(assignment, session.student);
+    const repo = targetRepoOfSession(session, assignment);
     const targetUrl = repo && opts.forgeUrlOf ? opts.forgeUrlOf(repo) : undefined;
     const source = stagingSourceFor(assignment, targetUrl);
     try {
@@ -201,11 +216,22 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     return { session: updated, healthyInMs };
   }
 
+  /** Champs que le jeton de lancement apporte, posés à la création comme à la reprise. */
+  function launchPatch(startOpts: StartOptions): Partial<SessionRow> {
+    const patch: Partial<SessionRow> = {};
+    if (startOpts.teacherId !== undefined) patch.teacherId = startOpts.teacherId;
+    if (startOpts.launchJti !== undefined) patch.launchJti = startOpts.launchJti;
+    if (startOpts.targetRepo !== undefined) patch.targetRepo = startOpts.targetRepo;
+    return patch;
+  }
+
   async function startInner(
     user: UserRow,
     assignment: AssignmentRow,
-    sebVerified: boolean,
+    startOpts: StartOptions,
   ): Promise<StartResult> {
+    const sebVerified = startOpts.sebVerified ?? false;
+    const patch = launchPatch(startOpts);
     // Une ligne par couple (étudiant, devoir), quel que soit son état : c'est
     // ce qui rend l'identifiant de session **stable pour la vie du volume**,
     // donc le remote `origin` écrit dans `work/` valable après une fermeture
@@ -221,7 +247,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         existing.containerName !== null &&
         (await engine.inspect(existing.containerName))?.state === "running";
       if (alive) {
-        const touched = updateSession(db, existing.id, { lastSeen: new Date() });
+        const touched = updateSession(db, existing.id, { ...patch, lastSeen: new Date() });
         return {
           session: touched,
           launched: false,
@@ -230,6 +256,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         };
       }
       const revived = updateSession(db, existing.id, {
+        ...patch,
         state: "starting",
         sebVerified: sebVerified || existing.sebVerified,
         lastSeen: new Date(),
@@ -256,6 +283,9 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         lastSeen: now,
         cookieToken,
         sebVerified,
+        teacherId: startOpts.teacherId ?? assignment.teacherId,
+        launchJti: startOpts.launchJti ?? null,
+        targetRepo: startOpts.targetRepo ?? null,
       })
       .returning()
       .all();
@@ -295,7 +325,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       shared.catch(() => undefined);
       inFlight.set(key, shared);
       try {
-        const result = await startInner(user, assignment, startOpts.sebVerified ?? false);
+        const result = await startInner(user, assignment, startOpts);
         resolve(result.session);
         return result;
       } catch (err) {
@@ -473,7 +503,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         if (session.state !== "running" && session.state !== "starting") return undefined;
         const assignment = findAssignment(db, session.assignmentId);
         if (!assignment) return undefined;
-        const repo = targetRepoFor(assignment, session.student);
+        const repo = targetRepoOfSession(session, assignment);
         return {
           sessionId: session.id,
           student: session.student,
@@ -487,8 +517,14 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
 
     repoOfEvent(row) {
       const assignment = findAssignment(db, row.assignment);
+      // Le dépôt du jeton de lancement, quand la session en porte un ; la
+      // convention du devoir sinon. La session est consultée par son
+      // identifiant, pas par le couple, parce qu'elle survit à sa fermeture :
+      // le relais doit rester juste après la destruction du conteneur.
+      const session = row.sessionId ? findSession(db, row.sessionId) : undefined;
+      if (session) return targetRepoOfSession(session, assignment);
       if (!assignment) return undefined;
-      return targetRepoFor(assignment, row.student);
+      return targetRepoOfSession({ targetRepo: null, student: row.student }, assignment);
     },
   };
 

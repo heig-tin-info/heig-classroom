@@ -153,6 +153,14 @@ export const teacherGrants = pgTable(
     id: uuid("id").primaryKey(),
     /** Normalized to lowercase. */
     email: text("email").notNull().unique(),
+    /**
+     * Online workspace (ADR-013): the feature is opened teacher by teacher by
+     * the administrator. Off by default — a teacher without the grant never
+     * sees the work-mode section and the API refuses a non-`free` mode.
+     */
+    codespaceEnabled: boolean("codespace_enabled").notNull().default(false),
+    /** Concurrent portal sessions allowed across all of their assignments. */
+    codespaceMaxActiveSessions: integer("codespace_max_active_sessions").notNull().default(2),
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),
@@ -294,6 +302,26 @@ export const assignments = pgTable(
       .default("manual"),
     /** Manual mode: deadline offset from publication; null = absolute deadline. */
     durationMinutes: integer("duration_minutes"),
+    /**
+     * Work mode (ADR-013, `WorkMode` of @hgc/contracts). `free` is the
+     * historical flow. `online`/`online_seb` hand the work to the codespace
+     * portal: the student gets read access to their repository and the portal
+     * pushes for them, so no student credential ever exists.
+     */
+    workMode: text("work_mode", { enum: ["free", "online", "online_seb"] })
+      .notNull()
+      .default("free"),
+    /** Portal catalogue image; null = the portal's default image. */
+    codespaceImage: text("codespace_image"),
+    /** Accepted Browser Exam Keys (`online_seb`), 64 hex each. Never sent to students. */
+    browserExamKeys: text("browser_exam_keys")
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    /** Last successful PUT of this assignment to the portal (ADR-013). */
+    codespaceSyncedAt: timestamp("codespace_synced_at", { withTimezone: true }),
+    /** Failure of the last synchronization attempt; null when the last one worked. */
+    codespaceSyncError: text("codespace_sync_error"),
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),

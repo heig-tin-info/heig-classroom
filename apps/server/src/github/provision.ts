@@ -13,6 +13,8 @@ import { join } from "node:path";
 
 import type { Octokit } from "octokit";
 
+import type { WorkMode } from "@hgc/contracts";
+
 import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
 
@@ -26,8 +28,11 @@ export interface ProvisionResult {
   fullName: string;
   defaultBranch: string;
   rulesetId: number | null;
-  /** `pending` if an invitation was created, `accepted` if already a collaborator. */
-  invitationStatus: "pending" | "accepted";
+  /**
+   * `pending` if an invitation was created, `accepted` if already a
+   * collaborator, `none` in exam mode where the student is not invited at all.
+   */
+  invitationStatus: "none" | "pending" | "accepted";
 }
 
 export async function provisionStudentRepo(opts: {
@@ -39,8 +44,16 @@ export async function provisionStudentRepo(opts: {
   branches: string[];
   defaultBranch: string;
   studentLogin: string;
+  /**
+   * ADR-013. `free`: the historical flow, the student pushes with their own
+   * account. `online`: read-only (`pull`) — the portal pushes for them, so no
+   * student credential exists anywhere. `online_seb`: not invited at all, the
+   * student has no access to the repository before grading.
+   */
+  workMode?: WorkMode;
 }): Promise<ProvisionResult> {
   const { octokit, token, org, squashedRepo, targetRepo, branches, studentLogin } = opts;
+  const workMode: WorkMode = opts.workMode ?? "free";
   const auth = (repo: string) => authUrl(token, org, repo);
 
   // 1. Creation (idempotent: 422 name already exists = step already done).
@@ -141,17 +154,30 @@ export async function provisionStudentRepo(opts: {
     rulesetId = data.id;
   }
 
-  // 4. Invite the student with push permission (idempotent: 204 = already a collaborator).
-  const invite = await octokit.request(
-    "PUT /repos/{owner}/{repo}/collaborators/{username}",
-    { owner: org, repo: targetRepo, username: studentLogin, permission: "push" },
-  );
+  // 4. Invite the student (idempotent: 204 = already a collaborator).
+  //    Exam mode grants nothing: the repository stays invisible to the
+  //    student until the teacher opens it after grading.
+  let invitationStatus: ProvisionResult["invitationStatus"] = "none";
+  if (workMode !== "online_seb") {
+    const invite = await octokit.request(
+      "PUT /repos/{owner}/{repo}/collaborators/{username}",
+      {
+        owner: org,
+        repo: targetRepo,
+        username: studentLogin,
+        // `pull` in online mode: no write access means no student credential
+        // to manage, and the force-push ruleset above still stands.
+        permission: workMode === "free" ? "push" : "pull",
+      },
+    );
+    invitationStatus = invite.status === 201 ? "pending" : "accepted";
+  }
 
   return {
     repoId,
     fullName,
     defaultBranch: opts.defaultBranch,
     rulesetId,
-    invitationStatus: invite.status === 201 ? "pending" : "accepted",
+    invitationStatus,
   };
 }

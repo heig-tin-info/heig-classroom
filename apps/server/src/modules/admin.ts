@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../audit.js";
+import { codespaceConfigured } from "../codespace.js";
 import type { AppConfig } from "../config.js";
 import { classrooms, scheduledTasks, teacherGrants, users } from "../db/schema.js";
 import { syncUserRole } from "../roles.js";
@@ -25,11 +26,13 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
   const requireAdmin = adminGuard(app);
 
   app.get("/app/api/admin/teachers", { preHandler: requireAdmin }, async () => {
-    return app.db
+    const rows = await app.db
       .select({
         id: teacherGrants.id,
         email: teacherGrants.email,
         grantedAt: teacherGrants.createdAt,
+        codespaceEnabled: teacherGrants.codespaceEnabled,
+        codespaceMaxActiveSessions: teacherGrants.codespaceMaxActiveSessions,
         givenName: users.givenName,
         familyName: users.familyName,
         lastLoginAt: users.lastLoginAt,
@@ -40,9 +43,24 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
       .from(teacherGrants)
       .leftJoin(users, sql`lower(${users.email}) = ${teacherGrants.email}`)
       .orderBy(teacherGrants.createdAt);
+    // ADR-013: without a portal the column does not exist at all — the rows
+    // carry `codespace: null` and the admin screen drops the whole column.
+    const online = codespaceConfigured(config);
+    return rows.map(({ codespaceEnabled, codespaceMaxActiveSessions, ...r }) => ({
+      ...r,
+      codespace: online
+        ? { enabled: codespaceEnabled, maxActiveSessions: codespaceMaxActiveSessions }
+        : null,
+    }));
   });
 
-  const GrantBody = z.object({ email: z.email() });
+  /** Online workspace settings of a teacher (ADR-013), both writes share it. */
+  const CodespaceGrant = z.object({
+    enabled: z.boolean().optional(),
+    maxActiveSessions: z.number().int().min(0).max(100).optional(),
+  });
+
+  const GrantBody = z.object({ email: z.email(), codespace: CodespaceGrant.optional() });
 
   app.post("/app/api/admin/teachers", { preHandler: requireAdmin }, async (req, reply) => {
     const body = GrantBody.safeParse(req.body);
@@ -55,9 +73,20 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
         .code(409)
         .send({ error: "is_admin", message: "This e-mail is the administrator" });
     }
+    const online = codespaceConfigured(config);
     const [created] = await app.db
       .insert(teacherGrants)
-      .values({ id: randomUUID(), email, createdBy: req.user!.id })
+      .values({
+        id: randomUUID(),
+        email,
+        createdBy: req.user!.id,
+        ...(online && body.data.codespace?.enabled !== undefined
+          ? { codespaceEnabled: body.data.codespace.enabled }
+          : {}),
+        ...(online && body.data.codespace?.maxActiveSessions !== undefined
+          ? { codespaceMaxActiveSessions: body.data.codespace.maxActiveSessions }
+          : {}),
+      })
       .onConflictDoNothing({ target: teacherGrants.email })
       .returning();
     if (!created) {
@@ -79,6 +108,53 @@ export async function adminPlugin(app: FastifyInstance, opts: { config: AppConfi
   });
 
   const GrantParam = z.object({ gid: z.uuid() });
+
+  /**
+   * Online workspace of one teacher (ADR-013): the switch and the quota. The
+   * grant row itself is untouched — revoking the teacher role is the DELETE
+   * below.
+   */
+  app.patch("/app/api/admin/teachers/:gid", { preHandler: requireAdmin }, async (req, reply) => {
+    if (!codespaceConfigured(config)) return reply.code(404).send({ error: "not_found" });
+    const params = GrantParam.safeParse(req.params);
+    if (!params.success) return reply.code(404).send({ error: "not_found" });
+    const body = z
+      .object({ codespace: CodespaceGrant })
+      .safeParse(req.body);
+    if (!body.success || Object.keys(body.data.codespace).length === 0) {
+      return reply.code(400).send({ error: "validation", message: "Nothing to update" });
+    }
+    const patch = {
+      ...(body.data.codespace.enabled !== undefined
+        ? { codespaceEnabled: body.data.codespace.enabled }
+        : {}),
+      ...(body.data.codespace.maxActiveSessions !== undefined
+        ? { codespaceMaxActiveSessions: body.data.codespace.maxActiveSessions }
+        : {}),
+    };
+    const [updated] = await app.db
+      .update(teacherGrants)
+      .set(patch)
+      .where(eq(teacherGrants.id, params.data.gid))
+      .returning();
+    if (!updated) return reply.code(404).send({ error: "not_found" });
+    await audit(app.db, {
+      actorUserId: req.user!.id,
+      actorType: "user",
+      action: "teacher.codespace_grant",
+      subjectType: "teacher_grant",
+      subjectId: updated.id,
+      payload: { email: updated.email, ...patch },
+    });
+    return {
+      id: updated.id,
+      email: updated.email,
+      codespace: {
+        enabled: updated.codespaceEnabled,
+        maxActiveSessions: updated.codespaceMaxActiveSessions,
+      },
+    };
+  });
 
   app.delete(
     "/app/api/admin/teachers/:gid",

@@ -1,8 +1,13 @@
 /**
  * Les migrations drizzle-kit sont la seule source du schéma physique depuis
  * V1 (`git/db.ts` a disparu). Ce test affirme que la base ouverte par
- * `openDb` porte bien les quatre tables du cadrage, et que `push_events` — la
+ * `openDb` porte bien les quatre entités du cadrage, et que `push_events` — la
  * table écrite par P3 — n'a pas dérivé.
+ *
+ * Cinquième table depuis l'intégration classroom : `launch_tokens_used`. Ce
+ * n'est pas une entité du cadrage mais un registre d'unicité — un `jti`
+ * consommé et sa date d'expiration — dont la clé primaire *est* la garantie
+ * d'usage unique du jeton de lancement.
  */
 import { describe, expect, it } from "vitest";
 
@@ -10,13 +15,14 @@ import { openDb } from "./client.js";
 import { assignments, pushEvents, sessions, users } from "./schema.js";
 
 describe("migrations", () => {
-  it("crée exactement les quatre entités du cadrage", () => {
+  it("crée exactement les quatre entités du cadrage, plus le registre des jetons", () => {
     const handle = openDb(":memory:");
     const rows = handle.db.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%' ORDER BY name",
     );
     expect(rows.map((r) => r.name)).toEqual([
       "assignments",
+      "launch_tokens_used",
       "push_events",
       "sessions",
       "users",

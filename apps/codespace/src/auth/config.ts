@@ -41,10 +41,15 @@ function fromRepoRoot(path: string): string {
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().default("127.0.0.1"),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  /**
+   * 3100 par défaut : dans le monorepo, `apps/server` (classroom) occupe
+   * 3000 et les deux applications tournent ensemble en développement
+   * (docs/integration-classroom.md).
+   */
+  PORT: z.coerce.number().int().min(1).max(65535).default(3100),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
   /** Origine publique du portail ; base des URI de redirection OIDC. */
-  PUBLIC_URL: z.string().default("http://localhost:3000"),
+  PUBLIC_URL: z.string().default("http://localhost:3100"),
   DATABASE_PATH: z.string().default("./var/codespace.sqlite"),
 
   // --- Moteur de conteneurs (engine/) -------------------------------------
@@ -89,8 +94,50 @@ const EnvSchema = z.object({
   FORGE_TOKEN: z.string().default(""),
   FORGE_USER: z.string().default("codespace"),
 
+  // --- Intégration classroom (classroom/) ----------------------------------
+  /**
+   * Secret HS256 partagé avec heig-classroom (`packages/contracts`
+   * `codespace.ts`). **Vide = intégration désactivée** : `PUT
+   * /api/assignments/:id`, `GET /api/assignments/:id/sessions` et `GET
+   * /launch` ne sont pas enregistrées et répondent 404, et le portail reste
+   * utilisable en autonome avec sa propre connexion OIDC.
+   *
+   * Trente-deux caractères au minimum : un HMAC-SHA256 n'apporte rien
+   * au-dessous de la taille de son bloc de sortie.
+   */
+  CODESPACE_LAUNCH_SECRET: z
+    .string()
+    .default("")
+    .refine((v) => v === "" || v.length >= 32, {
+      message: "CODESPACE_LAUNCH_SECRET doit faire au moins 32 caractères",
+    }),
+  /** Origine publique de classroom : `startURL` des `.seb` et lien de retour. */
+  CLASSROOM_URL: z.string().default("http://localhost:3000"),
+  /**
+   * Image donnée à un devoir synchronisé dont `image` vaut `null`. Distincte
+   * de `CODESPACE_IMAGE`, qui est le repli du **moteur** quand une session
+   * n'en désigne aucune.
+   */
+  CODESPACE_DEFAULT_IMAGE: z.string().default("codespace/c-dev:4.137.0"),
+
   // --- SEB (seb/) ----------------------------------------------------------
   SEB_VERIFIER: z.enum(["real", "simulated"]).default("simulated"),
+  /**
+   * Hôtes autorisés par le filtre d'URL de SEB **en plus** de celui de
+   * classroom (l'hôte de la `startURL`) et de celui du portail : le
+   * fournisseur d'identité, sans quoi la page de connexion est bloquée
+   * (docs/pistes.md, « Correction au cadrage relevée par le test SEB »).
+   * Liste séparée par des virgules.
+   */
+  SEB_EXTRA_ALLOWED_HOSTS: z
+    .string()
+    .default("")
+    .transform((v) =>
+      v
+        .split(",")
+        .map((h) => h.trim())
+        .filter((h) => h !== ""),
+    ),
   /**
    * Origine sur laquelle SEB calcule ses hachés. Vide = reconstruction depuis
    * `Host`, acceptable en développement en clair seulement (analyse.md 4.6).
@@ -152,6 +199,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
     if (data.SEB_PUBLIC_ORIGIN === "") {
       throw new Error("Configuration invalide : SEB_PUBLIC_ORIGIN est obligatoire en production");
+    }
+    if (data.CODESPACE_LAUNCH_SECRET.includes("change-me")) {
+      throw new Error(
+        "Configuration invalide : CODESPACE_LAUNCH_SECRET de développement interdit en production",
+      );
     }
   }
   return {

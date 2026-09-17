@@ -78,6 +78,21 @@ const EnvSchema = z.object({
   // callback URLs and its user tokens serve GET /user without any scope.
   GITHUB_APP_CLIENT_ID: z.string().default(""),
   GITHUB_APP_CLIENT_SECRET: z.string().default(""),
+
+  // --- Online workspace portal (apps/codespace, ADR-013). ---
+  /**
+   * Base URL of the portal (dev: http://localhost:3100 — the portal listens
+   * on 3100 so it does not collide with classroom on 3000). EMPTY = the
+   * feature does not exist at all: no admin column, no work-mode section,
+   * and the `/app/codespace/*` routes answer 404.
+   */
+  CODESPACE_URL: z.string().default(""),
+  /**
+   * HS256 secret shared with the portal (`packages/domain/src/hs256.ts`):
+   * signs the launch tokens and the server-to-server service tokens. At
+   * least 32 characters; startup fails if CODESPACE_URL is set without it.
+   */
+  CODESPACE_LAUNCH_SECRET: z.string().default(""),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema>;
@@ -94,14 +109,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     for (const [key, marker] of [
       ["OIDC_CLIENT_SECRET", "not-for-production"],
       ["COOKIE_SECRET", "change-me"],
+      ["CODESPACE_LAUNCH_SECRET", "change-me"],
     ] as const) {
       if (parsed.data[key].includes(marker)) {
         throw new Error(`Invalid configuration: dev ${key} forbidden in production`);
       }
     }
   }
+  // A portal URL without its shared secret would emit unsigned launches or
+  // crash at the first Start click: refuse to boot instead (ADR-013).
+  if (parsed.data.CODESPACE_URL.trim() !== "" && parsed.data.CODESPACE_LAUNCH_SECRET.length < 32) {
+    throw new Error(
+      "Invalid configuration: CODESPACE_URL requires CODESPACE_LAUNCH_SECRET of at least 32 characters",
+    );
+  }
   return {
     ...parsed.data,
+    // Trailing slash stripped once: every call below concatenates paths.
+    CODESPACE_URL: parsed.data.CODESPACE_URL.trim().replace(/\/+$/, ""),
     SUPER_ADMIN_EMAIL: parsed.data.SUPER_ADMIN_EMAIL.trim().toLowerCase(),
     // PEM path made absolute at load time: the process no longer depends on
     // its launch directory (ADR-010, secret in a file).

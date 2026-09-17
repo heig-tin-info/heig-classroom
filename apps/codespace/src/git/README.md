@@ -151,8 +151,13 @@ cd apps/portal && ./node_modules/.bin/tsc --noEmit \
 - `SessionLookup` est branché sur la table `sessions`
   ([`sessions/manager.ts`](../sessions/manager.ts), champ `lookup`) : l'adresse
   du conteneur vient de la ligne de session.
-- `stagingTargets` reçoit le dépôt cible du devoir (`targetRepo` ou la
-  convention `targetRepoPattern`), via `manager.repoOfEvent`.
+- `stagingTargets` reçoit le dépôt cible **de la session**, via
+  `manager.repoOfEvent` : le dépôt que le jeton de lancement de classroom a
+  apporté (`sessions.targetRepo`) et, à défaut, la convention du devoir
+  (`targetRepo` ou `targetRepoPattern`) pour la graine YAML autonome. La
+  session est retrouvée par l'identifiant porté par l'événement, pas par le
+  couple, parce qu'elle survit à la destruction du conteneur — le relais doit
+  rester juste pendant une panne longue de la forge.
 - `startGitServer` est lié à `CODESPACE_GATEWAY:9418` par `server.ts` ; les
   autres surfaces du portail écoutent sur `HOST:PORT`.
 - L'espace de travail de la session reçoit un remote `origin` pointé sur

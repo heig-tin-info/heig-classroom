@@ -3,6 +3,7 @@
  * (consumers). Wire format: dates travel as ISO strings. Any payload drift
  * becomes a compile error on the side that diverges.
  */
+import type { TeacherCodespaceGrant, WorkMode } from "./codespace.js";
 
 /** Display format for date-times; null falls back to ISO (`2026-09-01 08:00`). */
 export const DATE_FORMATS = ["iso", "eu", "uk", "us"] as const;
@@ -25,6 +26,19 @@ export interface Me {
   locale: "en" | "fr" | null;
   dateFormat: DateFormat | null;
   emailPrefs: Record<string, boolean>;
+  /**
+   * Online workspace (ADR-013): the viewer's own grant, or null when the
+   * feature is not configured at all (no `CODESPACE_URL`). This is where the
+   * front reads whether to show the work-mode section of the assignment form
+   * and the admin column; the server re-checks on every write.
+   */
+  codespace: TeacherCodespaceGrant | null;
+  /**
+   * Host of the portal (`localhost:3100`, `codespace.example.ch`): the
+   * student side builds the `sebs://<host>/exam/<id>.seb` deep link from it.
+   * Null when no portal is configured.
+   */
+  codespaceHost: string | null;
 }
 
 export type AssignmentState = "draft" | "published" | "locked";
@@ -142,6 +156,12 @@ export interface Assignment {
   durationMinutes: number | null;
   branches: string[];
   protectedFiles: string[];
+  /** ADR-013; `free` for every assignment created before the feature. */
+  workMode: WorkMode;
+  /** Portal catalogue image; null = the portal's default image. */
+  codespaceImage: string | null;
+  /** Teacher-side only — Browser Exam Keys are secrets, never sent to students. */
+  browserExamKeys: string[];
 }
 
 export interface OrgRepo {
@@ -248,6 +268,14 @@ export interface AssignmentDetailPayload {
     sourceAheadSha: string | null;
     sourcePushedAt: string | null;
     syncedAt: string | null;
+    /** ADR-013 work mode and its portal settings (teacher side). */
+    workMode: WorkMode;
+    codespaceImage: string | null;
+    browserExamKeys: string[];
+    /** Last successful PUT to the portal; null = never synced. */
+    codespaceSyncedAt: string | null;
+    /** Failure of the last attempt; null when the last one succeeded. */
+    codespaceSyncError: string | null;
   };
   students: AssignmentDetailStudent[];
 }
@@ -337,6 +365,12 @@ export interface StudentAssignment {
   gradingMode: GradingMode;
   /** Grades signed off by the teacher: what the student sees is final. */
   gradesValidatedAt: string | null;
+  /**
+   * ADR-013. `online`/`online_seb` put a Start button next to (or instead of)
+   * the repository link. The Browser Exam Keys are deliberately absent: they
+   * are secrets and never leave the teacher side.
+   */
+  workMode: WorkMode;
   repo: StudentRepo | null;
 }
 

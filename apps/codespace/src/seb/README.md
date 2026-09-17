@@ -124,7 +124,7 @@ pas au premier succès, pour que la durée ne dise pas *quel* BEK a réussi.
 | aucun des deux | `Host` plus `defaultProtocol` | développement en clair |
 
 Le piège est réel : un frontal TLS termine le HTTPS, le portail voit
-`http://127.0.0.1:3000/...`, et le haché ne correspond jamais. Le réglage sûr
+`http://127.0.0.1:3100/...`, et le haché ne correspond jamais. Le réglage sûr
 est `publicOrigin`, parce qu'un `Host` ou un `X-Forwarded-Host` manipulable
 laisserait l'étudiant choisir l'URL sur laquelle le haché est calculé.
 
