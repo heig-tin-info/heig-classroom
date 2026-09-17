@@ -2,7 +2,7 @@
   "name": "heig-classroom",
   "private": true,
   "version": "0.1.0",
-  "description": "HEIG GitHub Classroom \u2014 portail teacher/student adoss\u00e9 \u00e0 GitHub",
+  "description": "HEIG GitHub Classroom — portail teacher/student adossé à GitHub",
   "packageManager": "pnpm@10.34.4",
   "engines": {
     "node": ">=22"
@@ -16,6 +16,10 @@
   "pnpm": {
     "overrides": {
       "esbuild@<0.25.0": ">=0.28.1"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
   }
 }

@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "./config.js";
@@ -129,8 +131,9 @@ describe("configuration : ce qui est interdit en production", () => {
 
   it("résout les chemins depuis la racine du dépôt, pas depuis le répertoire de lancement", () => {
     const config = loadConfig({ SECCOMP_PROFILE: "./infra/seccomp/codespace.json" });
-    expect(config.seccompProfile.endsWith("/heig-codespace/infra/seccomp/codespace.json")).toBe(
-      true,
-    );
+    // La racine de l'application est le package.json le plus proche du module,
+    // quel que soit le nom du dépôt qui l'héberge (monorepo ou non).
+    const appRoot = fileURLToPath(new URL("../../", import.meta.url));
+    expect(config.seccompProfile).toBe(resolve(appRoot, "infra/seccomp/codespace.json"));
   });
 });

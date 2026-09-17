@@ -9,3 +9,7 @@ secrets
 .env.*
 docs
 *.xlsx
+apps/codespace/var
+apps/codespace/images
+apps/codespace/infra
+apps/codespace/seed

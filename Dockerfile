@@ -10,6 +10,8 @@ COPY packages/domain/package.json packages/domain/
 COPY packages/contracts/package.json packages/contracts/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
+# apps/codespace est un autre déploiement (VM moteur) : présent pour le lockfile, jamais construit ici
+COPY apps/codespace/package.json apps/codespace/
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.base.json ./
 COPY packages ./packages
@@ -17,7 +19,7 @@ COPY apps ./apps
 # The production VM has ~450 MiB of RAM (ADR-009): let Node spill into swap
 # instead of aborting (exit 134), and keep the workspace build sequential.
 ENV NODE_OPTIONS=--max-old-space-size=1536
-RUN pnpm --workspace-concurrency=1 build
+RUN pnpm --filter '!@hgc/codespace' --workspace-concurrency=1 build
 # Self-contained production tree for the server (pruned node_modules + workspaces)
 RUN pnpm --filter @hgc/server deploy --prod --legacy /out \
   && cp -r apps/server/drizzle /out/drizzle \
