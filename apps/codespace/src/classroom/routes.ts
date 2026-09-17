@@ -52,7 +52,7 @@ import {
   sebLink,
   type SebVerifier,
 } from "../seb/index.js";
-import type { SessionManager } from "../sessions/manager.js";
+import { WorkspaceBootstrapError, type SessionManager } from "../sessions/manager.js";
 import {
   assignmentSessionRows,
   countLiveSessionsForTeacher,
@@ -61,7 +61,7 @@ import {
   isOpen,
   splitRepoRef,
 } from "../sessions/store.js";
-import { errorPage } from "../web/pages.js";
+import { errorPage, workspaceErrorPage } from "../web/pages.js";
 import { sessionCookieOptions } from "../web/routes.js";
 
 import {
@@ -455,12 +455,35 @@ async function classroomRoutesImpl(
       }
     }
 
-    const result = await manager.start(user, assignment, {
-      sebVerified: assignment.mode === "exam",
-      teacherId: assignment.teacherId,
-      launchJti: claims.jti,
-      targetRepo: claims.repo,
-    });
+    let result: Awaited<ReturnType<SessionManager["start"]>>;
+    try {
+      result = await manager.start(user, assignment, {
+        sebVerified: assignment.mode === "exam",
+        teacherId: assignment.teacherId,
+        launchJti: claims.jti,
+        targetRepo: claims.repo,
+      });
+    } catch (err) {
+      // Le dépôt de l'étudiant n'a pas pu être récupéré : **aucun conteneur
+      // n'a été lancé** et la session ne s'ouvre pas. Ouvrir l'éditeur sur un
+      // répertoire vide, comme le 2026-09-17, laisse l'étudiant travailler à
+      // côté de son rendu sans le savoir.
+      if (!(err instanceof WorkspaceBootstrapError)) throw err;
+      request.log.warn(
+        {
+          launch: {
+            jti: claims.jti,
+            assignmentId: assignment.id,
+            login: user.login,
+            repo: claims.repo?.fullName ?? null,
+            cause: err.shortCause,
+          },
+          err: err.message,
+        },
+        "lancement refusé : espace de travail impossible à préparer",
+      );
+      return html(reply, 503, workspaceErrorPage(err.shortCause));
+    }
 
     if (assignment.mode === "exam") {
       reply.setCookie(

@@ -93,6 +93,24 @@ const EnvSchema = z.object({
   FORGE_URL: z.string().default("http://localhost:3300"),
   FORGE_TOKEN: z.string().default(""),
   FORGE_USER: z.string().default("codespace"),
+  /**
+   * GitHub App — **les noms de heig-classroom, mot pour mot**
+   * (`apps/server/src/config.ts`), parce que c'est la même App et que
+   * l'exploitant recopie une valeur d'un `.env` à l'autre.
+   *
+   * `FORGE_KIND=github` + `GITHUB_APP_ID` + fichier PEM lisible = forge
+   * complète : jeton d'installation résolu par l'organisation du dépôt, `git
+   * fetch` d'amorçage authentifié, relais authentifié. Sans l'un des deux, la
+   * forge reste « non configurée » : seuls les dépôts publics sont
+   * accessibles et le relais laisse les `PushEvent` en attente
+   * (docs/deploy.md § 5).
+   *
+   * La clé privée est un **fichier**, jamais une variable : une PEM tient sur
+   * plusieurs lignes et un `EnvironmentFile=` de systemd n'en lirait que la
+   * première.
+   */
+  GITHUB_APP_ID: z.string().default(""),
+  GITHUB_APP_PRIVATE_KEY_PATH: z.string().default(""),
 
   // --- Intégration classroom (classroom/) ----------------------------------
   /**
@@ -168,6 +186,8 @@ export type AppConfig = z.infer<typeof EnvSchema> & {
   volumesRoot: string;
   seccompProfile: string;
   databasePath: string;
+  /** Chemin absolu de la PEM de la GitHub App ; chaîne vide si aucune. */
+  githubAppPrivateKeyPath: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -211,5 +231,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     volumesRoot: fromRepoRoot(data.VOLUMES_ROOT),
     seccompProfile: fromRepoRoot(data.SECCOMP_PROFILE),
     databasePath: fromRepoRoot(data.DATABASE_PATH),
+    githubAppPrivateKeyPath:
+      data.GITHUB_APP_PRIVATE_KEY_PATH === ""
+        ? ""
+        : fromRepoRoot(data.GITHUB_APP_PRIVATE_KEY_PATH),
   };
 }

@@ -40,6 +40,14 @@ Terme d'interface à choisir : « codespace » entre en collision avec GitHub Co
 4. **Extension de barre d'état** VS Code (portail / rendre) : après la première répétition d'examen en salle.
 5. **Ligne graphique** : découle du monorepo (composants React partagés au jalon 4) ; en attendant, copier les variables CSS de classroom dans les pages HTML.
 
+## Retours du premier essai réel (2026-09-17, classroom de test)
+
+Session ouverte depuis classroom par un vrai compte, VS Code servi, push relayé vers GitHub par la GitHub App. Trois retours d'interface, tous à traiter dans l'image (réglages machine et extension), pas dans le portail :
+
+1. **Barre latérale secondaire vide** ouverte par défaut (elle hébergeait le chat, désactivé) : à masquer au démarrage par réglage machine ; nom exact du réglage à vérifier dans la version 1.137 embarquée.
+2. **Disposition clavier détectée « Swiss German »** : VS Code Web n'a pas de disposition suisse romande. La frappe n'est pas affectée, seuls certains raccourcis le sont ; poser `keyboard.dispatch: keyCode` dans l'image.
+3. **Extension de barre d'état** (déjà en piste 4 ci-dessus, désormais prioritaire) : compte à rebours jusqu'à l'échéance du devoir et bouton « Fermer » qui ramène vers classroom. Le portail transmet l'échéance et l'URL de retour au conteneur au démarrage (variables d'environnement ou fichier de réglages machine) ; l'extension est cuite dans l'image et dans la liste blanche.
+
 ## Correction au cadrage relevée par le test SEB
 
 Le filtre d'URL de SEB doit autoriser le domaine du fournisseur d'identité (Switch edu-ID) en plus de celui du portail, sinon la page de connexion est bloquée. Le cadrage parlait d'une règle de domaine unique.

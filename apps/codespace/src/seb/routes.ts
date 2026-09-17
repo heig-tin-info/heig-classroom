@@ -114,6 +114,23 @@ pas depuis un autre navigateur.</p>
 `;
 }
 
+/**
+ * Refus de démarrage d'épreuve pour une cause qui n'est pas SEB : l'énoncé n'a
+ * pas pu être mis dans l'espace de travail. On ne redirige pas l'étudiant vers
+ * une salle vide — on appelle le surveillant.
+ */
+export function workspacePage(detail: string): string {
+  return `<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Épreuve indisponible</title></head>
+<body>
+<h1>Épreuve indisponible</h1>
+<p>${escapeHtml(detail)}</p>
+</body>
+</html>
+`;
+}
+
 function readCookie(header: string | undefined, name: string): string | undefined {
   if (header === undefined) return undefined;
   for (const part of header.split(";")) {
@@ -205,11 +222,34 @@ async function sebRoutesPlugin(app: FastifyInstance, options: SebRoutesOptions):
           .send(outsideSebPage(REFUSAL_MESSAGES[verdict.reason]));
       }
 
-      const outcome = await options.onStart({
-        assignment,
-        clientAddress: request.ip,
-        request,
-      });
+      let outcome: StartOutcome;
+      try {
+        outcome = await options.onStart({
+          assignment,
+          clientAddress: request.ip,
+          request,
+        });
+      } catch (err) {
+        // Un `onStart` peut refuser pour une raison qui n'a rien de SEB :
+        // l'espace de travail n'a pas pu être préparé (`sessions/manager.ts`,
+        // `WorkspaceBootstrapError`). Le volet examen ne connaît pas ce
+        // module — la cause courte est lue par forme, pas par type, ce qui
+        // garde la frontière.
+        const cause = (err as { shortCause?: unknown } | null)?.shortCause;
+        if (typeof cause !== "string") throw err;
+        request.log.warn(
+          { seb: { assignmentId: assignment.id, clientAddress: request.ip }, cause },
+          "démarrage d'examen refusé : espace de travail impossible à préparer",
+        );
+        return reply
+          .code(503)
+          .type("text/html; charset=utf-8")
+          .send(
+            workspacePage(
+              `Espace de travail impossible à préparer : ${cause} ; signalez-le au surveillant.`,
+            ),
+          );
+      }
 
       const cookie = issueExamCookie(
         {

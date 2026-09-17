@@ -164,7 +164,33 @@ cd apps/portal && ./node_modules/.bin/tsc --noEmit \
   `http://portal.internal:9418/git/<session>`
   ([`sessions/workspace.ts`](../sessions/workspace.ts)).
 
+## L'autorisation de la forge, des deux côtés
+
+`gitRunner.gitAuthEnv` est le **seul** véhicule d'un jeton jusqu'à `git` :
+`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0`, donc
+`http.extraHeader` sans fichier de configuration. Jamais dans argv, jamais sur
+disque, et `redactSecrets` le retire des messages d'erreur.
+
+Il sert aux deux sens du canal :
+
+| sens | appelant | jeton |
+| --- | --- | --- |
+| `push` vers la forge | `relay.ts` (`buildPushEnv`) | `Forge.authorization(repo)` |
+| `fetch` d'amorçage | `staging.ts` (`ensureStagingRepo({ authorization })`) | le même |
+
+Le second manquait jusqu'au 2026-09-17 : le dépôt d'un étudiant provisionné
+par classroom est **privé**, le `fetch` anonyme était refusé, l'échec avalé, et
+la session s'ouvrait sur un espace de travail vide. `sessions/manager.ts`
+refuse désormais de démarrer une session dont le dépôt n'a pas pu être
+récupéré.
+
+Côté GitHub, `createGithubForge` résout l'installation **par organisation** du
+`owner` du dépôt (`GET /orgs/{org}/installation`) et met le jeton d'une heure
+en cache par installation, renouvelé une minute avant expiration. Pas
+d'identifiant d'installation en configuration : un portail sert plusieurs
+classes.
+
 ## Ce qui reste à faire après V1
 
-- `createGithubForge` n'est pas éprouvé contre la vraie GitHub App
-  (`TODO(verify)` dans `forge.ts`).
+- Rien de spécifique à ce module. `createGithubForge` a été éprouvé contre la
+  vraie App le 2026-09-17 (docs/deploy.md § 5).

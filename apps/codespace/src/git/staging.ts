@@ -14,7 +14,7 @@
 import { mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
-import { gitBare, git } from "./gitRunner.js";
+import { gitBare, git, gitAuthEnv } from "./gitRunner.js";
 
 /**
  * Where the staging repository is seeded from. The distinction is invariant
@@ -39,6 +39,16 @@ export interface StagingOptions {
   uploadPack?: boolean;
   /** Default branch of a fresh repository. */
   defaultBranch?: string;
+  /**
+   * Valeur d'en-tête `Authorization` pour le `git fetch` d'amorçage. Le dépôt
+   * d'un étudiant provisionné par classroom est **privé** : sans elle, le
+   * fetch est refusé et l'espace de travail s'ouvre vide (constaté en
+   * production le 2026-09-17). Elle ne passe jamais par argv ni par un fichier
+   * de configuration : `gitAuthEnv` la porte dans l'environnement du
+   * processus, exactement comme le relais. Absente = fetch anonyme, ce qui
+   * suffit pour un dépôt public.
+   */
+  authorization?: string;
 }
 
 export interface StagingPaths {
@@ -102,9 +112,22 @@ async function pickHead(gitDir: string, preferred: string): Promise<void> {
  * also enforced per request in httpBackend.ts, because the repository config
  * is not the authority on a policy that can change mid-session.
  */
-export async function ensureStagingRepo(
-  opts: StagingOptions,
-): Promise<StagingPaths & { created: boolean }> {
+export interface StagingResult extends StagingPaths {
+  /** Le dépôt nu n'existait pas avant cet appel. */
+  created: boolean;
+  /** Un `fetch` a été tenté (source non vide) et a réussi. */
+  fetched: boolean;
+  /**
+   * Nombre de références après amorçage. **Zéro est une information, pas une
+   * erreur** : un dépôt d'étudiant fraîchement créé par classroom n'a aucune
+   * branche, et en mode travaux pratiques l'espace de travail s'ouvre alors
+   * légitimement vide. C'est `sessions/manager.ts` qui tranche (voir
+   * `seedStaging`), parce que lui seul connaît le mode du devoir.
+   */
+  refs: number;
+}
+
+export async function ensureStagingRepo(opts: StagingOptions): Promise<StagingResult> {
   const paths = stagingPaths(opts.volumesRoot, opts.student, opts.assignment);
   const defaultBranch = opts.defaultBranch ?? "main";
   await mkdir(paths.workDir, { recursive: true });
@@ -125,11 +148,32 @@ export async function ensureStagingRepo(
   await gitBare(paths.gitDir, ["config", "core.logAllRefUpdates", "true"]);
 
   const from = sourceUrl(opts.source);
+  let fetched = false;
   if (from) {
-    await gitBare(paths.gitDir, ["fetch", "--prune", "--no-tags", from, ...REFSPECS]);
+    await gitBare(
+      paths.gitDir,
+      ["fetch", "--prune", "--no-tags", from, ...REFSPECS],
+      // L'autorisation ne touche ni argv (`ps`, `/proc/<pid>/cmdline`) ni le
+      // disque ; `gitRunner.redactSecrets` la retire des messages d'erreur.
+      opts.authorization ? { env: gitAuthEnv(opts.authorization) } : {},
+    );
+    fetched = true;
   }
   await pickHead(paths.gitDir, defaultBranch);
-  return { ...paths, created: !existed };
+  const refs = await refSnapshot(paths.gitDir);
+  return { ...paths, created: !existed, fetched, refs: refs.size };
+}
+
+/** Branche par défaut du dépôt de transit : ce que `HEAD` désigne, ou rien. */
+export async function stagingHeadBranch(gitDir: string): Promise<string | null> {
+  const head = await gitBare(gitDir, ["symbolic-ref", "--quiet", "HEAD"]).catch(() => "");
+  const ref = head.trim();
+  if (!ref.startsWith("refs/heads/")) return null;
+  const branch = ref.slice("refs/heads/".length);
+  // `symbolic-ref` rend une branche même quand elle n'existe pas encore (dépôt
+  // nu tout neuf) ; seule une branche **présente** est utilisable.
+  const exists = await gitBare(gitDir, ["rev-parse", "--verify", "--quiet", ref]).catch(() => "");
+  return exists.trim() === "" ? null : branch;
 }
 
 /**

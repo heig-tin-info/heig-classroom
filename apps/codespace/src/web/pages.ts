@@ -142,3 +142,18 @@ ${rows
 export function errorPage(title: string, detail: string): string {
   return layout(title, `<a href="/">Retour</a>`, `<p>${escapeHtml(detail)}</p>`);
 }
+
+/**
+ * Refus de démarrage parce que le dépôt de l'étudiant n'a pas pu être
+ * récupéré. La page existe parce que le contraire — ouvrir l'éditeur sur un
+ * répertoire vide — s'est produit en production le 2026-09-17 : rien ne
+ * signalait que le dépôt manquait, et l'étudiant a travaillé à côté de son
+ * rendu. La cause est courte et sans jargon de git ; le détail complet est
+ * dans le journal du portail, pas ici.
+ */
+export function workspaceErrorPage(cause: string): string {
+  return errorPage(
+    "Espace de travail impossible à préparer",
+    `Espace de travail impossible à préparer : ${cause} ; signalez-le à votre enseignant.`,
+  );
+}

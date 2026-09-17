@@ -12,6 +12,8 @@
  * Aucune injection de dépendances, aucun décorateur : les modules reçoivent
  * ce dont ils ont besoin en paramètre, ici.
  */
+import { readFileSync } from "node:fs";
+
 import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
@@ -55,20 +57,41 @@ export interface Portal {
   close(): Promise<void>;
 }
 
-/** Forge de destination du relais. `none` = tout reste dans le dépôt de transit. */
-export function createForge(config: AppConfig): Forge | null {
+/**
+ * Forge de destination du relais **et** source de l'autorisation qui amorce le
+ * dépôt de transit. `none` = tout reste dans le dépôt de transit.
+ *
+ * Côté GitHub, la clé privée est lue **une fois**, au démarrage : un fichier
+ * PEM illisible doit se voir dans le journal de démarrage, pas à la première
+ * session. L'installation, elle, est résolue par organisation à la demande
+ * (`createGithubForge`), parce qu'un portail sert plusieurs classes et donc
+ * plusieurs organisations GitHub.
+ */
+export function createForge(
+  config: AppConfig,
+  log?: { warn: (o: object, m: string) => void },
+): Forge | null {
   if (config.FORGE_KIND === "none") return null;
   if (config.FORGE_KIND === "github") {
-    const appId = process.env["GITHUB_APP_ID"] ?? "";
-    const privateKey = process.env["GITHUB_APP_PRIVATE_KEY"] ?? "";
-    const installationId = Number(process.env["GITHUB_APP_INSTALLATION_ID"] ?? "0");
+    const appId = config.GITHUB_APP_ID;
+    const keyPath = config.githubAppPrivateKeyPath;
     // Sans App, la forge sert encore à ce qui ne demande pas de jeton : l'URL
-    // de clonage d'un dépôt public, dont le dépôt de transit s'amorce en mode
-    // travaux pratiques. Le relais, lui, refuse explicitement et laisse les
-    // lignes `pending` (voir `createUnconfiguredGithubForge`).
-    // `baseUrl` n'est pas passé, comme pour `createGithubForge` : github.com.
-    if (!appId || !privateKey || !installationId) return createUnconfiguredGithubForge();
-    return createGithubForge({ appId, privateKey, installationId });
+    // de clonage d'un dépôt **public**. Le relais et l'amorçage d'un dépôt
+    // privé, eux, refusent explicitement et nommément
+    // (`createUnconfiguredGithubForge`). `baseUrl` n'est pas passé, comme pour
+    // `createGithubForge` : github.com.
+    if (!appId || !keyPath) return createUnconfiguredGithubForge();
+    let privateKey = "";
+    try {
+      privateKey = readFileSync(keyPath, "utf8");
+    } catch (err) {
+      log?.warn(
+        { path: keyPath, err: String((err as Error).message ?? err) },
+        "clé privée de la GitHub App illisible : forge GitHub non configurée",
+      );
+      return createUnconfiguredGithubForge();
+    }
+    return createGithubForge({ appId, privateKey });
   }
   if (!config.FORGE_TOKEN) return null;
   return createForgejoForge({ baseUrl: config.FORGE_URL, token: config.FORGE_TOKEN });
@@ -113,7 +136,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
       log: app.log,
     });
 
-  const forge = createForge(config);
+  const forge = createForge(config, app.log);
   const manager = createSessionManager({
     db,
     engine,
@@ -127,7 +150,14 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
     gitRemoteHost: "portal.internal",
     gitRemotePort: config.CODESPACE_GIT_PORT,
     log: app.log,
-    ...(forge ? { forgeUrlOf: (repo) => forge.pushUrl(repo) } : {}),
+    ...(forge
+      ? {
+          forgeUrlOf: (repo) => forge.pushUrl(repo),
+          // Le dépôt d'un étudiant est privé : l'amorçage du dépôt de transit
+          // porte la même autorisation que le relais, par l'environnement.
+          forgeAuthorization: (repo) => forge.authorization(repo),
+        }
+      : {}),
   });
 
   const store = createPushEventStore(db);

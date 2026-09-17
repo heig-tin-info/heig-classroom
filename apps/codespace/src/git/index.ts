@@ -14,11 +14,15 @@ export {
   createGithubForge,
   createUnconfiguredGithubForge,
   ForgeUnconfiguredError,
+  INSTALLATION_TOKEN_TTL_MS,
+  TOKEN_RENEWAL_MARGIN_MS,
+  UNCONFIGURED_GITHUB_MESSAGE,
   type Forge,
   type ForgejoOptions,
+  type GithubAppApi,
   type GithubOptions,
 } from "./forge.js";
-export { git, gitBare, redactSecrets, GitError } from "./gitRunner.js";
+export { git, gitAuthEnv, gitBare, redactSecrets, GitError } from "./gitRunner.js";
 export {
   authorizeSource,
   backendEnv,
@@ -58,9 +62,11 @@ export {
 export {
   ensureStagingRepo,
   refSnapshot,
+  stagingHeadBranch,
   stagingPaths,
   type StagingOptions,
   type StagingPaths,
+  type StagingResult,
   type StagingSource,
 } from "./staging.js";
 export type { GitService, RefChange, RepoRef, SessionLookup, StagingSession } from "./types.js";
