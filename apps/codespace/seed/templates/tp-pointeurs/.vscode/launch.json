@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Déboguer hello",
+      "type": "gdb",
+      "request": "launch",
+      "target": "${workspaceFolder}/hello",
+      "cwd": "${workspaceFolder}",
+      "gdbpath": "/usr/bin/gdb",
+      "preLaunchTask": "make",
+      "valuesFormatting": "parseText",
+      "autorun": ["set disable-randomization on"]
+    }
+  ]
+}

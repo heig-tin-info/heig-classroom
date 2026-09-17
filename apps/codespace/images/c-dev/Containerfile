@@ -1,0 +1,121 @@
+# Image etudiante heig-codespace : C, gdb, code-server.
+# Construite par : podman --remote --url unix:///run/podman/podman.sock \
+#                    build -t codespace/c-dev images/c-dev
+# Lancee par images/c-dev/run-hardened.sh (durcissement obligatoire, CLAUDE.md invariant 3).
+
+# Debian 13 « trixie », stable au 2026-09-17, epinglee par empreinte.
+FROM docker.io/library/debian:trixie-slim@sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f
+
+# Version de code-server epinglee (release GitHub coder/code-server).
+ARG CS_VERSION=4.137.0
+# Extensions Open VSX, epinglees a l'identifiant seulement : Open VSX ne
+# garantit pas la disponibilite d'une version ancienne. La version resolue
+# au build est inscrite dans /etc/code-server/extensions.lock.
+ARG EXT_CLANGD=llvm-vs-code-extensions.vscode-clangd
+ARG EXT_DEBUG=webfreak.debug
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    TZ=Europe/Zurich
+
+# 0. L'image « slim » exclut /usr/share/man par dpkg : on le retablit AVANT
+#    d'installer quoi que ce soit, sinon manpages-dev est installe sans ses
+#    pages. Le reste des exclusions (doc, locale, info) est conserve.
+RUN printf 'path-include /usr/share/man/*\n' > /etc/dpkg/dpkg.cfg.d/heig-man-pages
+
+# 1. Chaine C, gdb, git, pages de manuel, clangd.
+#    curl et ca-certificates servent au telechargement du .deb et au test
+#    d'acceptation /healthz ; procps et less au confort du terminal.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        gdb \
+        make \
+        git \
+        man-db \
+        manpages-dev \
+        clangd \
+        libc6-dev \
+        binutils \
+        curl \
+        ca-certificates \
+        procps \
+        less && \
+    rm -rf /var/lib/apt/lists/*
+
+# 2. code-server depuis la release GitHub, version epinglee.
+RUN curl -fsSL -o /tmp/code-server.deb \
+        "https://github.com/coder/code-server/releases/download/v${CS_VERSION}/code-server_${CS_VERSION}_amd64.deb" && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends /tmp/code-server.deb && \
+    rm -f /tmp/code-server.deb && \
+    rm -rf /var/lib/apt/lists/* && \
+    code-server --version
+
+# 3. Utilisateur student, uid 1000. /work est le point de montage du volume.
+#    coder-logs est un lien vers le tmpfs : sans lui code-server leve une
+#    exception au demarrage en essayant d'ecrire ses journaux sur la racine en
+#    lecture seule. Le reste de ~/.local/share/code-server reste sur la racine,
+#    donc le repertoire d'extensions par defaut n'est pas inscriptible.
+RUN useradd --uid 1000 --create-home --shell /bin/bash student && \
+    mkdir -p /work /home/student/.cache /home/student/.local/share/code-server && \
+    ln -s /run/code-server/logs /home/student/.local/share/code-server/coder-logs && \
+    chown -R 1000:1000 /work /home/student
+
+# 4. Extensions preinstallees au build depuis Open VSX (galerie par defaut de
+#    code-server). Le repertoire est sur la racine, donc en lecture seule a
+#    l'execution : c'est la seule barriere qui tienne contre un .vsix apporte
+#    par l'etudiant (docs/analyse.md 3.2).
+RUN mkdir -p /opt/code-server/extensions /tmp/cs-build /etc/code-server && \
+    code-server \
+        --extensions-dir /opt/code-server/extensions \
+        --user-data-dir /tmp/cs-build \
+        --force \
+        --install-extension "${EXT_CLANGD}" \
+        --install-extension "${EXT_DEBUG}" && \
+    code-server \
+        --extensions-dir /opt/code-server/extensions \
+        --user-data-dir /tmp/cs-build \
+        --list-extensions --show-versions | tee /etc/code-server/extensions.lock && \
+    grep -qi "^${EXT_CLANGD}@" /etc/code-server/extensions.lock && \
+    grep -qi "^${EXT_DEBUG}@" /etc/code-server/extensions.lock && \
+    rm -rf /tmp/cs-build /root/.config/code-server /root/.local && \
+    chown -R root:root /opt/code-server && \
+    chmod -R a-w /opt/code-server
+
+# 5. Reglages machine. Copies dans le user-data-dir tmpfs par le point d'entree.
+COPY settings.json /etc/code-server/settings.json
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod 0644 /etc/code-server/settings.json && \
+    chmod 0755 /usr/local/bin/entrypoint.sh
+
+# 5b. Resolveur : avec --dns=none Podman n'ecrit aucun /etc/resolv.conf et la
+#     libc retombe sur 127.0.0.1 avec cinq secondes d'attente par tentative,
+#     donc toute resolution ratee (curl, git, clangd) bloque cinq secondes.
+#     L'image livre un resolv.conf statique sans aucun nameserver, qui ramene
+#     l'echec sous la seconde. Il doit etre pose par COPY et non par RUN :
+#     pendant un RUN, buildah monte son propre /etc/resolv.conf par-dessus et
+#     l'ecriture serait perdue avec le montage.
+COPY resolv.conf /etc/resolv.conf
+RUN chmod 0644 /etc/resolv.conf
+
+# 6. Reglages par defaut de clangd pour un TP en C. clangd ne lit que
+#    $XDG_CONFIG_HOME/clangd/config.yaml (soit ~/.config/clangd/config.yaml) et
+#    les fichiers .clangd du projet : le modele est donc depose aux deux
+#    endroits utiles. ~/.config est sur la racine en lecture seule ; le point
+#    d'entree recopie le meme fichier dans le XDG_CONFIG_HOME du tmpfs, dont
+#    heritent code-server, son hote d'extensions et le terminal integre.
+RUN mkdir -p /etc/clangd /home/student/.config/clangd && \
+    printf '%s\n' \
+    'CompileFlags:' \
+    '  Add: [-std=c17, -Wall, -Wextra]' \
+    > /etc/clangd/config.yaml && \
+    cp /etc/clangd/config.yaml /home/student/.config/clangd/config.yaml && \
+    chmod 0644 /etc/clangd/config.yaml /home/student/.config/clangd/config.yaml && \
+    chown -R 1000:1000 /home/student/.config
+
+USER 1000:1000
+WORKDIR /work
+EXPOSE 8080
+ENV PAGER=less
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
