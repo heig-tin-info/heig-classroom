@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
 
 import type { ActivityData, Commit } from "@hgc/contracts";
 
-import { api } from "../api";
+import { api, apiErrorMessage } from "../api";
 import { useT } from "../i18n";
-import { isoDateTime } from "../ui";
+import { Alert, Button, isoDateTime } from "../ui";
 import { buildGraph, laneColor } from "./graph";
 
 /**
@@ -250,6 +250,29 @@ export function ActivityPanel({
       <p className="flex items-center gap-2 px-5 py-4 text-sm text-fg-muted">
         <Loader2 className="size-4 animate-spin" /> Loading activity…
       </p>
+    );
+  }
+  if (activity.isError) {
+    return (
+      <div className="p-4">
+        <Alert
+          tone="danger"
+          icon={AlertTriangle}
+          title="Could not load this repository's activity"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void activity.refetch()}
+              loading={activity.isFetching}
+            >
+              <RefreshCw /> Retry
+            </Button>
+          }
+        >
+          {apiErrorMessage(activity.error, "The server did not answer.")}
+        </Alert>
+      </div>
     );
   }
   const commits = activity.data?.commits ?? [];

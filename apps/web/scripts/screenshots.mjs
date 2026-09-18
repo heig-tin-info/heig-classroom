@@ -1,0 +1,188 @@
+// Screenshots of the mocked web app, for the visual check required by
+// `.claude/skills/hgc-ui/SKILL.md`. Development tool only: it is never
+// imported by the app, never bundled and never runs in CI.
+//
+//   pnpm --filter @hgc/web dev:mock          # in one terminal
+//   pnpm --filter @hgc/web screenshots       # in another
+//
+// Flags: --dark, --width=390|768|1440 (repeatable), --only=<substring>,
+//        --fold (viewport only, instead of the full page), --list.
+// Environment: BASE (default http://localhost:5173), OUT (default
+// apps/web/screenshots).
+//
+// See docs/development/ui-mock-and-screenshots.md.
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { chromium } from "playwright-core";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const BASE = process.env.BASE ?? "http://localhost:5173";
+const OUT = process.env.OUT ?? path.resolve(here, "..", "screenshots");
+
+const argv = process.argv.slice(2);
+const flag = (name) => argv.includes(`--${name}`);
+const opt = (name) =>
+  argv.filter((a) => a.startsWith(`--${name}=`)).map((a) => a.slice(name.length + 3));
+
+const dark = flag("dark");
+const fullPage = !flag("fold");
+const only = opt("only").concat(argv.filter((a) => !a.startsWith("--")));
+const widths = opt("width").map(Number).filter(Boolean);
+
+// --- Scenes, as data ---------------------------------------------------
+//
+// name   file name (plus the theme and width suffixes)
+// role   mock persona: teacher | student | admin
+// path   URL under BASE; scene flags of the mock go in the query string
+// ls     extra localStorage entries, written before the first paint
+// act    what to open once the page settled (a sheet, a menu, a dialog)
+
+const scenes = [
+  // Teacher home
+  { name: "teacher-home", role: "teacher", path: "/" },
+  { name: "teacher-home-list", role: "teacher", path: "/", ls: { "hgc-classrooms-view": "list" } },
+  { name: "teacher-home-timeline", role: "teacher", path: "/", ls: { "hgc-classrooms-view": "timeline" } },
+  { name: "teacher-home-archives", role: "teacher", path: "/", act: (p) => p.getByRole("button", { name: "Archives" }).first().click() },
+  { name: "teacher-home-new", role: "teacher", path: "/", act: (p) => p.getByRole("button", { name: /create classroom/i }).first().click() },
+  { name: "teacher-home-empty", role: "teacher", path: "/?empty=1" },
+  { name: "teacher-home-error", role: "teacher", path: "/?fail=1", settle: 9000 },
+  { name: "teacher-home-loading", role: "teacher", path: "/?slow=1", settle: 300 },
+  { name: "teacher-home-many", role: "teacher", path: "/?many=1" },
+  { name: "teacher-home-many-list", role: "teacher", path: "/?many=1", ls: { "hgc-classrooms-view": "list" } },
+
+  // Classroom
+  { name: "classroom", role: "teacher", path: "/classrooms/c1" },
+  { name: "classroom-students", role: "teacher", path: "/classrooms/c1?tab=students" },
+  { name: "classroom-staff", role: "teacher", path: "/classrooms/c1?tab=staff" },
+  { name: "classroom-settings", role: "teacher", path: "/classrooms/c1?tab=settings" },
+  { name: "classroom-free-plan", role: "teacher", path: "/classrooms/c2" },
+  { name: "classroom-not-installed", role: "teacher", path: "/classrooms/c4" },
+  { name: "classroom-org-missing", role: "teacher", path: "/classrooms/c5" },
+  { name: "classroom-empty", role: "teacher", path: "/classrooms/c1?empty=1" },
+  { name: "classroom-empty-students", role: "teacher", path: "/classrooms/c1?tab=students&empty=1" },
+  { name: "classroom-empty-staff", role: "teacher", path: "/classrooms/c1?tab=staff&empty=1" },
+  { name: "classroom-error", role: "teacher", path: "/classrooms/c1?fail=1", settle: 9000 },
+  { name: "classroom-loading", role: "teacher", path: "/classrooms/c1?slow=1", settle: 300 },
+  { name: "classroom-roster-many", role: "teacher", path: "/classrooms/c1?tab=students&many=1" },
+  { name: "classroom-assignments-many", role: "teacher", path: "/classrooms/c1?many=1" },
+  { name: "classroom-import", role: "teacher", path: "/classrooms/c1?tab=students", act: (p) => p.getByRole("button", { name: /add students/i }).first().click() },
+  { name: "classroom-archive-confirm", role: "teacher", path: "/classrooms/c1?tab=settings", act: (p) => p.getByRole("button", { name: /archive classroom/i }).first().click() },
+
+  // Assignment form
+  { name: "assignment-new", role: "teacher", path: "/classrooms/c1", act: (p) => p.getByRole("button", { name: /create assignment/i }).first().click() },
+  { name: "assignment-edit-draft", role: "teacher", path: "/classrooms/c1", act: (p) => openRowMenu(p, "Lab 4 — File I/O", /edit/i) },
+  { name: "assignment-edit-published", role: "teacher", path: "/classrooms/c1", act: (p) => openRowMenu(p, "Lab 2 — Pointers, arrays and dynamic memory allocation", /edit/i) },
+  { name: "assignment-edit-locked", role: "teacher", path: "/classrooms/c1", act: (p) => openRowMenu(p, "Lab 1 — Hello, C", /edit/i) },
+  { name: "assignment-edit-online", role: "teacher", path: "/classrooms/c1", act: (p) => openRowMenu(p, "Semester project", /edit/i) },
+  { name: "assignment-edit-seb", role: "teacher", path: "/classrooms/c2", act: (p) => openRowMenu(p, "Exam — Data structures", /edit/i) },
+
+  // Assignment detail
+  { name: "assignment-detail", role: "teacher", path: "/classrooms/c1/assignments/a2" },
+  { name: "assignment-detail-locked", role: "teacher", path: "/classrooms/c1/assignments/a1" },
+  { name: "assignment-detail-draft", role: "teacher", path: "/classrooms/c1/assignments/a4" },
+  { name: "assignment-detail-ungraded", role: "teacher", path: "/classrooms/c1/assignments/a6" },
+  { name: "assignment-detail-expanded", role: "teacher", path: "/classrooms/c1/assignments/a2", act: (p) => p.locator("tbody tr").first().click() },
+  { name: "assignment-detail-milestone-add", role: "teacher", path: "/classrooms/c1/assignments/a2", act: (p) => p.getByRole("button", { name: /add milestone/i }).first().click() },
+  { name: "assignment-detail-history", role: "teacher", path: "/classrooms/c1/assignments/a1", act: (p) => p.getByRole("button", { name: /grade history/i }).first().click() },
+  { name: "assignment-detail-adjust", role: "teacher", path: "/classrooms/c1/assignments/a1", act: (p) => p.getByRole("button", { name: /adjust grade/i }).first().click() },
+  { name: "assignment-detail-error", role: "teacher", path: "/classrooms/c1/assignments/a2?fail=1", settle: 9000 },
+  { name: "assignment-detail-loading", role: "teacher", path: "/classrooms/c1/assignments/a2?slow=1", settle: 300 },
+  { name: "assignment-detail-many", role: "teacher", path: "/classrooms/c1/assignments/a2?many=1" },
+
+  // Student
+  { name: "student-home", role: "student", path: "/" },
+  { name: "student-home-list", role: "student", path: "/", ls: { "hgc-student-view": "list" } },
+  { name: "student-unlinked", role: "student", path: "/?unlinked=1" },
+  { name: "student-empty", role: "student", path: "/?empty=1" },
+  { name: "student-error", role: "student", path: "/?fail=1", settle: 9000 },
+  { name: "student-loading", role: "student", path: "/?slow=1", settle: 300 },
+  { name: "student-many", role: "student", path: "/?many=1" },
+  { name: "student-settings", role: "student", path: "/settings" },
+
+  // Settings and administration
+  { name: "settings", role: "teacher", path: "/settings" },
+  { name: "settings-avatar", role: "teacher", path: "/settings", act: (p) => p.getByRole("button", { name: /change picture/i }).first().click() },
+  { name: "admin", role: "admin", path: "/admin" },
+  { name: "admin-empty", role: "admin", path: "/admin?empty=1" },
+  { name: "admin-error", role: "admin", path: "/admin?fail=1", settle: 9000 },
+  { name: "admin-loading", role: "admin", path: "/admin?slow=1", settle: 300 },
+];
+
+/**
+ * Opens the overflow menu of one assignment row and picks an item. The menu
+ * closes on any scroll, so the row is brought into view and left to settle
+ * before the click — otherwise a narrow viewport opens and shuts it at once.
+ */
+async function openRowMenu(page, assignmentName, item) {
+  const trigger = page.getByLabel(`Actions for ${assignmentName}`);
+  await trigger.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(400);
+  await trigger.click();
+  await page.getByRole("menuitem", { name: item }).click();
+}
+
+if (flag("list")) {
+  for (const s of scenes) console.log(s.name);
+  process.exit(0);
+}
+
+// --- Runner ------------------------------------------------------------
+
+const picked = scenes.filter((s) => only.length === 0 || only.some((f) => s.name.includes(f)));
+if (picked.length === 0) {
+  console.error(`No scene matches ${only.join(", ")}. Try --list.`);
+  process.exit(1);
+}
+
+fs.mkdirSync(OUT, { recursive: true });
+const browser = await chromium.launch();
+let failures = 0;
+
+for (const width of widths.length ? widths : [1440]) {
+  const ctx = await browser.newContext({
+    viewport: { width, height: width < 700 ? 844 : 900 },
+    deviceScaleFactor: 1,
+    colorScheme: dark ? "dark" : "light",
+  });
+  for (const scene of picked) {
+    const page = await ctx.newPage();
+    const problems = [];
+    page.on("pageerror", (e) => problems.push(String(e)));
+    page.on("console", (m) => {
+      if (m.type() === "error") problems.push(m.text());
+    });
+    await page.addInitScript(
+      ({ role, ls, dark }) => {
+        localStorage.clear();
+        localStorage.setItem("hgc-mock-role", role);
+        if (dark) localStorage.setItem("hgc-theme", "dark");
+        for (const [k, v] of Object.entries(ls ?? {})) localStorage.setItem(k, v);
+      },
+      { role: scene.role, ls: scene.ls, dark },
+    );
+    try {
+      await page.goto(BASE + scene.path, { waitUntil: "domcontentloaded" });
+      await page.waitForTimeout(scene.settle ?? 1500);
+      if (scene.act) {
+        await scene.act(page);
+        await page.waitForTimeout(700);
+      }
+    } catch (e) {
+      problems.push(`scene failed: ${String(e).split("\n")[0]}`);
+    }
+    const suffix = `${dark ? "-dark" : ""}${width === 1440 ? "" : `-${width}`}`;
+    const file = path.join(OUT, `${scene.name}${suffix}.png`);
+    await page.screenshot({ path: file, fullPage });
+    if (problems.length) failures += 1;
+    console.log(
+      `${path.relative(process.cwd(), file)}${problems.length ? `  PROBLEMS: ${problems.join(" | ").slice(0, 400)}` : ""}`,
+    );
+    await page.close();
+  }
+  await ctx.close();
+}
+
+await browser.close();
+if (failures) console.error(`${failures} scene(s) reported console or page errors.`);

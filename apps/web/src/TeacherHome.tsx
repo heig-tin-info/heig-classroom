@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -10,6 +11,7 @@ import {
   LayoutGrid,
   List,
   Plus,
+  RefreshCw,
   School,
   Users,
 } from "lucide-react";
@@ -19,11 +21,13 @@ import type { ClassroomSummary } from "@hgc/contracts";
 
 import { api, apiErrorMessage } from "./api";
 import { fuzzyFilter } from "./fuzzy";
+import { HelpIcon } from "./help";
 import { compactDuration } from "./AssignmentForm";
 import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -47,6 +51,37 @@ import {
 } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
+
+/**
+ * A query that failed: say what could not be loaded, quote the server, and
+ * offer the one thing that can help — asking again.
+ */
+function LoadError({
+  title,
+  error,
+  onRetry,
+  retrying,
+}: {
+  title: string;
+  error: unknown;
+  onRetry: () => void;
+  retrying?: boolean;
+}) {
+  return (
+    <Alert
+      tone="danger"
+      icon={AlertTriangle}
+      title={title}
+      action={
+        <Button size="sm" variant="secondary" onClick={onRetry} loading={retrying}>
+          <RefreshCw /> Retry
+        </Button>
+      }
+    >
+      {apiErrorMessage(error, "The server did not answer.")}
+    </Alert>
+  );
+}
 
 /** Hover popover on the student counts: the roster at a glance. */
 function RosterPopover({ room, children }: { room: ClassroomSummary; children: React.ReactNode }) {
@@ -189,8 +224,9 @@ function ClassroomsList({
   );
   return (
     <Card className="overflow-hidden">
+      {/* Six columns do not fit a phone: scroll the table, not the page. */}
       <div className="overflow-x-auto">
-        <table className={T.table}>
+        <table className={cx(T.table, "min-w-170")}>
           <thead>
             <tr className={T.head}>
               <Th k="name">{t("classrooms.col.name")}</Th>
@@ -263,7 +299,12 @@ function NewClassroomDialog({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title={t("classrooms.new")}
-      subtitle={t("classrooms.newHint")}
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          {t("classrooms.newHint")}
+          <HelpIcon topic="new-classroom" />
+        </span>
+      }
       onClose={onClose}
       footer={
         <>
@@ -284,7 +325,13 @@ function NewClassroomDialog({ onClose }: { onClose: () => void }) {
           create.mutate();
         }}
       >
-        {installedOrgs.data?.length && !customOrg ? (
+        {installedOrgs.isLoading ? (
+          // Placeholder in the shape of the select that is about to land, so
+          // the form does not jump from a text field to a dropdown.
+          <Select label={t("classrooms.org")} value="" disabled onChange={() => {}}>
+            <option value="">{t("common.loading")}</option>
+          </Select>
+        ) : installedOrgs.data?.length && !customOrg ? (
           <Select
             label={t("classrooms.org")}
             value={org}
@@ -384,6 +431,9 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
   const open = (id: string) => navigate({ view: "classroom", id });
   const total = rooms.data?.length ?? 0;
   const students = (rooms.data ?? []).reduce((n, r) => n + r.students, 0);
+  // Nothing to search, sort or archive yet: the page is a title and one
+  // invitation, and the empty state carries the only primary action.
+  const bare = !showArchives && !rooms.isLoading && !rooms.isError && total === 0;
 
   const viewOption = (value: ClassroomsViewMode, Icon: typeof LayoutGrid, label: string) => ({
     value,
@@ -402,6 +452,13 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
     const archived = fuzzyFilter(query, archivedRooms.data ?? [], (r) => `${r.name} ${r.orgLogin}`);
     body = archivedRooms.isLoading ? (
       <CardsSkeleton />
+    ) : archivedRooms.isError ? (
+      <LoadError
+        title="Could not load the archives"
+        error={archivedRooms.error}
+        onRetry={() => void archivedRooms.refetch()}
+        retrying={archivedRooms.isFetching}
+      />
     ) : archived.length ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         {archived.map((c) => (
@@ -416,7 +473,7 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                 </p>
               </div>
             </div>
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <Badge tone="zinc" icon={Archive}>
                 {t("classrooms.archived")}
               </Badge>
@@ -431,6 +488,11 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
                   <ArchiveRestore /> {t("classrooms.restore")}
                 </Button>
               ) : null}
+              {unarchive.isError && unarchive.variables === c.id ? (
+                <p className="w-full text-[13px] text-danger">
+                  {apiErrorMessage(unarchive.error, "Could not restore this classroom.")}
+                </p>
+              ) : null}
             </div>
           </Card>
         ))}
@@ -444,6 +506,15 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
     );
   } else if (rooms.isLoading) {
     body = <CardsSkeleton />;
+  } else if (rooms.isError) {
+    body = (
+      <LoadError
+        title="Could not load your classrooms"
+        error={rooms.error}
+        onRetry={() => void rooms.refetch()}
+        retrying={rooms.isFetching}
+      />
+    );
   } else if (!rooms.data?.length) {
     body = (
       <Card>
@@ -452,11 +523,19 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
           title={t("classrooms.empty.title")}
           action={
             <Button onClick={() => setCreating(true)}>
-              <Plus /> {t("classrooms.new")}
+              <Plus /> {t("classrooms.newAction")}
             </Button>
           }
         >
           {t("classrooms.empty.body")}
+        </EmptyState>
+      </Card>
+    );
+  } else if (filtered.length === 0) {
+    body = (
+      <Card>
+        <EmptyState icon={School} title="No classroom matches" className="py-12">
+          Nothing here is called “{query}”. Try a shorter search, or part of the organization name.
         </EmptyState>
       </Card>
     );
@@ -484,51 +563,62 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={showArchives ? t("classrooms.archives") : t("classrooms.title")}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {showArchives ? t("classrooms.archives") : t("classrooms.title")}
+            <HelpIcon topic="classrooms" />
+          </span>
+        }
         description={
           showArchives
             ? t("classrooms.archives.emptyBody")
-            : total
-              ? t("classrooms.summary", { n: total, students })
-              : null
+            : query.trim() !== "" && total
+              ? `${filtered.length} of ${total} classrooms`
+              : total
+                ? t("classrooms.summary", { n: total, students })
+                : null
         }
         actions={
-          <>
-            {/* Primary action, one per screen: everything else is secondary. */}
+          // Primary action, one per screen — and none at all while the empty
+          // state below is offering the very same thing.
+          bare ? null : (
             <Button onClick={() => setCreating(true)}>
-              <Plus /> {t("classrooms.new")}
+              <Plus /> {t("classrooms.newAction")}
             </Button>
-          </>
+          )
         }
       />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <SearchInput
-          placeholder={t("common.search")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          aria-label={t("common.search")}
-        />
-        <span className="flex-1" />
-        <Segmented
-          name="classrooms-view"
-          value={mode}
-          onChange={setViewMode}
-          disabled={showArchives}
-          options={[
-            viewOption("cards", LayoutGrid, t("view.cards")),
-            viewOption("list", List, t("view.list")),
-            viewOption("timeline", CalendarRange, t("view.timeline")),
-          ]}
-        />
-        <IconButton
-          label={t("classrooms.archives")}
-          active={showArchives}
-          onClick={() => setShowArchives((v) => !v)}
-        >
-          <Archive />
-        </IconButton>
-      </div>
+      {bare ? null : (
+        <div className="flex flex-wrap items-center gap-2">
+          <SearchInput
+            placeholder={t("common.search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            aria-label={t("common.search")}
+            className="w-full sm:w-56"
+          />
+          <span className="hidden flex-1 sm:block" />
+          <Segmented
+            name="classrooms-view"
+            value={mode}
+            onChange={setViewMode}
+            disabled={showArchives}
+            options={[
+              viewOption("cards", LayoutGrid, t("view.cards")),
+              viewOption("list", List, t("view.list")),
+              viewOption("timeline", CalendarRange, t("view.timeline")),
+            ]}
+          />
+          <IconButton
+            label={t("classrooms.archives")}
+            active={showArchives}
+            onClick={() => setShowArchives((v) => !v)}
+          >
+            <Archive />
+          </IconButton>
+        </div>
+      )}
 
       {body}
 

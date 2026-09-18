@@ -7,6 +7,7 @@ import {
   ExternalLink,
   FileSpreadsheet,
   GraduationCap,
+  RefreshCw,
   Settings as SettingsIcon,
   Trash2,
   UserMinus,
@@ -19,13 +20,14 @@ import { useState } from "react";
 
 import type { ClassroomDetail, ClassroomGradesPayload, ClassroomStaffRole } from "@hgc/contracts";
 
-import { api, apiErrorMessage, useMe } from "./api";
+import { api, ApiError, apiErrorMessage, useMe } from "./api";
 import { AssignmentsSection } from "./AssignmentsCard";
 import { Breadcrumb } from "./Breadcrumb";
 import { useConfirm } from "./confirm";
 import { fuzzyFilter } from "./fuzzy";
 import { useT } from "./i18n";
 import { useSearchParam, type Route } from "./router";
+import { useToast } from "./notify";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import {
@@ -86,13 +88,15 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
       <Card className="p-5">
         <SectionHeading title="Name" description="Shown to you, your staff and the students." />
         <form
-          className="mt-4 flex items-end gap-3"
+          className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
             rename.mutate();
           }}
         >
-          <Field label="Classroom name" value={name} onChange={(e) => setName(e.target.value)} required fullWidth />
+          <div className="min-w-56 flex-1">
+            <Field label="Classroom name" value={name} onChange={(e) => setName(e.target.value)} required fullWidth />
+          </div>
           <Button
             type="submit"
             variant="secondary"
@@ -101,13 +105,23 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
           >
             Rename
           </Button>
+          {rename.isError ? (
+            <p className="w-full text-[13px] text-danger">
+              {apiErrorMessage(rename.error, "Could not rename this classroom.")}
+            </p>
+          ) : null}
+          {rename.isSuccess && name === room.name ? (
+            <p className="w-full text-[13px] text-success">Name saved.</p>
+          ) : null}
         </form>
       </Card>
 
       {room.isOwner ? (
         <Card className="divide-y divide-line">
           <div className="flex flex-wrap items-center gap-4 p-5">
-            <div className="min-w-0 flex-1">
+            {/* A wide minimum keeps the sentence readable: below it the button
+                drops to its own line instead of squeezing the text. */}
+            <div className="min-w-56 flex-1">
               <h3 className="font-semibold">Archive this classroom</h3>
               <p className="mt-0.5 text-[13px] text-fg-muted">
                 Removes the classroom from the interface for you and the students. Data and GitHub
@@ -131,9 +145,16 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
             >
               <Archive /> Archive classroom
             </Button>
+            {archive.isError ? (
+              <p className="w-full text-[13px] text-danger">
+                {apiErrorMessage(archive.error, "Could not archive this classroom.")}
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-4 p-5">
-            <div className="min-w-0 flex-1">
+            {/* A wide minimum keeps the sentence readable: below it the button
+                drops to its own line instead of squeezing the text. */}
+            <div className="min-w-56 flex-1">
               <h3 className="font-semibold text-danger">Delete this classroom</h3>
               <p className="mt-0.5 text-[13px] text-fg-muted">
                 Deletes the classroom, its roster and its assignments from the portal. GitHub
@@ -158,6 +179,11 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
             >
               <Trash2 /> Delete permanently
             </Button>
+            {remove.isError ? (
+              <p className="w-full text-[13px] text-danger">
+                {apiErrorMessage(remove.error, "Could not delete this classroom.")}
+              </p>
+            ) : null}
           </div>
         </Card>
       ) : null}
@@ -309,6 +335,11 @@ function StaffTab({ room }: { room: ClassroomDetail }) {
                     ]}
                   />
                 ) : null}
+                {remove.isError && remove.variables === m.id ? (
+                  <p className="w-full text-[13px] text-danger">
+                    {apiErrorMessage(remove.error, "Could not remove this member.")}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -394,12 +425,21 @@ function StudentsTab({ room }: { room: ClassroomDetail }) {
                 <GraduationCap /> {t("roster.join")}
               </Button>
             )}
-            <Button onClick={() => setImporting(true)}>
-              <UserPlus /> Add students
-            </Button>
+            {/* The empty state below already carries this action; two accent
+                buttons for the same thing is one too many. */}
+            {room.roster.length ? (
+              <Button onClick={() => setImporting(true)}>
+                <UserPlus /> Add students
+              </Button>
+            ) : null}
           </>
         }
       />
+      {join.isError ? (
+        <p className="text-[13px] text-danger">
+          {apiErrorMessage(join.error, "Could not give you a seat in this classroom.")}
+        </p>
+      ) : null}
       {room.roster.length === 0 ? (
         <Card>
           <EmptyState
@@ -416,19 +456,27 @@ function StudentsTab({ room }: { room: ClassroomDetail }) {
         </Card>
       ) : (
         <Card className="overflow-hidden">
-          <div className="border-b border-line px-4 py-3">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3">
             <SearchInput
               placeholder="Search students…"
               aria-label="Search students"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-64"
+              className="w-full sm:w-64"
             />
+            {/* A long roster never paginates: it says how much of it you see. */}
+            <span className="text-[13px] text-fg-muted">
+              {shown.length === room.roster.length
+                ? `${room.roster.length} students`
+                : `${shown.length} of ${room.roster.length} students`}
+            </span>
           </div>
           {shown.length ? (
             <RosterTable classroomId={room.id} roster={shown} />
           ) : (
-            <EmptyState icon={Users} title="No student matches" className="py-10" />
+            <EmptyState icon={Users} title="No student matches" className="py-10">
+              Search by last name, first name, e-mail or GitHub login.
+            </EmptyState>
           )}
         </Card>
       )}
@@ -439,6 +487,7 @@ function StudentsTab({ room }: { room: ClassroomDetail }) {
 
 export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
+  const toast = useToast();
   const [tab, setTab] = useSearchParam("tab", "assignments");
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
@@ -469,6 +518,9 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       XLSX.utils.book_append_sheet(wb, ws, "Notes");
       XLSX.writeFile(wb, `${data.classroom.name} — grades.xlsx`);
     },
+    // The action lives in the overflow menu, which is gone by the time it
+    // fails: the toast is the only place left to say so.
+    onError: (err) => toast(apiErrorMessage(err, "Could not build the grade sheet."), "error"),
   });
 
   if (detail.isLoading) {
@@ -482,10 +534,50 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
     );
   }
   if (!detail.data) {
+    // A 404 is an answer, not a failure: it gets its own way out.
+    const gone = detail.error instanceof ApiError && detail.error.status === 404;
     return (
-      <Card>
-        <EmptyState icon={XCircle} title="Classroom not found" />
-      </Card>
+      <div className="space-y-6">
+        <Breadcrumb
+          items={[
+            { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
+            { label: gone ? "Unknown classroom" : "Classroom" },
+          ]}
+        />
+        {gone ? (
+          <Card>
+            <EmptyState
+              icon={XCircle}
+              title="Classroom not found"
+              action={
+                <Button variant="secondary" onClick={() => navigate({ view: "home" })}>
+                  Back to my classrooms
+                </Button>
+              }
+            >
+              It was deleted, or the link points at a classroom you cannot open.
+            </EmptyState>
+          </Card>
+        ) : (
+          <Alert
+            tone="danger"
+            icon={AlertTriangle}
+            title="Could not load this classroom"
+            action={
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => void detail.refetch()}
+                loading={detail.isFetching}
+              >
+                <RefreshCw /> Retry
+              </Button>
+            }
+          >
+            {apiErrorMessage(detail.error, "The server did not answer.")}
+          </Alert>
+        )}
+      </div>
     );
   }
   const room = detail.data;
@@ -569,12 +661,20 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
         <InstallWizard room={room} />
       ) : null}
 
+      {/* These two buttons live in the body of their Alert, not in its
+          `action` slot: a long label there squeezes a long text down to one
+          word per line on a phone. */}
       {installed && room.org?.plan === "free" ? (
         <Alert
           tone="warning"
           icon={AlertTriangle}
           title={`${room.org.login} is on the GitHub Free plan`}
-          action={
+        >
+          Private repositories get no branch protection (a student can force-push or delete their
+          history), the deadline falls back to archiving, and organization secrets are not
+          delivered, so the automatic LLM review fails silently. GitHub Team is free for teachers
+          through GitHub Education.
+          <span className="mt-2.5 block">
             <LinkButton
               size="sm"
               href="https://education.github.com/globalcampus/teacher"
@@ -583,12 +683,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             >
               Request the education upgrade
             </LinkButton>
-          }
-        >
-          Private repositories get no branch protection (a student can force-push or delete their
-          history), the deadline falls back to archiving, and organization secrets are not
-          delivered, so the automatic LLM review fails silently. GitHub Team is free for teachers
-          through GitHub Education.
+          </span>
         </Alert>
       ) : null}
 
@@ -597,26 +692,28 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           tone="warning"
           icon={AlertTriangle}
           title="ANTHROPIC_API_KEY is missing on the organization"
-          action={
+        >
+          The automatic LLM reviews (deadline and milestones) will fail until the secret exists.
+          Add it under Organization settings → Secrets and variables → Actions, with access to
+          private repositories.
+          <span className="mt-2.5 block">
             <LinkButton
               size="sm"
               href={`https://github.com/organizations/${room.org.login}/settings/secrets/actions`}
               target="_blank"
               rel="noreferrer"
             >
-              Open the org secrets
+              Open the organization secrets
             </LinkButton>
-          }
-        >
-          The automatic LLM reviews (deadline and milestones) will fail until the secret exists.
-          Add it under Organization settings → Secrets and variables → Actions, with access to
-          private repositories.
+          </span>
         </Alert>
       ) : null}
 
       <Tabs
         value={tab as Tab}
         onChange={setTab}
+        idPrefix="classroom"
+        label="Classroom sections"
         items={[
           { value: "assignments", label: "Assignments", icon: ClipboardList },
           { value: "students", label: "Students", icon: Users, count: room.roster.length },
@@ -625,21 +722,25 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
         ]}
       />
 
-      {tab === "students" ? (
-        <StudentsTab room={room} />
-      ) : tab === "staff" ? (
-        <StaffTab room={room} />
-      ) : tab === "settings" ? (
-        <SettingsTab room={room} onGone={() => navigate({ view: "home" })} />
-      ) : (
-        <AssignmentsSection
-          classroomId={room.id}
-          appInstalled={installed}
-          onOpenAssignment={(aid) =>
-            navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
-          }
-        />
-      )}
+      {/* One panel, named after the selected tab: `idPrefix` on Tabs makes
+          each tab point at it with aria-controls. */}
+      <div role="tabpanel" id={`classroom-panel-${tab}`} aria-labelledby={`classroom-tab-${tab}`}>
+        {tab === "students" ? (
+          <StudentsTab room={room} />
+        ) : tab === "staff" ? (
+          <StaffTab room={room} />
+        ) : tab === "settings" ? (
+          <SettingsTab room={room} onGone={() => navigate({ view: "home" })} />
+        ) : (
+          <AssignmentsSection
+            classroomId={room.id}
+            appInstalled={installed}
+            onOpenAssignment={(aid) =>
+              navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
+            }
+          />
+        )}
+      </div>
     </div>
   );
 }

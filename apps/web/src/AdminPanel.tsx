@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, MonitorPlay, School, Trash2, UserPlus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { AlertTriangle, ClipboardList, MonitorPlay, RefreshCw, School, Trash2, UserPlus } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
 
 import type { TeacherCodespaceGrant } from "@hgc/contracts";
 
@@ -8,6 +8,7 @@ import { api, ApiError, apiErrorMessage } from "./api";
 import { useConfirm } from "./confirm";
 import { ScheduledTasksCard } from "./ScheduledTasks";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -19,6 +20,7 @@ import {
   isoDateTime,
   PageHeader,
   SectionHeading,
+  Skeleton,
   SortHeader,
   Switch,
   T,
@@ -69,19 +71,23 @@ function CodespaceCell({
         onChange={(v) => onSave({ enabled: v })}
         label={`Online workspace for ${row.email}`}
       />
-      <input
-        type="number"
-        min={0}
-        max={100}
-        value={quota}
-        onChange={(e) => setQuota(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && dirty) onSave({ maxActiveSessions: parsed });
-        }}
-        className={cx(inputClass, "h-8 w-16 text-center tabular-nums")}
-        aria-label={`Concurrent sessions allowed for ${row.email}`}
-        disabled={saving || !grant.enabled}
-      />
+      {/* The width lives on the wrapper: `inputClass` carries `w-full`, and a
+          `w-16` next to it is not guaranteed to win the cascade. */}
+      <span className="inline-block w-16 shrink-0">
+        <input
+          type="number"
+          min={0}
+          max={100}
+          value={quota}
+          onChange={(e) => setQuota(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && dirty) onSave({ maxActiveSessions: parsed });
+          }}
+          className={cx(inputClass, "px-1 text-center tabular-nums")}
+          aria-label={`Concurrent sessions allowed for ${row.email}`}
+          disabled={saving || !grant.enabled}
+        />
+      </span>
       {dirty ? (
         <Button size="sm" variant="secondary" onClick={() => onSave({ maxActiveSessions: parsed })} loading={saving}>
           Save
@@ -155,6 +161,17 @@ export function AdminPage() {
       ? apiErrorMessage(grant.error, "Request failed")
       : null;
 
+  /** Failure of the last revoke or grant change, under the row it came from. */
+  const rowError = (id: string): string | null => {
+    if (revoke.isError && revoke.variables === id) {
+      return apiErrorMessage(revoke.error, "Could not revoke this teacher.");
+    }
+    if (setCodespace.isError && setCodespace.variables?.id === id) {
+      return apiErrorMessage(setCodespace.error, "Could not save the online workspace grant.");
+    }
+    return null;
+  };
+
   const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (
     <SortHeader k={k} sort={sort} onToggle={toggle} right={right}>
       {children}
@@ -196,13 +213,40 @@ export function AdminPage() {
             </Button>
             {grantError ? <span className="w-full text-sm text-danger">{grantError}</span> : null}
           </form>
-          {rows.length === 0 && !teachers.isLoading ? (
+          {teachers.isLoading ? (
+            <div className="space-y-3 p-5">
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} className="h-4 w-full" />
+              ))}
+            </div>
+          ) : teachers.isError ? (
+            <div className="p-4">
+              <Alert
+                tone="danger"
+                icon={AlertTriangle}
+                title="Could not load the teachers"
+                action={
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void teachers.refetch()}
+                    loading={teachers.isFetching}
+                  >
+                    <RefreshCw /> Retry
+                  </Button>
+                }
+              >
+                {apiErrorMessage(teachers.error, "The server did not answer.")}
+              </Alert>
+            </div>
+          ) : rows.length === 0 ? (
             <EmptyState icon={School} title="No teachers yet">
               Grant the teacher role by e-mail above.
             </EmptyState>
           ) : (
+            /* Seven columns never fit a phone: the table scrolls, not the page. */
             <div className="overflow-x-auto">
-              <table className={T.table}>
+              <table className={cx(T.table, "min-w-220")}>
                 <thead>
                   <tr className={T.head}>
                     <Th k="email">E-mail</Th>
@@ -226,60 +270,69 @@ export function AdminPage() {
                 </thead>
                 <tbody>
                   {rows.map((r) => (
-                    <tr key={r.id} className={cx(T.row, T.rowHover)}>
-                      <td className={`${T.td} font-semibold`}>{r.email}</td>
-                      <td className={T.td}>
-                        {r.signedUp ? (
-                          `${r.givenName ?? ""} ${r.familyName ?? ""}`.trim() || "—"
-                        ) : (
-                          <Badge tone="amber">not signed in yet</Badge>
-                        )}
-                      </td>
-                      <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
-                        {r.lastLoginAt ? isoDateTime(r.lastLoginAt) : "—"}
-                      </td>
-                      <td className={`${T.td} text-right tabular-nums`}>{r.classrooms}</td>
-                      <td className={`${T.td} text-right tabular-nums`}>
-                        <span className="inline-flex items-center gap-1">
-                          <ClipboardList className="size-3.5 text-fg-faint" /> {r.assignments}
-                        </span>
-                      </td>
-                      {showCodespace ? (
+                    <Fragment key={r.id}>
+                      <tr className={cx(T.row, T.rowHover)}>
+                        <td className={`${T.td} font-semibold`}>{r.email}</td>
                         <td className={T.td}>
-                          {r.codespace ? (
-                            <CodespaceCell
-                              row={r}
-                              saving={setCodespace.isPending}
-                              onSave={(codespace) => setCodespace.mutate({ id: r.id, codespace })}
-                            />
-                          ) : null}
+                          {r.signedUp ? (
+                            `${r.givenName ?? ""} ${r.familyName ?? ""}`.trim() || "—"
+                          ) : (
+                            <Badge tone="amber">not signed in yet</Badge>
+                          )}
                         </td>
+                        <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
+                          {r.lastLoginAt ? isoDateTime(r.lastLoginAt) : "—"}
+                        </td>
+                        <td className={`${T.td} text-right tabular-nums`}>{r.classrooms}</td>
+                        <td className={`${T.td} text-right tabular-nums`}>
+                          <span className="inline-flex items-center gap-1">
+                            <ClipboardList className="size-3.5 text-fg-faint" /> {r.assignments}
+                          </span>
+                        </td>
+                        {showCodespace ? (
+                          <td className={T.td}>
+                            {r.codespace ? (
+                              <CodespaceCell
+                                row={r}
+                                saving={setCodespace.isPending}
+                                onSave={(codespace) => setCodespace.mutate({ id: r.id, codespace })}
+                              />
+                            ) : null}
+                          </td>
+                        ) : null}
+                        <td className={`${T.td} text-right`}>
+                          <IconButton
+                            danger
+                            label="Revoke teacher role"
+                            disabled={revoke.isPending}
+                            onClick={async () => {
+                              if (
+                                await confirm({
+                                  title: `Revoke ${r.email}?`,
+                                  message:
+                                    r.classrooms > 0
+                                      ? `They own ${r.classrooms} classroom(s); the data stays but they lose access at once.`
+                                      : "They lose access at once.",
+                                  confirmLabel: "Revoke",
+                                  danger: true,
+                                })
+                              ) {
+                                revoke.mutate(r.id);
+                              }
+                            }}
+                          >
+                            <Trash2 />
+                          </IconButton>
+                        </td>
+                      </tr>
+                      {rowError(r.id) ? (
+                        <tr>
+                          <td colSpan={showCodespace ? 7 : 6} className="px-3 pb-2 text-[13px] text-danger">
+                            {rowError(r.id)}
+                          </td>
+                        </tr>
                       ) : null}
-                      <td className={`${T.td} text-right`}>
-                        <IconButton
-                          danger
-                          label="Revoke teacher role"
-                          disabled={revoke.isPending}
-                          onClick={async () => {
-                            if (
-                              await confirm({
-                                title: `Revoke ${r.email}?`,
-                                message:
-                                  r.classrooms > 0
-                                    ? `They own ${r.classrooms} classroom(s); the data stays but they lose access at once.`
-                                    : "They lose access at once.",
-                                confirmLabel: "Revoke",
-                                danger: true,
-                              })
-                            ) {
-                              revoke.mutate(r.id);
-                            }
-                          }}
-                        >
-                          <Trash2 />
-                        </IconButton>
-                      </td>
-                    </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

@@ -1,12 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, History, Snowflake, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, History, RefreshCw, Snowflake, XCircle } from "lucide-react";
 
 import type { GradeRunHistory, GradeView } from "@hgc/contracts";
 
-import { api } from "./api";
-import { Badge, EmptyState, isoDateTime, Modal, Spinner, T } from "./ui";
+import { api, apiErrorMessage } from "./api";
+import { Alert, Badge, Button, cx, EmptyState, isoDateTime, Modal, Spinner, T } from "./ui";
 
-/** Grade x/y (GR-11): frozen (snowflake) once the deadline is enforced. */
+/**
+ * Grade x/y (GR-11), frozen (snowflake) once the deadline is enforced. A
+ * grade is a number, not a status, so it reads as plain tabular text — a
+ * green pill around "0/10" said the opposite of what it meant. The badge is
+ * kept for what really is a status: a grade the CI could not parse.
+ */
 export function GradeBadge({
   grade,
   frozen,
@@ -17,9 +22,10 @@ export function GradeBadge({
   if (!grade) return <span className="text-fg-faint">—</span>;
   if (grade.parseStatus === "ok") {
     return (
-      <Badge tone={frozen ? "zinc" : "green"} icon={frozen ? Snowflake : undefined}>
+      <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
         {grade.points}/{grade.max}
-      </Badge>
+        {frozen ? <Snowflake className="size-3 text-fg-faint" /> : null}
+      </span>
     );
   }
   if (grade.parseStatus === "fallback") return <span className="text-fg-faint">—</span>;
@@ -58,11 +64,31 @@ export function GradeHistoryModal({
     <Modal title="Grade history" subtitle={student} size="lg" onClose={onClose}>
       {history.isLoading ? (
         <Spinner className="py-6" />
+      ) : history.isError ? (
+        <Alert
+          tone="danger"
+          icon={AlertTriangle}
+          title="Could not load the grade history"
+          action={
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void history.refetch()}
+              loading={history.isFetching}
+            >
+              <RefreshCw /> Retry
+            </Button>
+          }
+        >
+          {apiErrorMessage(history.error, "The server did not answer.")}
+        </Alert>
       ) : !d || d.runs.length === 0 ? (
-        <EmptyState icon={History} title="No CI run captured yet" className="py-8" />
+        <EmptyState icon={History} title="No CI run captured yet" className="py-8">
+          Runs appear here as soon as the grading workflow completes on a commit.
+        </EmptyState>
       ) : (
-        <div className="-mx-5 max-h-96 overflow-y-auto">
-          <table className={T.table}>
+        <div className="-mx-5 max-h-96 overflow-x-auto overflow-y-auto">
+          <table className={cx(T.table, "min-w-150")}>
             <thead>
               <tr className={T.head}>
                 <th className={`${T.th} pl-5`}>Run</th>

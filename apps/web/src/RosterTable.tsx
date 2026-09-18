@@ -10,7 +10,7 @@ import {
   UserRoundX,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import type { RosterEntry } from "@hgc/contracts";
 
@@ -75,7 +75,9 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
       save.isError && save.error instanceof ApiError
         ? apiErrorMessage(save.error, "Update failed")
         : null;
-    const small = cx(inputClass, "h-8");
+    // Plain field height: a `h-8` here loses the cascade against the
+    // `h-[34px]` of `inputClass`, so it was only pretending to be compact.
+    const small = inputClass;
     return (
       <tr className={cx(T.row, "bg-surface-2/60")}>
         <td className={T.td}>
@@ -128,100 +130,116 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
     );
   }
 
+  // A failed action from the row menu: one line under the row it came from.
+  const failure = unclaim.isError
+    ? apiErrorMessage(unclaim.error, "Could not revoke this claim.")
+    : remove.isError
+      ? apiErrorMessage(remove.error, "Could not remove this student.")
+      : null;
+
   return (
-    <tr className={cx(T.row, T.rowHover)}>
-      <td className={`${T.td} font-semibold`}>
-        <span className="flex items-center gap-2.5">
-          <StudentAvatar entry={entry} />
-          {entry.nom}
-        </span>
-      </td>
-      <td className={T.td}>{entry.prenom}</td>
-      <td className={`${T.td} text-fg-muted`}>
-        <a href={`mailto:${entry.email}`} className="hover:text-fg hover:underline">
-          {entry.email}
-        </a>
-      </td>
-      <td className={T.td}>
-        <span className="inline-flex items-center gap-1">
-          {entry.conflictFlag ? (
-            <Badge tone="red" icon={AlertTriangle}>
-              conflict
-            </Badge>
-          ) : entry.status === "claimed" ? (
-            <Badge tone="green" icon={CheckCircle2}>
-              claimed
-            </Badge>
-          ) : (
-            <Badge tone="amber" icon={Clock}>
-              pending
-            </Badge>
-          )}
-          {entry.staff ? (
-            <Badge tone="zinc" icon={GraduationCap}>
-              staff
-            </Badge>
-          ) : null}
-        </span>
-      </td>
-      <td className={T.td}>
-        {entry.githubLogin ? (
-          <span className="inline-flex items-center gap-1.5 text-fg-muted">
-            <GithubIcon className="size-3.5" /> {entry.githubLogin}
+    <Fragment>
+      <tr className={cx(T.row, T.rowHover)}>
+        <td className={`${T.td} font-semibold`}>
+          <span className="flex items-center gap-2.5">
+            <StudentAvatar entry={entry} />
+            {entry.nom}
           </span>
-        ) : (
-          <span className="text-fg-faint">—</span>
-        )}
-      </td>
-      <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
-        {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
-      </td>
-      <td className={`${T.td} whitespace-nowrap text-right`}>
-        <Menu
-          label={`Actions for ${entry.prenom} ${entry.nom}`}
-          items={[
-            { label: "Edit", icon: Pencil, onSelect: () => setEditing(true) },
-            ...(entry.status === "claimed" || entry.conflictFlag
-              ? [
-                  {
-                    label: "Revoke claim",
-                    icon: UserRoundX,
-                    onSelect: async () => {
-                      if (
-                        await confirm({
-                          title: `Revoke ${entry.prenom} ${entry.nom}'s claim?`,
-                          message: "The seat goes back to pending; the student claims it again on their next sign-in.",
-                          confirmLabel: "Revoke",
-                        })
-                      ) {
-                        unclaim.mutate();
-                      }
+        </td>
+        <td className={T.td}>{entry.prenom}</td>
+        <td className={`${T.td} text-fg-muted`}>
+          <a href={`mailto:${entry.email}`} className="hover:text-fg hover:underline">
+            {entry.email}
+          </a>
+        </td>
+        <td className={T.td}>
+          <span className="inline-flex items-center gap-1">
+            {entry.conflictFlag ? (
+              <Badge tone="red" icon={AlertTriangle}>
+                conflict
+              </Badge>
+            ) : entry.status === "claimed" ? (
+              <Badge tone="green" icon={CheckCircle2}>
+                claimed
+              </Badge>
+            ) : (
+              <Badge tone="amber" icon={Clock}>
+                pending
+              </Badge>
+            )}
+            {entry.staff ? (
+              <Badge tone="zinc" icon={GraduationCap}>
+                staff
+              </Badge>
+            ) : null}
+          </span>
+        </td>
+        <td className={T.td}>
+          {entry.githubLogin ? (
+            <span className="inline-flex items-center gap-1.5 text-fg-muted">
+              <GithubIcon className="size-3.5" /> {entry.githubLogin}
+            </span>
+          ) : (
+            <span className="text-fg-faint">—</span>
+          )}
+        </td>
+        <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
+          {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
+        </td>
+        <td className={`${T.td} whitespace-nowrap text-right`}>
+          <Menu
+            label={`Actions for ${entry.prenom} ${entry.nom}`}
+            items={[
+              { label: "Edit", icon: Pencil, onSelect: () => setEditing(true) },
+              ...(entry.status === "claimed" || entry.conflictFlag
+                ? [
+                    {
+                      label: "Revoke claim",
+                      icon: UserRoundX,
+                      onSelect: async () => {
+                        if (
+                          await confirm({
+                            title: `Revoke ${entry.prenom} ${entry.nom}'s claim?`,
+                            message: "The seat goes back to pending; the student claims it again on their next sign-in.",
+                            confirmLabel: "Revoke",
+                          })
+                        ) {
+                          unclaim.mutate();
+                        }
+                      },
                     },
-                  },
-                ]
-              : []),
-            {
-              label: "Remove from roster",
-              icon: Trash2,
-              danger: true,
-              separator: true,
-              onSelect: async () => {
-                if (
-                  await confirm({
-                    title: `Remove ${entry.prenom} ${entry.nom}?`,
-                    message: "The student leaves the roster. Existing repositories on GitHub are not touched.",
-                    confirmLabel: "Remove",
-                    danger: true,
-                  })
-                ) {
-                  remove.mutate();
-                }
+                  ]
+                : []),
+              {
+                label: "Remove from roster",
+                icon: Trash2,
+                danger: true,
+                separator: true,
+                onSelect: async () => {
+                  if (
+                    await confirm({
+                      title: `Remove ${entry.prenom} ${entry.nom}?`,
+                      message: "The student leaves the roster. Existing repositories on GitHub are not touched.",
+                      confirmLabel: "Remove",
+                      danger: true,
+                    })
+                  ) {
+                    remove.mutate();
+                  }
+                },
               },
-            },
-          ]}
-        />
-      </td>
-    </tr>
+            ]}
+          />
+        </td>
+      </tr>
+      {failure ? (
+        <tr>
+          <td colSpan={7} className="px-3 pb-2 text-[13px] text-danger">
+            {failure}
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
   );
 }
 
@@ -247,8 +265,9 @@ export function RosterTable({
   );
 
   return (
+    /* Seven columns never fit a phone: the table scrolls, the page does not. */
     <div className="overflow-x-auto">
-      <table className={T.table}>
+      <table className={cx(T.table, "min-w-220")}>
         <thead>
           <tr className={T.head}>
             <Th k="nom">Last name</Th>

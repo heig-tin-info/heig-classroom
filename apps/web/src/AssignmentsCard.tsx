@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -9,6 +10,7 @@ import {
   MonitorPlay,
   Pencil,
   Plus,
+  RefreshCw,
   Send,
   Trash2,
 } from "lucide-react";
@@ -16,10 +18,11 @@ import { useState } from "react";
 
 import type { Assignment } from "@hgc/contracts";
 
-import { api } from "./api";
+import { api, apiErrorMessage } from "./api";
 import { AssignmentForm, compactDuration } from "./AssignmentForm";
 import { useConfirm } from "./confirm";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -136,22 +139,36 @@ function AssignmentRow({
         </span>
         {a.state === "draft" && a.publishMode === "scheduled" ? (
           <Tip label="Auto-publishes at the start date">
-            <span className="ml-1 text-accent">· auto</span>
+            <span className="ml-1 font-medium text-fg-muted">· auto</span>
           </Tip>
         ) : null}
       </>
     );
 
+  // Whichever action just failed: one line under the row rather than silence.
+  const failure = publish.isError
+    ? apiErrorMessage(publish.error, "Could not publish this assignment.")
+    : archive.isError
+      ? apiErrorMessage(archive.error, "Could not archive this assignment.")
+      : unarchive.isError
+        ? apiErrorMessage(unarchive.error, "Could not restore this assignment.")
+        : remove.isError
+          ? apiErrorMessage(remove.error, "Could not delete this assignment.")
+          : null;
+
   return (
     // Title and state on the first line, the schedule on the second; the
-    // actions stay pinned right whatever the name length.
-    <li className={cx("flex items-center gap-4 px-5 py-3.5", archived && "opacity-70")}>
-      <div className="min-w-0 flex-1">
+    // actions stay pinned right whatever the name length, and drop below the
+    // title once the row no longer fits a phone.
+    <li className={cx("flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5", archived && "opacity-70")}>
+      <div className="min-w-56 flex-1">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+          {/* Never truncated: on a phone the end of the name is often the
+              only thing telling two labs apart. */}
           <button
             type="button"
             onClick={onOpen}
-            className="truncate text-left text-[15px] font-semibold tracking-tight transition-colors hover:text-accent"
+            className="max-w-full text-balance text-left text-[15px] font-semibold tracking-tight transition-colors hover:text-accent"
           >
             {a.name}
           </button>
@@ -167,12 +184,14 @@ function AssignmentRow({
             </Badge>
           ) : null}
         </div>
-        <p className="mt-0.5 flex items-center gap-1.5 text-[13px] text-fg-muted">
-          <CalendarClock className="size-3.5 shrink-0 text-fg-faint" />
-          <span className="truncate">{when}</span>
+        {/* The icon rides in the text flow, so a schedule that wraps on a
+            phone never leaves it stranded on a line of its own. */}
+        <p className="mt-0.5 text-[13px] text-fg-muted">
+          <CalendarClock className="mr-1.5 inline size-3.5 -translate-y-px text-fg-faint" />
+          {when}
         </p>
       </div>
-      <div className="flex shrink-0 items-center gap-1">
+      <div className="ml-auto flex shrink-0 items-center gap-1">
         {!archived && a.state === "draft" ? (
           <Button
             size="sm"
@@ -204,6 +223,7 @@ function AssignmentRow({
           <Menu items={menu} label={`Actions for ${a.name}`} />
         )}
       </div>
+      {failure ? <p className="w-full text-[13px] text-danger">{failure}</p> : null}
     </li>
   );
 }
@@ -236,9 +256,11 @@ export function AssignmentsSection({
             <IconButton label="Archives" active={showArchived} onClick={() => setShowArchived((v) => !v)}>
               <Archive />
             </IconButton>
-            {appInstalled ? (
+            {/* The empty state below already carries this action; two accent
+                buttons for the same thing is one too many. */}
+            {appInstalled && list.data?.length ? (
               <Button onClick={() => setSheet("create")}>
-                <Plus /> New assignment
+                <Plus /> Create assignment
               </Button>
             ) : null}
           </>
@@ -254,6 +276,19 @@ export function AssignmentsSection({
             </div>
           ))}
         </Card>
+      ) : list.isError ? (
+        <Alert
+          tone="danger"
+          icon={AlertTriangle}
+          title={showArchived ? "Could not load the archives" : "Could not load the assignments"}
+          action={
+            <Button size="sm" variant="secondary" onClick={() => void list.refetch()} loading={list.isFetching}>
+              <RefreshCw /> Retry
+            </Button>
+          }
+        >
+          {apiErrorMessage(list.error, "The server did not answer.")}
+        </Alert>
       ) : list.data?.length ? (
         <Card>
           <ul className="divide-y divide-line">
@@ -281,7 +316,7 @@ export function AssignmentsSection({
               title="No assignments yet"
               action={
                 <Button onClick={() => setSheet("create")}>
-                  <Plus /> New assignment
+                  <Plus /> Create assignment
                 </Button>
               }
             >

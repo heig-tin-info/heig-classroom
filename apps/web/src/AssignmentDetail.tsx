@@ -39,13 +39,14 @@ import type {
 import { finalPoints, resolveFinalGrade } from "@hgc/domain";
 
 import { ActivityPanel } from "./activity/ActivityPanel";
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { compactDuration } from "./AssignmentForm";
 import { Breadcrumb } from "./Breadcrumb";
 import { buildCloneScript, cloneScriptFileName } from "./cloneScript";
 import { useConfirm } from "./confirm";
 import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
+import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
 import type { Route } from "./router";
 import {
@@ -54,6 +55,7 @@ import {
   Button,
   Card,
   cx,
+  EmptyState,
   Field,
   GithubIcon,
   IconButton,
@@ -74,6 +76,34 @@ import {
   useNow,
   useSortableTable,
 } from "./ui";
+
+/** A query that failed: what broke, what the server said, and one retry. */
+function LoadError({
+  title,
+  error,
+  onRetry,
+  retrying,
+}: {
+  title: string;
+  error: unknown;
+  onRetry: () => void;
+  retrying?: boolean;
+}) {
+  return (
+    <Alert
+      tone="danger"
+      icon={AlertTriangle}
+      title={title}
+      action={
+        <Button size="sm" variant="secondary" onClick={onRetry} loading={retrying}>
+          <RefreshCw /> Retry
+        </Button>
+      }
+    >
+      {apiErrorMessage(error, "The server did not answer.")}
+    </Alert>
+  );
+}
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
@@ -263,8 +293,14 @@ function StudentRow({
         { method: "POST" },
       ),
   });
-  const gradeNowError =
+  // 409 means "this workflow has no manual trigger" — a fact about the
+  // repository, not a failure; anything else is one and says what happened.
+  const gradeNowUnsupported =
     gradeNow.isError && gradeNow.error instanceof ApiError && gradeNow.error.status === 409;
+  const gradeNowError = gradeNow.isError && !gradeNowUnsupported;
+  const lockError = toggleLock.isError
+    ? apiErrorMessage(toggleLock.error, "Could not change the lock on this repository.")
+    : null;
 
   const r = s.repo;
   const locked = r?.lockedAt != null;
@@ -276,7 +312,7 @@ function StudentRow({
         onClick={() => canExpand && setExpanded((e) => !e)}
         className={cx(T.row, T.rowHover, canExpand && "cursor-pointer", locked && "opacity-60")}
       >
-        <td className={`${T.td} font-semibold`}>
+        <td className={`${T.td} whitespace-nowrap font-semibold`}>
           <span className="inline-flex items-center gap-1.5">
             {canExpand ? (
               expanded ? (
@@ -463,11 +499,13 @@ function StudentRow({
               {showGrades ? (
                 <Tip
                   label={
-                    gradeNowError
+                    gradeNowUnsupported
                       ? t("assignment.gradeNowUnsupported")
-                      : gradeNow.isSuccess
-                        ? t("assignment.gradeNowStarted")
-                        : t("assignment.gradeNow")
+                      : gradeNowError
+                        ? apiErrorMessage(gradeNow.error, "Could not start the grading run.")
+                        : gradeNow.isSuccess
+                          ? t("assignment.gradeNowStarted")
+                          : t("assignment.gradeNow")
                   }
                 >
                   <button
@@ -477,16 +515,18 @@ function StudentRow({
                     disabled={gradeNow.isPending || locked}
                     className={cx(
                       "inline-flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-40",
-                      gradeNowError
+                      gradeNowUnsupported
                         ? "text-warning"
-                        : gradeNow.isSuccess
-                          ? "text-success"
-                          : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+                        : gradeNowError
+                          ? "text-danger"
+                          : gradeNow.isSuccess
+                            ? "text-success"
+                            : "text-fg-faint hover:bg-surface-2 hover:text-fg",
                     )}
                   >
                     {gradeNow.isPending ? (
                       <Loader2 className="size-4 animate-spin" />
-                    ) : gradeNowError ? (
+                    ) : gradeNow.isError ? (
                       <AlertTriangle className="size-4" />
                     ) : gradeNow.isSuccess ? (
                       <CheckCircle2 className="size-4" />
@@ -496,8 +536,10 @@ function StudentRow({
                   </button>
                 </Tip>
               ) : null}
-              {/* Padlock shows the STATE: closed red when locked, open otherwise. */}
-              <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
+              {/* Padlock shows the STATE: closed red when locked, open otherwise.
+                  A failed lock/unlock turns it into a warning carrying the
+                  server's message — there is no room for a line in this cell. */}
+              <Tip label={lockError ?? (locked ? t("assignment.unlockRepo") : t("assignment.lockRepo"))}>
                 <button
                   type="button"
                   aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
@@ -505,11 +547,17 @@ function StudentRow({
                   disabled={toggleLock.isPending}
                   className={cx(
                     "inline-flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none",
-                    locked ? "text-danger hover:bg-danger-soft" : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+                    lockError
+                      ? "text-danger"
+                      : locked
+                        ? "text-danger hover:bg-danger-soft"
+                        : "text-fg-faint hover:bg-surface-2 hover:text-fg",
                   )}
                 >
                   {toggleLock.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
+                  ) : lockError ? (
+                    <AlertTriangle className="size-4" />
                   ) : locked ? (
                     <Lock className="size-4" />
                   ) : (
@@ -558,20 +606,23 @@ function SyncBanner({
   const syncing = sync.isSuccess && !ahead ? false : sync.isSuccess;
   if (!ahead && !syncing) return null;
   return (
-    <Alert
-      tone="warning"
-      icon={GitPullRequest}
-      title="The source repository has new commits"
-      action={
-        <Button size="sm" variant="secondary" onClick={() => sync.mutate()} disabled={syncing} loading={sync.isPending}>
-          <GitPullRequest /> {sync.isPending || syncing ? "Syncing…" : "Sync student repositories"}
-        </Button>
-      }
-    >
+    // The button sits in the body, not in the `action` slot: a long label
+    // there crushes this text to one word per line on a phone.
+    <Alert tone="warning" icon={GitPullRequest} title="The source repository has new commits">
       {a.sourceAheadSha ? (
         <code className="mr-1 font-mono text-xs">{a.sourceAheadSha.slice(0, 7)}</code>
       ) : null}
       Syncing opens a pull request on each student repository; students merge it themselves.
+      {sync.isError ? (
+        <span className="mt-1 block text-danger">
+          {apiErrorMessage(sync.error, "Could not start the sync.")}
+        </span>
+      ) : null}
+      <span className="mt-2.5 block">
+        <Button size="sm" variant="secondary" onClick={() => sync.mutate()} disabled={syncing} loading={sync.isPending}>
+          <GitPullRequest /> {sync.isPending || syncing ? "Syncing…" : "Sync student repositories"}
+        </Button>
+      </span>
     </Alert>
   );
 }
@@ -609,7 +660,7 @@ function CodespaceBanner({
           disabled={resync.isSuccess}
           loading={resync.isPending}
         >
-          <RefreshCw /> {resync.isSuccess ? "Resync queued" : "Resync"}
+          <RefreshCw /> {resync.isSuccess ? "Queued" : "Resync"}
         </Button>
       }
     >
@@ -624,6 +675,11 @@ function CodespaceBanner({
         : a.codespaceSyncedAt
           ? `synced with the portal at ${isoDateTime(a.codespaceSyncedAt)}`
           : "never synced with the portal yet"}
+      {resync.isError ? (
+        <span className="mt-1 block text-danger">
+          {apiErrorMessage(resync.error, "Could not queue the resync.")}
+        </span>
+      ) : null}
     </Alert>
   );
 }
@@ -694,7 +750,7 @@ function MilestonesSection({
         <SectionHeading
           icon={MilestoneIcon}
           title="Milestones"
-          count={rows.length}
+          count={milestones.data?.length}
           description={
             <>
               Intermediate LLM reviews of the criteria tagged{" "}
@@ -710,7 +766,20 @@ function MilestonesSection({
         ) : null}
       </div>
 
-      {rows.length === 0 && !adding ? (
+      {milestones.isLoading ? (
+        <div className="border-t border-line px-5 py-3.5">
+          <Skeleton className="h-4 w-56" />
+        </div>
+      ) : milestones.isError ? (
+        <div className="border-t border-line p-4">
+          <LoadError
+            title="Could not load the milestones"
+            error={milestones.error}
+            onRetry={() => void milestones.refetch()}
+            retrying={milestones.isFetching}
+          />
+        </div>
+      ) : rows.length === 0 && !adding ? (
         <p className="border-t border-line px-5 py-3 text-[13px] text-fg-muted">
           No milestones — the only review happens at the deadline.
         </p>
@@ -747,6 +816,11 @@ function MilestonesSection({
               >
                 <Trash2 />
               </IconButton>
+              {remove.isError && remove.variables === m.id ? (
+                <p className="w-full text-[13px] text-danger">
+                  {apiErrorMessage(remove.error, "Could not delete this milestone.")}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -917,7 +991,37 @@ export function AssignmentDetail({
       </div>
     );
   }
-  if (!detail.data) return null;
+  if (!detail.data) {
+    // A deleted or unreachable assignment: an answer, not a failure.
+    const gone = detail.error instanceof ApiError && detail.error.status === 404;
+    return (
+      <div className="space-y-6">
+        {crumbs}
+        {gone ? (
+          <Card>
+            <EmptyState
+              icon={XCircle}
+              title="Assignment not found"
+              action={
+                <Button variant="secondary" onClick={() => navigate({ view: "classroom", id: classroomId })}>
+                  Back to the classroom
+                </Button>
+              }
+            >
+              It was deleted, or the link points at an assignment of another classroom.
+            </EmptyState>
+          </Card>
+        ) : (
+          <LoadError
+            title="Could not load this assignment"
+            error={detail.error}
+            onRetry={() => void detail.refetch()}
+            retrying={detail.isFetching}
+          />
+        )}
+      </div>
+    );
+  }
   const a = detail.data.assignment;
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
   const passing = students.filter((s) => s.repo?.ciStatus === "pass").length;
@@ -1041,6 +1145,11 @@ export function AssignmentDetail({
                 {a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate")}
               </Button>
             ) : null}
+            {validate.isError ? (
+              <p className="w-full text-right text-[13px] text-danger">
+                {apiErrorMessage(validate.error, "Could not validate the grades.")}
+              </p>
+            ) : null}
           </>
         }
       />
@@ -1094,40 +1203,54 @@ export function AssignmentDetail({
             onChange={(e) => setQuery(e.target.value)}
             className="w-64"
           />
-          <span className="text-[13px] text-fg-muted">
-            {rows.length === students.length ? `${students.length} students` : `${rows.length} of ${students.length} students`}
+          <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-muted">
+            {rows.length === students.length
+              ? `${students.length} students`
+              : `${rows.length} of ${students.length} students`}
+            <HelpIcon topic="assignment-detail" />
           </span>
         </div>
-        <div className="overflow-x-auto">
-          <table className={T.table}>
-            <thead>
-              <tr className={T.head}>
-                <Th k="name">{t("assignment.col.student")}</Th>
-                <Th k="status">{t("assignment.col.status")}</Th>
-                <Th k="lastCommitAt">{t("assignment.col.lastCommit")}</Th>
-                <Th k="commitCount" right>
-                  {t("assignment.col.commits")}
-                </Th>
-                <th className={T.th}>{t("assignment.col.checks")}</th>
-                {showGrades ? <Th k="grade">{t("assignment.col.grade")}</Th> : null}
-                <th className={T.th} aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <StudentRow
-                  key={s.enrollmentId}
-                  classroomId={classroomId}
-                  assignmentId={assignmentId}
-                  frozen={a.state === "locked"}
-                  showGrades={showGrades}
-                  canAdjust={canAdjust}
-                  s={s}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {students.length === 0 ? (
+          <EmptyState icon={Users} title="No students in this classroom" className="py-12">
+            Add the roster on the classroom page — repositories are created once students accept.
+          </EmptyState>
+        ) : rows.length === 0 ? (
+          <EmptyState icon={Users} title="No student matches" className="py-12">
+            Search by last name, first name, e-mail or GitHub login.
+          </EmptyState>
+        ) : (
+          /* Seven columns never fit a phone: the table scrolls, the page does not. */
+          <div className="overflow-x-auto">
+            <table className={cx(T.table, "min-w-220")}>
+              <thead>
+                <tr className={T.head}>
+                  <Th k="name">{t("assignment.col.student")}</Th>
+                  <Th k="status">{t("assignment.col.status")}</Th>
+                  <Th k="lastCommitAt">{t("assignment.col.lastCommit")}</Th>
+                  <Th k="commitCount" right>
+                    {t("assignment.col.commits")}
+                  </Th>
+                  <th className={T.th}>{t("assignment.col.checks")}</th>
+                  {showGrades ? <Th k="grade">{t("assignment.col.grade")}</Th> : null}
+                  <th className={T.th} aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((s) => (
+                  <StudentRow
+                    key={s.enrollmentId}
+                    classroomId={classroomId}
+                    assignmentId={assignmentId}
+                    frozen={a.state === "locked"}
+                    showGrades={showGrades}
+                    canAdjust={canAdjust}
+                    s={s}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Card>
     </div>
   );

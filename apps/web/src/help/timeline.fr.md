@@ -14,3 +14,9 @@ Chaque classe se déroule en une piste par devoir, de sa date de début à son �
 ## Ouvrir un devoir
 
 Cliquez sa barre. Le survol montre les dates exactes et l'état.
+
+## Sur un petit écran
+
+La frise a besoin de largeur : en dessous de 720 px environ, elle défile
+horizontalement dans sa carte. Sur un téléphone, la **vue cartes** est plus
+confortable.

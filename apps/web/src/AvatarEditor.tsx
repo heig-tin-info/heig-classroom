@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ImageUp, Trash2, ZoomIn } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { api } from "./api";
+import { api, apiErrorMessage } from "./api";
 import { Button, Modal } from "./ui";
 
 const VIEW = 288; // on-screen preview
@@ -197,7 +197,16 @@ export function AvatarEditor({
             e.target.value = "";
           }}
         />
-        {save.isError ? <p className="text-sm text-danger">Upload failed — try again.</p> : null}
+        {save.isError ? (
+          <p className="text-sm text-danger">
+            {apiErrorMessage(save.error, "Could not upload the picture. Try again.")}
+          </p>
+        ) : null}
+        {remove.isError ? (
+          <p className="text-sm text-danger">
+            {apiErrorMessage(remove.error, "Could not remove the picture. Try again.")}
+          </p>
+        ) : null}
       </div>
     </Modal>
   );

@@ -234,7 +234,14 @@ export function TimelineView({
   return (
     <Card className="p-5">
       <div className="mb-3 flex items-center gap-1">
-        <SectionHeading title="Timeline" help="timeline" description="Wheel or drag to pan · ⌘/Ctrl + wheel to zoom" className="mr-auto" />
+        <SectionHeading
+          title="Timeline"
+          help="timeline"
+          description={
+            <span className="hidden sm:inline">Wheel or drag to pan · ⌘/Ctrl + wheel to zoom</span>
+          }
+          className="mr-auto"
+        />
         <IconButton label="Zoom out" onClick={() => zoomBy(1.6)}><ZoomOut className="size-4" /></IconButton>
         <IconButton label="Zoom in" onClick={() => zoomBy(1 / 1.6)}><ZoomIn className="size-4" /></IconButton>
         <IconButton label="Focus on what's in progress" onClick={() => setView(computeDefault(rooms))}>
@@ -242,7 +249,11 @@ export function TimelineView({
         </IconButton>
       </div>
 
-      <div className="flex gap-2">
+      {/* Desktop-first by nature: a gantt needs width. Below ~720 px the
+          whole chart scrolls sideways rather than collapsing into unreadable
+          slivers, and a note points at the card view for a phone. */}
+      <div className="overflow-x-auto">
+      <div className="flex min-w-180 gap-2">
         {/* Label column */}
         <div className="w-52 shrink-0">
           <div className={AXIS_H} />
@@ -365,6 +376,12 @@ export function TimelineView({
           })}
         </div>
       </div>
+      </div>
+
+      <p className="mt-3 text-xs text-fg-muted sm:hidden">
+        The timeline is made for a wide screen: scroll sideways, or use the card
+        view on a phone.
+      </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-fg-faint">
         <span className="inline-flex items-center gap-1.5">
@@ -455,12 +472,14 @@ function AssignmentBar({
           : a.state === "locked" || past
             ? "bg-surface-3 text-fg-muted"
             : ongoing
-              ? "bg-accent text-white ring-2 ring-accent/30"
-              : "bg-accent text-white"
+              ? "bg-accent text-on-fill ring-2 ring-accent/30"
+              : "bg-accent text-on-fill"
       }`}
       style={{ left: `${left}%`, width: `${width}%` }}
     >
-      {a.name}
+      {/* Under ~6 % the name is two clipped letters: the bar speaks for itself
+          and the label column beside it carries the name. */}
+      {width > 6 ? a.name : null}
     </button>
   );
 }

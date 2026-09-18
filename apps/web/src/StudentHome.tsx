@@ -12,6 +12,8 @@ import {
   Lock,
   MonitorPlay,
   Play,
+  RefreshCw,
+  SearchX,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -21,6 +23,7 @@ import { resolveFinalGrade } from "@hgc/domain";
 import { api, ApiError, apiErrorMessage } from "./api";
 import { GradeScale, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
+import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
 import {
   Alert,
@@ -236,12 +239,16 @@ function RowAction({
   githubLinked,
   codespaceHost,
   align = "end",
+  emphasis = "secondary",
 }: {
   a: StudentAssignment;
   githubLinked: boolean;
   /** Portal host, for the `sebs://` deep link; null = no portal configured. */
   codespaceHost: string | null;
   align?: "start" | "end";
+  /** Accent fill only where the screen wants the eye: the "Up next" card.
+      In the rows the same action stays secondary, so one red button leads. */
+  emphasis?: "primary" | "secondary";
 }) {
   const t = useT();
   const qc = useQueryClient();
@@ -271,7 +278,7 @@ function RowAction({
           {startButton ? (
             // Plain navigation: this URL is also the SEB startURL, so it
             // must work as a link, not as a fetch.
-            <LinkButton href={`/app/codespace/start/${a.id}`} variant="primary">
+            <LinkButton href={`/app/codespace/start/${a.id}`} variant={emphasis}>
               <Play /> {t("student.start")}
             </LinkButton>
           ) : null}
@@ -297,6 +304,7 @@ function RowAction({
     <div className={wrap}>
       <Tip label={githubLinked ? null : t("student.linkPrompt")}>
         <Button
+          variant={emphasis}
           onClick={() => accept.mutate()}
           disabled={!githubLinked || locked}
           loading={accept.isPending}
@@ -475,8 +483,9 @@ function StudentList({
   );
   return (
     <Card className="overflow-hidden">
+      {/* Six columns never fit a phone: the table scrolls, the page does not. */}
       <div className="overflow-x-auto">
-        <table className={T.table}>
+        <table className={cx(T.table, "min-w-200")}>
           <thead>
             <tr className={T.head}>
               <th className={T.th}>{t("nav.classrooms")}</th>
@@ -551,7 +560,7 @@ function UpNext({
           <Countdown deadline={a.deadlineAt} />
         </p>
       </div>
-      <RowAction a={a} githubLinked={githubLinked} codespaceHost={codespaceHost} />
+      <RowAction a={a} githubLinked={githubLinked} codespaceHost={codespaceHost} emphasis="primary" />
     </Card>
   );
 }
@@ -597,7 +606,12 @@ export function StudentHome({ me }: { me: Me }) {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t("student.title")}
+        title={
+          <span className="inline-flex items-center gap-2">
+            {t("student.title")}
+            <HelpIcon topic="student-home" />
+          </span>
+        }
         description={
           rooms.data
             ? t(open.length === 1 ? "student.summary.one" : "student.summary", { n: open.length })
@@ -624,6 +638,19 @@ export function StudentHome({ me }: { me: Me }) {
           <Skeleton className="h-20 w-full rounded-card" />
           <Skeleton className="h-40 w-full rounded-card" />
         </div>
+      ) : rooms.isError ? (
+        <Alert
+          tone="danger"
+          icon={AlertTriangle}
+          title={t("student.loadFailed")}
+          action={
+            <Button size="sm" variant="secondary" onClick={() => void rooms.refetch()} loading={rooms.isFetching}>
+              <RefreshCw /> {t("common.retry")}
+            </Button>
+          }
+        >
+          {apiErrorMessage(rooms.error, t("error.server"))}
+        </Alert>
       ) : !rooms.data?.length ? (
         <Card>
           <EmptyState icon={ClipboardList} title={t("student.empty.title")}>
@@ -642,8 +669,9 @@ export function StudentHome({ me }: { me: Me }) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label={t("common.search")}
+              className="w-full sm:w-56"
             />
-            <span className="flex-1" />
+            <span className="hidden flex-1 sm:block" />
             <Segmented
               name="student-view"
               value={view}
@@ -655,7 +683,13 @@ export function StudentHome({ me }: { me: Me }) {
             />
           </div>
 
-          {view === "list" ? (
+          {query !== "" && filteredFlat.length === 0 ? (
+            <Card>
+              <EmptyState icon={SearchX} title={t("student.noMatch")} className="py-12">
+                {t("student.noMatchBody")}
+              </EmptyState>
+            </Card>
+          ) : view === "list" ? (
             <StudentList rows={filteredFlat} githubLinked={linked} codespaceHost={me.codespaceHost} />
           ) : (
             <div className="space-y-8">

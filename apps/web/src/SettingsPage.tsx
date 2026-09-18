@@ -3,7 +3,7 @@ import { useState } from "react";
 import { BellRing, GraduationCap, Mail, School, ShieldCheck, SlidersHorizontal, Unlink } from "lucide-react";
 
 import { AvatarEditor } from "./AvatarEditor";
-import { api } from "./api";
+import { api, apiErrorMessage } from "./api";
 import { useConfirm } from "./confirm";
 import { useI18n, LOCALES } from "./i18n";
 import { DATE_FORMATS, EMAIL_KINDS, type DateFormat, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
@@ -88,6 +88,9 @@ function PreferencesCard({ me }: { me: Me }) {
           </Select>
         </SettingRow>
       </Card>
+      {saveDate.isError ? (
+        <p className="text-[13px] text-danger">{apiErrorMessage(saveDate.error, t("error.save"))}</p>
+      ) : null}
     </section>
   );
 }
@@ -153,6 +156,9 @@ function EmailCard({ me }: { me: Me }) {
           </SettingRow>
         ))}
       </Card>
+      {save.isError ? (
+        <p className="text-[13px] text-danger">{apiErrorMessage(save.error, t("error.save"))}</p>
+      ) : null}
     </section>
   );
 }
@@ -205,7 +211,9 @@ export function SettingsPage({ me }: { me: Me }) {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-4 p-5">
-            <div className="min-w-0 flex-1">
+            {/* A wide minimum: below it the buttons drop to their own line
+                rather than squeezing the sentence. */}
+            <div className="min-w-56 flex-1">
               <p className="flex items-center gap-2 font-semibold">
                 <GithubIcon className="size-4 text-fg-faint" /> {t("settings.github")}
               </p>
@@ -241,6 +249,11 @@ export function SettingsPage({ me }: { me: Me }) {
                 <GithubIcon /> {t("settings.link")}
               </LinkButton>
             )}
+            {unlink.isError ? (
+              <p className="w-full text-[13px] text-danger">
+                {apiErrorMessage(unlink.error, t("error.save"))}
+              </p>
+            ) : null}
           </div>
         </Card>
       </section>

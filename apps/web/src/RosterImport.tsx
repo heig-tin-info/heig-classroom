@@ -3,6 +3,7 @@ import { AlertTriangle, CheckCircle2, FileSpreadsheet, Upload, UserPlus } from "
 import { useRef, useState } from "react";
 
 import { api, ApiError } from "./api";
+import { HelpIcon } from "./help";
 import { Button, cx, Field, Sheet, Textarea } from "./ui";
 
 type Cell = string | number | null;
@@ -71,7 +72,12 @@ export function RosterImport({ classroomId, onClose }: { classroomId: string; on
   return (
     <Sheet
       title="Add students"
-      subtitle="Last name, first name and e-mail — the student claims the seat on first sign-in"
+      subtitle={
+        <span className="inline-flex items-center gap-1.5">
+          Last name, first name and e-mail — the student claims the seat on first sign-in
+          <HelpIcon topic="import-roster" />
+        </span>
+      }
       onClose={onClose}
       footer={
         <>

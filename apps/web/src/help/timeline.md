@@ -14,3 +14,8 @@ Each classroom unrolls into one lane per assignment, spanning from its start dat
 ## How to open an assignment
 
 Click its bar. Hovering shows the exact dates and state.
+
+## On a small screen
+
+The chart needs width: below roughly 720 px it scrolls sideways inside its
+card. The **card view** is the comfortable one on a phone.

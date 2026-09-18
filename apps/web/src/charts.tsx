@@ -71,7 +71,7 @@ export function GradeScale({ points, max }: { points: number; max: number }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span
-        className="inline-flex h-[22px] items-center rounded-full px-2 text-xs font-bold tabular-nums text-white"
+        className="inline-flex h-[22px] items-center rounded-full px-2 text-xs font-bold tabular-nums text-on-fill"
         style={{ backgroundColor: band.color }}
       >
         {points}/{max}

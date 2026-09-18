@@ -8,6 +8,18 @@
  * browser). Every endpoint the web app calls is served from the in-memory
  * state below; mutations edit that state so the flows feel real, and the
  * page reload starts over.
+ *
+ * Scene flags, remembered the same way (`?empty=1`, `?empty=0` to clear):
+ *
+ *  - `empty` — nothing anywhere: no classrooms, no roster, no assignments, no
+ *    teachers, no scheduled tasks, so every empty state is reachable;
+ *  - `fail`  — every GET under /app/api answers 500 (except /app/api/me, so
+ *    the shell still renders), to look at the error states;
+ *  - `slow`  — 2.5 s of latency on every call, to look at the loading states;
+ *  - `many`  — 30 classrooms, a 120-student roster and 40 assignments on the
+ *    first one, to look at long lists and the sidebar.
+ *
+ * See `docs/development/ui-mock-and-screenshots.md`.
  */
 import type {
   ActivityData,
@@ -32,14 +44,37 @@ type Role = Me["role"];
 
 const ROLE_KEY = "hgc-mock-role";
 const params = new URLSearchParams(window.location.search);
+let urlDirty = false;
 const asParam = params.get("as");
 if (asParam === "teacher" || asParam === "student" || asParam === "admin") {
   localStorage.setItem(ROLE_KEY, asParam);
   params.delete("as");
+  urlDirty = true;
+}
+const role: Role = (localStorage.getItem(ROLE_KEY) as Role | null) ?? "teacher";
+
+/** Scene flags: read from the URL, then remembered like the persona. */
+const FLAG_NAMES = ["empty", "fail", "slow", "many"] as const;
+type FlagName = (typeof FLAG_NAMES)[number];
+const flags = {} as Record<FlagName, boolean>;
+for (const name of FLAG_NAMES) {
+  const key = `hgc-mock-${name}`;
+  const raw = params.get(name);
+  if (raw !== null) {
+    if (raw === "0" || raw === "false") localStorage.removeItem(key);
+    else localStorage.setItem(key, "1");
+    params.delete(name);
+    urlDirty = true;
+  }
+  flags[name] = localStorage.getItem(key) === "1";
+}
+if (urlDirty) {
   const q = params.toString();
   window.history.replaceState(null, "", window.location.pathname + (q ? `?${q}` : ""));
 }
-const role: Role = (localStorage.getItem(ROLE_KEY) as Role | null) ?? "teacher";
+
+/** Latency of every mocked call: enough to see a skeleton under `?slow=1`. */
+const LATENCY = () => (flags.slow ? 2500 : 120 + Math.random() * 180);
 
 // --- Time helpers: everything is relative to now so countdowns look alive ---
 const H = 3_600_000;
@@ -197,7 +232,7 @@ const rooms: Room[] = [
         deadline: -16 * D,
         state: "locked",
       }),
-      assignment("a2", "Lab 2 — Pointers and arrays", "heig-prg1-2026", {
+      assignment("a2", "Lab 2 — Pointers, arrays and dynamic memory allocation", "heig-prg1-2026", {
         start: -12 * D,
         deadline: 3 * D + 5 * H,
       }),
@@ -209,6 +244,13 @@ const rooms: Room[] = [
         start: 19 * D,
         deadline: 33 * D,
         state: "draft",
+      }),
+      // Ungraded workshop: the grade column, the milestones and the review
+      // countdown all disappear (gradingMode "none").
+      assignment("a6", "Workshop — Git basics", "heig-prg1-2026", {
+        start: -20 * D,
+        deadline: 8 * D,
+        gradingMode: "none",
       }),
       assignment("a5", "Semester project", "heig-prg1-2026", {
         start: 0,
@@ -296,6 +338,63 @@ const rooms: Room[] = [
     ],
     archivedAssignments: new Set(),
     teacher: "Grace Hopper",
+  },
+  {
+    // The GitHub App is not installed yet: the classroom page shows the
+    // install wizard and assignments are out of reach.
+    summary: {
+      id: "c4",
+      name: "Réseaux 2026",
+      orgLogin: "heig-reseaux-2026",
+      createdAt: iso(-2 * D),
+      archivedAt: null,
+      isOwner: true,
+    },
+    org: {
+      login: "heig-reseaux-2026",
+      installationId: null,
+      githubOrgId: 191_400_002,
+      plan: null,
+      status: "active",
+      exists: true,
+      llmSecret: null,
+    },
+    students: makeStudents(12, 0.25, "c4"),
+    staff: [],
+    assignments: [],
+    archivedAssignments: new Set(),
+    teacher: "Ada Lovelace",
+  },
+  {
+    // The organization was deleted or renamed on GitHub: read-only classroom.
+    summary: {
+      id: "c5",
+      name: "SYE 2024",
+      orgLogin: "heig-sye-2024",
+      createdAt: iso(-500 * D),
+      archivedAt: null,
+      isOwner: true,
+    },
+    org: {
+      login: "heig-sye-2024",
+      installationId: null,
+      githubOrgId: null,
+      plan: null,
+      status: "degraded",
+      exists: false,
+      llmSecret: null,
+    },
+    students: makeStudents(16, 1, "c5"),
+    staff: [],
+    assignments: [
+      assignment("e1", "Processes and signals", "heig-sye-2024", {
+        start: -480 * D,
+        deadline: -460 * D,
+        state: "locked",
+      }),
+    ],
+    archivedAssignments: new Set(),
+    teacher: "Ada Lovelace",
   },
 ];
 
@@ -541,6 +640,7 @@ function assignmentDetail(room: Room, a: Assignment): AssignmentDetailPayload {
 }
 
 function studentRooms(): StudentClassroom[] {
+  if (flags.empty) return [];
   const mine = [rooms[0]!, rooms[1]!];
   return mine.map((room, ri) => ({
     id: room.summary.id,
@@ -598,6 +698,62 @@ const tasks = [
   { key: "collect-grades", description: "Pull grade annotations from completed workflow runs", webhookWoken: true, enabled: true, intervalMinutes: 15, defaultIntervalMinutes: 15, lastRunAt: iso(-9 * 60_000), lastStatus: "error", lastError: "GitHub API rate limit exceeded for installation 88213", lastDurationMs: 8_100 },
   { key: "publish-scheduled", description: "Publish drafts whose start date has come", webhookWoken: false, enabled: false, intervalMinutes: 10, defaultIntervalMinutes: 10, lastRunAt: null, lastStatus: null, lastError: null, lastDurationMs: null },
 ];
+
+// --- Scene flags: reshape the fixtures before the first request ---
+
+/** `?many=1`: 30 classrooms, and 120 students / 40 assignments on the first. */
+function inflate() {
+  const first = rooms[0]!;
+  first.students = makeStudents(120, 0.8, "c1");
+  const topics = ["Strings", "Structs", "Recursion", "Sorting", "Files", "Makefiles", "Unit tests", "Pointers"];
+  for (let i = first.assignments.length; i < 40; i += 1) {
+    const deadline = (i - 24) * 3 * D;
+    first.assignments.push(
+      assignment(`am${i}`, `Lab ${i + 1} — ${topics[i % topics.length]}`, first.summary.orgLogin, {
+        start: deadline - 7 * D,
+        deadline,
+        state: deadline < 0 ? "locked" : i % 7 === 0 ? "draft" : "published",
+      }),
+    );
+  }
+  for (let i = rooms.length; i < 30; i += 1) {
+    const org = `heig-course-${i + 1}`;
+    rooms.push({
+      summary: {
+        id: `c${i + 10}`,
+        name: `Course ${i + 1} — ${topics[i % topics.length]}`,
+        orgLogin: org,
+        createdAt: iso(-(20 + i) * D),
+        archivedAt: null,
+        isOwner: i % 4 !== 0,
+      },
+      org: { login: org, installationId: 90_000 + i, githubOrgId: 192_000_000 + i, plan: "team", status: "active", exists: true, llmSecret: "ok" },
+      students: makeStudents(6 + (i % 24), 0.7, `c${i + 10}`),
+      staff: [],
+      assignments: [
+        assignment(`x${i}`, `Project ${i + 1}`, org, { start: -(i % 10) * D, deadline: (14 - (i % 10)) * D }),
+      ],
+      archivedAssignments: new Set(),
+      teacher: "Ada Lovelace",
+    });
+  }
+}
+
+/** `?empty=1`: keep the classrooms addressable, but strip every collection. */
+function strip() {
+  for (const r of [...rooms, ...archivedRooms]) {
+    r.students = [];
+    r.staff = [];
+    r.assignments = [];
+    r.archivedAssignments = new Set();
+  }
+  teachers.length = 0;
+  tasks.length = 0;
+  milestones.clear();
+}
+
+if (flags.many) inflate();
+if (flags.empty) strip();
 
 // --- Org repositories (assignment form) ---
 
@@ -680,10 +836,12 @@ on("POST", "/app/auth/github/unlink", () => {
   if (me) me = { ...me, githubLogin: null };
   return undefined;
 });
-on("GET", "/app/api/orgs", () => ["heig-prg1-2026", "heig-info2-tinb", "heig-tin-info"]);
+on("GET", "/app/api/orgs", () =>
+  flags.empty ? [] : ["heig-prg1-2026", "heig-info2-tinb", "heig-tin-info"],
+);
 
 on("GET", "/app/api/classrooms", (_m, _b, url) =>
-  (url.searchParams.get("archived") ? archivedRooms : rooms).map(summaryOf),
+  flags.empty ? [] : (url.searchParams.get("archived") ? archivedRooms : rooms).map(summaryOf),
 );
 on("POST", "/app/api/classrooms", (_m, body) => {
   const id = nextId("c");
@@ -962,8 +1120,16 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   const raw = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const url = new URL(raw, window.location.origin);
   if (!url.pathname.startsWith("/app/")) return realFetch(input, init);
-  await new Promise((r) => setTimeout(r, 120 + Math.random() * 180));
+  await new Promise((r) => setTimeout(r, LATENCY()));
   const method = (init?.method ?? "GET").toUpperCase();
+  // `?fail=1`: every read fails, except the session — the shell must still
+  // render so the failing page is the one under test.
+  if (flags.fail && method === "GET" && url.pathname !== "/app/api/me") {
+    return new Response(JSON.stringify({ message: "Simulated failure" }), {
+      status: 500,
+      headers: { "content-type": "application/json" },
+    });
+  }
   let body: Record<string, unknown> = {};
   if (typeof init?.body === "string" && init.body.startsWith("{")) {
     try {
@@ -1005,4 +1171,8 @@ class MockEventSource {
 }
 (window as unknown as { EventSource: unknown }).EventSource = MockEventSource;
 
-console.info(`[mock] persona: ${role} — switch with ?as=teacher|student|admin`);
+const on_ = FLAG_NAMES.filter((f) => flags[f]);
+console.info(
+  `[mock] persona: ${role} — switch with ?as=teacher|student|admin` +
+    `\n[mock] scene flags: ${on_.length ? on_.join(", ") : "none"} — ?empty=1 ?fail=1 ?slow=1 ?many=1 (append =0 to clear)`,
+);
