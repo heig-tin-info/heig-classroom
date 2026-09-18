@@ -77,7 +77,8 @@ function PreferencesCard({ me }: { me: Me }) {
               setDateFormat(f);
               saveDate.mutate(f);
             }}
-            className="w-52 tabular-nums"
+            width="w-52"
+            className="tabular-nums"
             aria-label={t("settings.dateFormat")}
           >
             {DATE_FORMATS.map((f) => (

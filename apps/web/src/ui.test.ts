@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buttonClass, formatDateTimeAs, localDateKey, menuPosition } from "./ui";
+import { buttonClass, formatDateTimeAs, localDateKey, menuPosition, scrollEdges } from "./ui";
 
 // Fixed local date-time: the formatters work on local getters, so building the
 // date from local parts keeps the test free of any timezone assumption.
@@ -54,7 +54,7 @@ describe("buttonClass", () => {
     const cls = buttonClass("primary", "md");
     expect(cls).toContain("bg-accent");
     expect(cls).toContain("text-on-fill");
-    expect(cls).toContain("h-[34px]");
+    expect(cls).toContain("h-8.5");
     expect(cls).toContain("rounded-full");
   });
 
@@ -123,5 +123,30 @@ describe("menuPosition", () => {
     const low = rect(600);
     expect(menuPosition(low, viewport, "end", 100).up).toBe(false);
     expect(menuPosition(low, viewport, "end", 400).up).toBe(true);
+  });
+});
+
+describe("scrollEdges", () => {
+  it("reports no edge when everything fits", () => {
+    expect(scrollEdges(0, 300, 300)).toEqual({ left: false, right: false });
+  });
+
+  it("fades the right edge at the start of a scrollable strip", () => {
+    expect(scrollEdges(0, 600, 390)).toEqual({ left: false, right: true });
+  });
+
+  it("fades both edges in the middle", () => {
+    expect(scrollEdges(100, 600, 390)).toEqual({ left: true, right: true });
+  });
+
+  it("fades only the left edge at the end", () => {
+    expect(scrollEdges(210, 600, 390)).toEqual({ left: true, right: false });
+  });
+
+  it("absorbs the sub-pixel scroll positions of a fractional viewport", () => {
+    // A zoomed page lands half a pixel short of either end; that is not an
+    // edge the reader can scroll towards, so it must not draw a fade.
+    expect(scrollEdges(0.5, 600.4, 390)).toEqual({ left: false, right: true });
+    expect(scrollEdges(210.4, 600.4, 390)).toEqual({ left: true, right: false });
   });
 });

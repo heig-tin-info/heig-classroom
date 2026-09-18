@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CheckCircle2, History, RefreshCw, Snowflake, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, History, Snowflake, XCircle } from "lucide-react";
 
 import type { GradeRunHistory, GradeView } from "@hgc/contracts";
 
-import { api, apiErrorMessage } from "./api";
-import { Alert, Badge, Button, cx, EmptyState, isoDateTime, Modal, Spinner, T } from "./ui";
+import { api } from "./api";
+import { Badge, cx, EmptyState, isoDateTime, Modal, QueryError, Spinner, T } from "./ui";
 
 /**
  * Grade x/y (GR-11), frozen (snowflake) once the deadline is enforced. A
@@ -65,23 +65,12 @@ export function GradeHistoryModal({
       {history.isLoading ? (
         <Spinner className="py-6" />
       ) : history.isError ? (
-        <Alert
-          tone="danger"
-          icon={AlertTriangle}
+        <QueryError
           title="Could not load the grade history"
-          action={
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void history.refetch()}
-              loading={history.isFetching}
-            >
-              <RefreshCw /> Retry
-            </Button>
-          }
-        >
-          {apiErrorMessage(history.error, "The server did not answer.")}
-        </Alert>
+          error={history.error}
+          onRetry={() => void history.refetch()}
+          retrying={history.isFetching}
+        />
       ) : !d || d.runs.length === 0 ? (
         <EmptyState icon={History} title="No CI run captured yet" className="py-8">
           Runs appear here as soon as the grading workflow completes on a commit.

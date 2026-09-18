@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ClipboardList, MonitorPlay, RefreshCw, School, Trash2, UserPlus } from "lucide-react";
+import { ClipboardList, MonitorPlay, School, Trash2, UserPlus } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 
 import type { TeacherCodespaceGrant } from "@hgc/contracts";
@@ -8,7 +8,6 @@ import { api, ApiError, apiErrorMessage } from "./api";
 import { useConfirm } from "./confirm";
 import { ScheduledTasksCard } from "./ScheduledTasks";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -17,8 +16,10 @@ import {
   Field,
   IconButton,
   inputClass,
+  inputSize,
   isoDateTime,
   PageHeader,
+  QueryError,
   SectionHeading,
   Skeleton,
   SortHeader,
@@ -71,23 +72,19 @@ function CodespaceCell({
         onChange={(v) => onSave({ enabled: v })}
         label={`Online workspace for ${row.email}`}
       />
-      {/* The width lives on the wrapper: `inputClass` carries `w-full`, and a
-          `w-16` next to it is not guaranteed to win the cascade. */}
-      <span className="inline-block w-16 shrink-0">
-        <input
-          type="number"
-          min={0}
-          max={100}
-          value={quota}
-          onChange={(e) => setQuota(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && dirty) onSave({ maxActiveSessions: parsed });
-          }}
-          className={cx(inputClass, "px-1 text-center tabular-nums")}
-          aria-label={`Concurrent sessions allowed for ${row.email}`}
-          disabled={saving || !grant.enabled}
-        />
-      </span>
+      <input
+        type="number"
+        min={0}
+        max={100}
+        value={quota}
+        onChange={(e) => setQuota(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && dirty) onSave({ maxActiveSessions: parsed });
+        }}
+        className={cx(inputClass, inputSize.md, "w-16 shrink-0 px-1 text-center tabular-nums")}
+        aria-label={`Concurrent sessions allowed for ${row.email}`}
+        disabled={saving || !grant.enabled}
+      />
       {dirty ? (
         <Button size="sm" variant="secondary" onClick={() => onSave({ maxActiveSessions: parsed })} loading={saving}>
           Save
@@ -221,23 +218,12 @@ export function AdminPage() {
             </div>
           ) : teachers.isError ? (
             <div className="p-4">
-              <Alert
-                tone="danger"
-                icon={AlertTriangle}
+              <QueryError
                 title="Could not load the teachers"
-                action={
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => void teachers.refetch()}
-                    loading={teachers.isFetching}
-                  >
-                    <RefreshCw /> Retry
-                  </Button>
-                }
-              >
-                {apiErrorMessage(teachers.error, "The server did not answer.")}
-              </Alert>
+                error={teachers.error}
+                onRetry={() => void teachers.refetch()}
+                retrying={teachers.isFetching}
+              />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState icon={School} title="No teachers yet">

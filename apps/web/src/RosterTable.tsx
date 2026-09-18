@@ -23,6 +23,7 @@ import {
   IconButton,
   Initials,
   inputClass,
+  inputSize,
   isoDateTime,
   Menu,
   SortHeader,
@@ -75,9 +76,9 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
       save.isError && save.error instanceof ApiError
         ? apiErrorMessage(save.error, "Update failed")
         : null;
-    // Plain field height: a `h-8` here loses the cascade against the
-    // `h-[34px]` of `inputClass`, so it was only pretending to be compact.
-    const small = inputClass;
+    // Compact: an inline edit sits inside a table row, so it takes the 28 px
+    // control height instead of the 34 px one a form field gets.
+    const small = cx(inputClass, inputSize.sm, "w-full");
     return (
       <tr className={cx(T.row, "bg-surface-2/60")}>
         <td className={T.td}>

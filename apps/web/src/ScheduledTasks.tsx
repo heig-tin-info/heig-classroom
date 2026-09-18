@@ -1,10 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, Pause, Play, RefreshCw, TimerReset, Zap } from "lucide-react";
+import { Loader2, Pause, Play, TimerReset, Zap } from "lucide-react";
 import { Fragment, useState } from "react";
 
 import { api, apiErrorMessage } from "./api";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -12,7 +11,9 @@ import {
   EmptyState,
   IconButton,
   inputClass,
+  inputSize,
   isoDateTime,
+  QueryError,
   SectionHeading,
   Skeleton,
   T,
@@ -60,23 +61,19 @@ function IntervalEditor({
   const dirty = valid && parsed !== task.intervalMinutes;
   return (
     <span className="inline-flex items-center gap-2">
-      {/* The width lives on the wrapper: `inputClass` carries `w-full`, and a
-          `w-20` next to it is not guaranteed to win the cascade. */}
-      <span className="inline-block w-20 shrink-0">
-        <input
-          type="number"
-          min={5}
-          max={7 * 24 * 60}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && dirty) onSave(parsed);
-          }}
-          className={cx(inputClass, "tabular-nums")}
-          aria-label="Interval in minutes"
-          disabled={saving}
-        />
-      </span>
+      <input
+        type="number"
+        min={5}
+        max={7 * 24 * 60}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && dirty) onSave(parsed);
+        }}
+        className={cx(inputClass, inputSize.md, "w-20 shrink-0 tabular-nums")}
+        aria-label="Interval in minutes"
+        disabled={saving}
+      />
       <span className="text-xs text-fg-faint">min</span>
       {dirty ? (
         <Button size="sm" variant="secondary" onClick={() => onSave(parsed)} loading={saving}>
@@ -136,23 +133,12 @@ export function ScheduledTasksCard() {
           </div>
         ) : tasks.isError ? (
           <div className="p-4">
-            <Alert
-              tone="danger"
-              icon={AlertTriangle}
+            <QueryError
               title="Could not load the scheduled tasks"
-              action={
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void tasks.refetch()}
-                  loading={tasks.isFetching}
-                >
-                  <RefreshCw /> Retry
-                </Button>
-              }
-            >
-              {apiErrorMessage(tasks.error, "The server did not answer.")}
-            </Alert>
+              error={tasks.error}
+              onRetry={() => void tasks.refetch()}
+              retrying={tasks.isFetching}
+            />
           </div>
         ) : (tasks.data ?? []).length === 0 ? (
           <EmptyState icon={TimerReset} title="No scheduled task">

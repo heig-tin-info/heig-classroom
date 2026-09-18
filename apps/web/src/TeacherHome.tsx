@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -11,7 +10,6 @@ import {
   LayoutGrid,
   List,
   Plus,
-  RefreshCw,
   School,
   Users,
 } from "lucide-react";
@@ -27,7 +25,6 @@ import { useT } from "./i18n";
 import type { Route } from "./router";
 import { TimelineView } from "./Timeline";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -39,6 +36,7 @@ import {
   Modal,
   OrgAvatar,
   PageHeader,
+  QueryError,
   SearchInput,
   Segmented,
   Select,
@@ -51,37 +49,6 @@ import {
 } from "./ui";
 
 type ClassroomsViewMode = "cards" | "list" | "timeline";
-
-/**
- * A query that failed: say what could not be loaded, quote the server, and
- * offer the one thing that can help — asking again.
- */
-function LoadError({
-  title,
-  error,
-  onRetry,
-  retrying,
-}: {
-  title: string;
-  error: unknown;
-  onRetry: () => void;
-  retrying?: boolean;
-}) {
-  return (
-    <Alert
-      tone="danger"
-      icon={AlertTriangle}
-      title={title}
-      action={
-        <Button size="sm" variant="secondary" onClick={onRetry} loading={retrying}>
-          <RefreshCw /> Retry
-        </Button>
-      }
-    >
-      {apiErrorMessage(error, "The server did not answer.")}
-    </Alert>
-  );
-}
 
 /** Hover popover on the student counts: the roster at a glance. */
 function RosterPopover({ room, children }: { room: ClassroomSummary; children: React.ReactNode }) {
@@ -145,7 +112,7 @@ function ClassroomCard({ room, onOpen }: { room: ClassroomSummary; onOpen: () =>
         <div className="flex items-start gap-3">
           <OrgAvatar login={room.orgLogin} className="size-9 rounded-[10px]" />
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[16px] font-bold tracking-tight transition-colors group-hover/card:text-accent">
+            <h3 className="truncate text-base font-bold tracking-tight transition-colors group-hover/card:text-accent">
               {room.name}
             </h3>
             <p className="truncate text-[13px] text-fg-muted">{room.orgLogin}</p>
@@ -252,7 +219,7 @@ function ClassroomsList({
               >
                 <td className={`${T.td} font-semibold`}>
                   <span className="inline-flex items-center gap-2.5">
-                    <OrgAvatar login={r.orgLogin} className="size-6 rounded-[6px]" /> {r.name}
+                    <OrgAvatar login={r.orgLogin} className="size-6 rounded-md" /> {r.name}
                   </span>
                 </td>
                 <td className={`${T.td} text-fg-muted`}>{r.orgLogin}</td>
@@ -453,7 +420,7 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
     body = archivedRooms.isLoading ? (
       <CardsSkeleton />
     ) : archivedRooms.isError ? (
-      <LoadError
+      <QueryError
         title="Could not load the archives"
         error={archivedRooms.error}
         onRetry={() => void archivedRooms.refetch()}
@@ -466,7 +433,7 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
             <div className="flex items-start gap-3">
               <OrgAvatar login={c.orgLogin} className="size-9 rounded-[10px] opacity-70" />
               <div className="min-w-0 flex-1">
-                <h3 className="truncate text-[16px] font-bold tracking-tight text-fg-muted">{c.name}</h3>
+                <h3 className="truncate text-base font-bold tracking-tight text-fg-muted">{c.name}</h3>
                 <p className="truncate text-[13px] text-fg-faint">
                   {c.orgLogin}
                   {c.archivedAt ? ` · ${t("classrooms.archivedOn", { date: c.archivedAt.slice(0, 10) })}` : ""}
@@ -508,7 +475,7 @@ export function TeacherHome({ navigate }: { navigate: (r: Route) => void }) {
     body = <CardsSkeleton />;
   } else if (rooms.isError) {
     body = (
-      <LoadError
+      <QueryError
         title="Could not load your classrooms"
         error={rooms.error}
         onRetry={() => void rooms.refetch()}

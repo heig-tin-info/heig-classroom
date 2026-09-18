@@ -26,7 +26,7 @@ removed from the URL, exactly like the persona. Append `=0` to clear one
 | `?as=teacher\|student\|admin` | Persona of the session. |
 | `?unlinked=1` | Student with no GitHub account linked. |
 | `?empty=1` | Nothing anywhere: no classrooms, no roster, no assignments, no teachers, no scheduled tasks. Classrooms stay addressable by URL, so `/classrooms/c1` shows an empty roster and an empty assignment list. |
-| `?fail=1` | Every GET under `/app/api` answers 500 `{"message":"Simulated failure"}`, except `/app/api/me` so the shell still renders. Allow about 7 s for React Query to exhaust its three retries before the error state appears. |
+| `?fail=1` | Every GET under `/app/api` answers 500 `{"message":"Simulated failure"}`, except `/app/api/me` so the shell still renders. The error state appears after about one second: React Query retries once (never on a 4xx) before giving up. |
 | `?slow=1` | 2.5 s of latency on every call: the skeletons and spinners stay on screen. |
 | `?many=1` | 30 classrooms, a 120-student roster and 40 assignments on the first one: long lists, long tables and the sidebar under load. |
 

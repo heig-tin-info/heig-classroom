@@ -99,6 +99,9 @@ Two pairs stay below their target, on purpose:
   generous between sections (32) and between the page header and its body
   (24). A screen that is all 16 px gaps has made no decision.
 - Content column: 1120 px max, 24 px side gutter (16 on phones).
+- A navigation list is capped, not scrolled: the sidebar shows twelve
+  classrooms and a "Show all (N)" row, always including the one being read.
+  Thirty names in a column is a wall, and it pushes the account row off.
 
 ## Shape and elevation
 
@@ -159,17 +162,38 @@ with a keyboard-reachable dismiss button.
 - Badge: pill, soft background, 12 px, tones green / amber / red / zinc /
   accent. Status is a badge; a count is plain text.
 - Card: `surface` + hairline + 16 px radius; padding 16–20.
-- Field: label 13 px 500 above, input 34 px, 12 px radius, `line-strong`
-  border, accent ring on focus.
+- Alert: hairline + soft tone fill, an icon, a title and one paragraph. Its
+  `action` slot holds one button, beside the text from `sm` up and on a line
+  of its own below it: a long label inline squeezes the body to one word per
+  line on a phone. Nothing goes in an Alert body that belongs in `action`.
+- QueryError: the standard failed-query alert (`Alert tone="danger"` +
+  `apiErrorMessage` + a secondary Retry). Every query error state uses it, so
+  a failure reads the same everywhere and there is one place to change it.
+  Queries retry once and never on a 4xx (`main.tsx`), so the error state
+  arrives in about a second: three retries read as a hang, not as a failure.
+- Field: label 13 px 500 above, 12 px radius, `line-strong` border, accent
+  ring on focus. Two heights, from the button scale: `sm` 28 px for a control
+  inside a table row, `md` 34 px everywhere else (`inputSize` in ui.tsx).
+  Width is a prop, never a class beside `inputClass`: Tailwind settles two
+  width or height utilities on one element by their order in the generated
+  stylesheet, not by the order they were written in.
 - Segmented: `surface-3` pill track, selected chip raised to `surface`.
 - Switch: `success` when on (a state, not an action, so not the accent),
   `line-strong` when off.
 - Tabs: text tabs with a 2 px ink (`fg`) underline, counts in `fg-faint`; red
-  stays for actions.
+  stays for actions. When the strip is wider than the screen it scrolls, the
+  hidden side is faded out over 36 px (a mask, so it works on either theme)
+  and the tabs snap: a fourth tab must never simply stop at the screen edge.
+- Settings row: label and the description of the current choice on the left,
+  the control on the right. The row wraps rather than squeezing — the text
+  keeps a 14 rem floor, so a segmented control or a select drops to its own
+  line on a phone while a switch stays on the label's line at any width.
 - Sheet: right drawer, 560 px, for every form longer than three fields.
   Dialog: centered, ≤ 480 px, for confirmations and one-field forms.
   A sheet never opens another sheet; a dialog may open over a sheet.
-- Menu: overflow for tertiary actions; destructive items last, separated.
+- Menu: overflow for tertiary actions; destructive items last, separated. It
+  closes on a page scroll, but not on the scroll its own opening click causes
+  (200 ms of grace) nor on one inside the panel.
 - Toast: bottom-right, `surface` + hairline + overlay shadow.
 - Empty state: icon in a `surface-2` circle, title, one line, one action.
 

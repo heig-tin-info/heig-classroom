@@ -63,6 +63,7 @@ import {
   Menu,
   Modal,
   PageHeader,
+  QueryError,
   SearchInput,
   SectionHeading,
   Select,
@@ -76,34 +77,6 @@ import {
   useNow,
   useSortableTable,
 } from "./ui";
-
-/** A query that failed: what broke, what the server said, and one retry. */
-function LoadError({
-  title,
-  error,
-  onRetry,
-  retrying,
-}: {
-  title: string;
-  error: unknown;
-  onRetry: () => void;
-  retrying?: boolean;
-}) {
-  return (
-    <Alert
-      tone="danger"
-      icon={AlertTriangle}
-      title={title}
-      action={
-        <Button size="sm" variant="secondary" onClick={onRetry} loading={retrying}>
-          <RefreshCw /> Retry
-        </Button>
-      }
-    >
-      {apiErrorMessage(error, "The server did not answer.")}
-    </Alert>
-  );
-}
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
   // Real test counters (TESTS annotation, score ≥ 0.7.2) beat check-run
@@ -606,9 +579,22 @@ function SyncBanner({
   const syncing = sync.isSuccess && !ahead ? false : sync.isSuccess;
   if (!ahead && !syncing) return null;
   return (
-    // The button sits in the body, not in the `action` slot: a long label
-    // there crushes this text to one word per line on a phone.
-    <Alert tone="warning" icon={GitPullRequest} title="The source repository has new commits">
+    <Alert
+      tone="warning"
+      icon={GitPullRequest}
+      title="The source repository has new commits"
+      action={
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => sync.mutate()}
+          disabled={syncing}
+          loading={sync.isPending}
+        >
+          <GitPullRequest /> {sync.isPending || syncing ? "Syncing…" : "Sync student repositories"}
+        </Button>
+      }
+    >
       {a.sourceAheadSha ? (
         <code className="mr-1 font-mono text-xs">{a.sourceAheadSha.slice(0, 7)}</code>
       ) : null}
@@ -618,11 +604,6 @@ function SyncBanner({
           {apiErrorMessage(sync.error, "Could not start the sync.")}
         </span>
       ) : null}
-      <span className="mt-2.5 block">
-        <Button size="sm" variant="secondary" onClick={() => sync.mutate()} disabled={syncing} loading={sync.isPending}>
-          <GitPullRequest /> {sync.isPending || syncing ? "Syncing…" : "Sync student repositories"}
-        </Button>
-      </span>
     </Alert>
   );
 }
@@ -772,7 +753,7 @@ function MilestonesSection({
         </div>
       ) : milestones.isError ? (
         <div className="border-t border-line p-4">
-          <LoadError
+          <QueryError
             title="Could not load the milestones"
             error={milestones.error}
             onRetry={() => void milestones.refetch()}
@@ -841,11 +822,17 @@ function MilestonesSection({
             placeholder="mid-review"
             pattern="[a-z0-9][a-z0-9_-]*"
             title="lowercase letters, digits, - and _"
-            className="w-44 font-mono"
+            width="w-44"
+            className="font-mono"
             required
             autoFocus
           />
-          <Select label="When" value={mode} onChange={(e) => setMode(e.target.value as "offset" | "date")} className="w-44">
+          <Select
+            label="When"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "offset" | "date")}
+            width="w-44"
+          >
             <option value="offset">J−n before deadline</option>
             <option value="date">Exact date</option>
           </Select>
@@ -857,7 +844,7 @@ function MilestonesSection({
               max={365}
               value={offset}
               onChange={(e) => setOffset(e.target.value)}
-              className="w-24"
+              width="w-24"
               required
             />
           ) : (
@@ -1012,7 +999,7 @@ export function AssignmentDetail({
             </EmptyState>
           </Card>
         ) : (
-          <LoadError
+          <QueryError
             title="Could not load this assignment"
             error={detail.error}
             onRetry={() => void detail.refetch()}

@@ -1,5 +1,14 @@
 import { useQuery } from "@tanstack/react-query";
-import { ClipboardList, Eye, Menu as MenuIcon, School, Settings as SettingsIcon, ShieldCheck, X } from "lucide-react";
+import {
+  ChevronDown,
+  ClipboardList,
+  Eye,
+  Menu as MenuIcon,
+  School,
+  Settings as SettingsIcon,
+  ShieldCheck,
+  X,
+} from "lucide-react";
 import { useId, useRef, useState, type ReactNode } from "react";
 
 import type { ClassroomSummary, Me } from "@hgc/contracts";
@@ -46,6 +55,25 @@ function NavItem({
   );
 }
 
+/** How many classrooms the sidebar shows before it offers to unfold. */
+const SIDEBAR_CLASSROOM_CAP = 12;
+
+/**
+ * The slice of the classroom list the sidebar shows while it is folded: the
+ * first `cap` entries, plus the classroom being read when it sits past them,
+ * so the current page is never missing from its own navigation.
+ */
+export function cappedClassrooms<T extends { id: string }>(
+  rooms: T[],
+  currentId: string | null,
+  cap: number,
+): T[] {
+  if (rooms.length <= cap) return rooms;
+  const head = rooms.slice(0, cap);
+  const current = currentId == null ? undefined : rooms.find((r) => r.id === currentId);
+  return current && !head.includes(current) ? [...head, current] : head;
+}
+
 function Nav({
   me,
   route,
@@ -73,6 +101,13 @@ function Nav({
   };
   const currentRoom =
     route.view === "classroom" ? route.id : route.view === "assignment" ? route.classroomId : null;
+  // Folded by default and not persisted: thirty classrooms turn the sidebar
+  // into a scrolling wall, and the teacher who wants them all says so once.
+  const [showAll, setShowAll] = useState(false);
+  const allRooms = rooms.data ?? [];
+  const shownRooms = showAll
+    ? allRooms
+    : cappedClassrooms(allRooms, currentRoom, SIDEBAR_CLASSROOM_CAP);
   return (
     // min-h-0 + overflow-y-auto: with thirty classrooms the list scrolls on its
     // own inside the sticky sidebar instead of pushing the account row out.
@@ -99,18 +134,18 @@ function Nav({
           />
         ) : null}
       </div>
-      {teacherUi && rooms.data?.length ? (
+      {teacherUi && allRooms.length ? (
         <div>
           <p className="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-wider text-fg-faint">
             {t("nav.classrooms")}
           </p>
           <div className="space-y-0.5">
-            {rooms.data.map((r) => (
+            {shownRooms.map((r) => (
               <NavItem
                 key={r.id}
                 label={
                   <span className="flex items-center gap-2">
-                    <OrgAvatar login={r.orgLogin} className="size-4 rounded-[4px]" />
+                    <OrgAvatar login={r.orgLogin} className="size-4 rounded-sm" />
                     <span className="truncate">{r.name}</span>
                   </span>
                 }
@@ -118,6 +153,13 @@ function Nav({
                 onClick={() => go({ view: "classroom", id: r.id })}
               />
             ))}
+            {allRooms.length > shownRooms.length ? (
+              <NavItem
+                icon={ChevronDown}
+                label={`Show all (${allRooms.length})`}
+                onClick={() => setShowAll(true)}
+              />
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -230,7 +272,7 @@ export function Shell({
 
         {studentView ? (
           <div className="border-b border-accent/20 bg-accent-soft px-4 py-2 text-[13px] text-accent">
-            <div className="mx-auto flex max-w-[1120px] items-center gap-2 sm:px-2">
+            <div className="mx-auto flex max-w-280 items-center gap-2 sm:px-2">
               <Eye className="size-4" />
               <span className="flex-1">{t("menu.studentViewBanner")}</span>
               {onToggleStudentView ? (
@@ -242,7 +284,7 @@ export function Shell({
           </div>
         ) : null}
 
-        <main className="mx-auto w-full max-w-[1120px] px-4 py-6 sm:px-8 lg:py-8">{children}</main>
+        <main className="mx-auto w-full max-w-280 px-4 py-6 sm:px-8 lg:py-8">{children}</main>
       </div>
     </div>
   );

@@ -1,4 +1,5 @@
 import {
+  AlertTriangle,
   ArrowDown,
   ArrowUp,
   Building2,
@@ -8,6 +9,7 @@ import {
   ChevronRight,
   Ellipsis,
   Loader2,
+  RefreshCw,
   Search,
   X,
 } from "lucide-react";
@@ -27,7 +29,9 @@ import type { ComponentType, ReactNode, RefObject } from "react";
 
 import type { DateFormat, Me } from "@hgc/contracts";
 
+import { apiErrorMessage } from "./api";
 import { HelpIcon } from "./help";
+import { useT } from "./i18n";
 
 /*
  * Shared primitives. Every visual value here comes from DESIGN.md (tokens in
@@ -51,11 +55,11 @@ export const Z = {
   modal: "z-50",
   toast: "z-50",
   /** Above the dialog: CreatingOverlay greys the whole dialog out. */
-  overlay: "z-[60]",
+  overlay: "z-60",
   /** Help must be able to slide over a dialog that summoned it. */
-  helpBackdrop: "z-[75]",
-  help: "z-[80]",
-  tooltip: "z-[90]",
+  helpBackdrop: "z-75",
+  help: "z-80",
+  tooltip: "z-90",
 } as const;
 
 /** Ticking clock for countdowns; re-renders every `intervalMs`. */
@@ -376,7 +380,7 @@ const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
 };
 const BUTTON_SIZES: Record<ButtonSize, string> = {
   sm: "h-7 px-3 text-[13px] [&_svg]:size-3.5",
-  md: "h-[34px] px-4 text-sm [&_svg]:size-4",
+  md: "h-8.5 px-4 text-sm [&_svg]:size-4",
   lg: "h-10 px-5 text-sm [&_svg]:size-4",
 };
 
@@ -385,7 +389,7 @@ export function buttonClass(variant: ButtonVariant = "primary", size: ButtonSize
   return cx(
     // disabled:pointer-events-none: hovering a disabled button must hit the
     // wrapping Tip span (disabled controls swallow mouse events).
-    "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out-emphasized active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50",
+    "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out-emphasized active:scale-97 disabled:pointer-events-none disabled:opacity-50",
     BUTTON_VARIANTS[variant],
     BUTTON_SIZES[size],
     extra,
@@ -616,7 +620,7 @@ export function Modal({
   const panel = useRef<HTMLDivElement>(null);
   const titleId = useId();
   useLayer(panel, onClose);
-  const width = { sm: "max-w-[420px]", md: "max-w-[520px]", lg: "max-w-[760px]" }[size];
+  const width = { sm: "max-w-105", md: "max-w-130", lg: "max-w-190" }[size];
   return createPortal(
     <div
       className={`layer-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-fg/30 p-4 backdrop-blur-[2px] sm:items-center`}
@@ -690,7 +694,7 @@ export function Sheet({
         tabIndex={-1}
         className={cx(
           "sheet-panel flex h-full w-full flex-col border-l border-line bg-surface shadow-sheet focus:outline-none",
-          width === "lg" ? "sm:max-w-[760px]" : "sm:max-w-[600px]",
+          width === "lg" ? "sm:max-w-190" : "sm:max-w-150",
         )}
       >
         <div className="flex items-start gap-3 border-b border-line px-6 pb-4 pt-5">
@@ -731,6 +735,9 @@ export interface MenuItem {
 /** Height assumed for the panel when deciding to flip it upward. */
 const MENU_FLIP_MARGIN = 280;
 
+/** How long after opening a scroll is treated as the opening, not a dismissal. */
+const MENU_SCROLL_GRACE = 200;
+
 export interface MenuPlacement {
   top?: number;
   bottom?: number;
@@ -763,7 +770,8 @@ export function menuPosition(
 /**
  * Overflow menu for tertiary actions. Positioned in a portal from the
  * trigger's rectangle (so it escapes overflow-hidden cards and tables) and
- * closes on outside click, Escape, scroll or selection.
+ * closes on outside click, Escape, page scroll or selection. A scroll inside
+ * the panel, or within `MENU_SCROLL_GRACE` of the opening, is not a dismissal.
  *
  * Keyboard (WAI-ARIA menu button): Enter, Space or ArrowDown on the trigger
  * opens the menu on its first item, ArrowUp opens it on the last; arrows move
@@ -790,6 +798,13 @@ export function Menu({
   const panel = useRef<HTMLDivElement>(null);
   const itemRefs = useRef<(HTMLElement | null)[]>([]);
   const menuId = useId();
+  /**
+   * When the menu opened, in ms. The opening click itself can make the page
+   * scroll (the browser bringing the focused trigger into view on a tall
+   * phone layout), and that scroll used to close the menu in the same frame.
+   * Scrolls inside this grace period are the opening, not the user leaving.
+   */
+  const openedAt = useRef(0);
 
   /** Indexes of the items the keyboard may land on (disabled ones are skipped). */
   const reachable = useMemo(
@@ -812,14 +827,21 @@ export function Menu({
       if (anchor.current?.contains(t) || panel.current?.contains(t)) return;
       close(false);
     };
-    const onScroll = () => close(false);
+    const onScroll = (e: Event) => {
+      // A scroll inside the panel is the user reading a long menu, and one in
+      // the first MENU_SCROLL_GRACE ms is the opening click's own scroll.
+      if (panel.current?.contains(e.target as Node)) return;
+      if (Date.now() - openedAt.current < MENU_SCROLL_GRACE) return;
+      close(false);
+    };
+    const onResize = () => close(false);
     document.addEventListener("mousedown", onDown);
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("mousedown", onDown);
       window.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("resize", onResize);
     };
   }, [open, close]);
 
@@ -833,6 +855,7 @@ export function Menu({
     const r = anchor.current.getBoundingClientRect();
     setPos(menuPosition(r, { width: window.innerWidth, height: window.innerHeight }, align));
     setActive(index);
+    openedAt.current = Date.now();
     setOpen(true);
   };
 
@@ -1054,7 +1077,7 @@ export function Badge({
   return (
     <span
       className={cx(
-        "inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-xs font-medium",
+        "inline-flex h-5.5 shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-xs font-medium",
         TONES[tone],
         className,
       )}
@@ -1099,8 +1122,56 @@ export function Alert({
         {title ? <p className="font-semibold">{title}</p> : null}
         {children ? <div className="text-fg-muted">{children}</div> : null}
       </div>
-      {action ? <div className="flex shrink-0 items-center self-center">{action}</div> : null}
+      {/* The action takes a line of its own under `sm`: a long label inline
+          squeezes the body to one word per line on a phone. From `sm` up it
+          goes back beside the text, vertically centred. */}
+      {action ? (
+        <div className="flex basis-full items-center sm:basis-auto sm:shrink-0 sm:self-center">
+          {action}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * A query that failed: what could not be loaded, what the server said, and
+ * the one thing that helps — asking again. `onRetry` is optional: some
+ * failures (a one-shot list inside a form) have nothing to retry from here.
+ */
+export function QueryError({
+  title,
+  error,
+  onRetry,
+  retrying,
+  fallback,
+}: {
+  title: string;
+  error: unknown;
+  onRetry?: () => void;
+  retrying?: boolean;
+  /**
+   * Shown when the server sent no message of its own. Teacher surfaces keep
+   * the English default; student surfaces pass their own `t("error.server")`.
+   */
+  fallback?: string;
+}) {
+  const t = useT();
+  return (
+    <Alert
+      tone="danger"
+      icon={AlertTriangle}
+      title={title}
+      action={
+        onRetry ? (
+          <Button size="sm" variant="secondary" onClick={onRetry} loading={retrying}>
+            <RefreshCw /> {t("common.retry")}
+          </Button>
+        ) : undefined
+      }
+    >
+      {apiErrorMessage(error, fallback ?? "The server did not answer.")}
+    </Alert>
   );
 }
 
@@ -1206,7 +1277,7 @@ export function SectionHeading({
     <div className={cx("flex flex-wrap items-center gap-x-3 gap-y-2", className)}>
       <div className="flex min-w-0 items-center gap-2">
         {Icon ? <Icon className="size-4 text-fg-faint" /> : null}
-        <h2 className="text-[16px] font-bold tracking-tight">{title}</h2>
+        <h2 className="text-base font-bold tracking-tight">{title}</h2>
         {count != null ? <span className="text-sm tabular-nums text-fg-faint">{count}</span> : null}
         {help ? <HelpIcon topic={help} /> : null}
       </div>
@@ -1240,6 +1311,25 @@ export function Stat({
   );
 }
 
+/** Width of the fade drawn over a scrollable edge of a tab strip. */
+const TAB_FADE = "36px";
+
+/**
+ * Which edges of a horizontal scroller still hide content. One pixel of
+ * tolerance absorbs the fractional scroll positions a zoomed or
+ * high-density viewport produces. Pure: this is the part worth testing.
+ */
+export function scrollEdges(
+  scrollLeft: number,
+  scrollWidth: number,
+  clientWidth: number,
+): { left: boolean; right: boolean } {
+  return {
+    left: scrollLeft > 1,
+    right: scrollLeft + clientWidth < scrollWidth - 1,
+  };
+}
+
 /**
  * Text tabs with an ink underline; counts sit in `fg-faint`.
  * Roving tabindex: only the selected tab is in the Tab order, ArrowLeft and
@@ -1247,6 +1337,10 @@ export function Stat({
  * Give `idPrefix` to wire the tabs to their panels: each tab then carries
  * `id="<prefix>-tab-<value>"` and `aria-controls="<prefix>-panel-<value>"`,
  * and the panel is expected to carry the matching id.
+ *
+ * On a narrow viewport the strip scrolls: the hidden side is faded out so the
+ * fourth tab announces itself instead of just ending at the screen edge, and
+ * scroll snapping stops a drag between two tabs.
  */
 export function Tabs<V extends string>({
   value,
@@ -1265,6 +1359,33 @@ export function Tabs<V extends string>({
   label?: string;
 }) {
   const refs = useRef<Partial<Record<V, HTMLButtonElement | null>>>({});
+  const strip = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  // Layout effect: measuring after paint would show one unfaded frame.
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const update = () =>
+      setEdges((prev) => {
+        const next = scrollEdges(el.scrollLeft, el.scrollWidth, el.clientWidth);
+        // Same edges, same object: a fresh one would re-render on every scroll.
+        return prev.left === next.left && prev.right === next.right ? prev : next;
+      });
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => {
+      el.removeEventListener("scroll", update);
+      observer.disconnect();
+    };
+  }, [items.length]);
+  // A mask, not an overlay: it fades whatever the strip holds without laying a
+  // canvas-coloured rectangle over it, which would be wrong in dark mode.
+  const mask =
+    edges.left || edges.right
+      ? `linear-gradient(to right, transparent 0, #000 ${edges.left ? TAB_FADE : "0px"}, #000 calc(100% - ${edges.right ? TAB_FADE : "0px"}), transparent 100%)`
+      : undefined;
   const onKeyDown = (e: React.KeyboardEvent) => {
     const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
     if (!keys.includes(e.key) || items.length === 0) return;
@@ -1278,52 +1399,72 @@ export function Tabs<V extends string>({
     refs.current[target.value]?.focus();
   };
   return (
-    <div
-      role="tablist"
-      aria-label={label}
-      onKeyDown={onKeyDown}
-      className={cx("flex gap-1 overflow-x-auto border-b border-line", className)}
-    >
-      {items.map((it) => {
-        const Icon = it.icon;
-        const active = it.value === value;
-        return (
-          <button
-            key={it.value}
-            ref={(el) => {
-              refs.current[it.value] = el;
-            }}
-            type="button"
-            role="tab"
-            id={idPrefix ? `${idPrefix}-tab-${it.value}` : undefined}
-            aria-controls={idPrefix ? `${idPrefix}-panel-${it.value}` : undefined}
-            aria-selected={active}
-            tabIndex={active ? 0 : -1}
-            onClick={() => onChange(it.value)}
-            className={cx(
-              "relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
-              active ? "text-fg" : "text-fg-muted hover:text-fg",
-              active && "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-fg",
-            )}
-          >
-            {Icon ? <Icon className="size-4" /> : null}
-            {it.label}
-            {it.count != null ? (
-              <span className={cx("text-xs tabular-nums", active ? "text-fg-muted" : "text-fg-faint")}>
-                {it.count}
-              </span>
-            ) : null}
-          </button>
-        );
-      })}
+    // The hairline lives on the wrapper, so the mask fades the tabs without
+    // eating the border that separates them from the panel below.
+    <div className={cx("border-b border-line", className)}>
+      <div
+        ref={strip}
+        role="tablist"
+        aria-label={label}
+        onKeyDown={onKeyDown}
+        className="flex snap-x snap-proximity gap-1 overflow-x-auto"
+        style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined}
+      >
+        {items.map((it) => {
+          const Icon = it.icon;
+          const active = it.value === value;
+          return (
+            <button
+              key={it.value}
+              ref={(el) => {
+                refs.current[it.value] = el;
+              }}
+              type="button"
+              role="tab"
+              id={idPrefix ? `${idPrefix}-tab-${it.value}` : undefined}
+              aria-controls={idPrefix ? `${idPrefix}-panel-${it.value}` : undefined}
+              aria-selected={active}
+              tabIndex={active ? 0 : -1}
+              onClick={() => onChange(it.value)}
+              className={cx(
+                "relative -mb-px inline-flex h-10 shrink-0 snap-start items-center gap-1.5 px-3 text-sm font-medium transition-colors",
+                active ? "text-fg" : "text-fg-muted hover:text-fg",
+                active && "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-fg",
+              )}
+            >
+              {Icon ? <Icon className="size-4" /> : null}
+              {it.label}
+              {it.count != null ? (
+                <span className={cx("text-xs tabular-nums", active ? "text-fg-muted" : "text-fg-faint")}>
+                  {it.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
 // --- Form controls ---
 
+/**
+ * Field chrome, with no width and no height of its own. Tailwind resolves
+ * conflicting utilities by their order in the generated stylesheet, not by
+ * their order in the class attribute, so a `w-16` or an `h-8` written next to
+ * this string was never guaranteed to win. Size comes from `inputSize` and
+ * width from the caller, which both compose instead of fighting.
+ */
 export const inputClass =
-  "h-[34px] w-full rounded-field border border-line-strong bg-surface px-3 text-sm text-fg transition-colors placeholder:text-fg-faint hover:border-fg-faint focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/20 disabled:opacity-50 disabled:hover:border-line-strong";
+  "rounded-field border border-line-strong bg-surface px-3 text-sm text-fg transition-colors placeholder:text-fg-faint hover:border-fg-faint focus:border-accent focus:outline-none focus:ring-3 focus:ring-accent/20 disabled:opacity-50 disabled:hover:border-line-strong";
+
+/** Control heights, aligned on the button scale of DESIGN.md (sm 28, md 34). */
+export type InputSize = "sm" | "md";
+export const inputSize: Record<InputSize, string> = {
+  sm: "h-7",
+  md: "h-8.5",
+};
 
 /** Label above a control; used by Field, Select and Textarea. */
 export function FieldLabel({
@@ -1349,22 +1490,32 @@ export function Field({
   help,
   hint,
   fullWidth,
+  size = "md",
+  width = "w-52",
   className = "",
   ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & {
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "size"> & {
   label: string;
   help?: string;
   /** Right-aligned note on the label line. */
   hint?: ReactNode;
   /** Stretch label and input to the parent width (grid cells). */
   fullWidth?: boolean;
+  /** Control height: `sm` 28 px for dense rows, `md` 34 px by default. */
+  size?: InputSize;
+  /**
+   * Width utility, on the wrapper so the label shares it. It lives here and
+   * not in `className` because two width utilities on the same element are
+   * resolved by the stylesheet order, not by the caller's intent.
+   */
+  width?: string;
 }) {
   return (
-    <label className={cx("flex flex-col gap-1.5", fullWidth ? "w-full" : "w-fit")}>
+    <label className={cx("flex flex-col gap-1.5", fullWidth ? "w-full" : width)}>
       <FieldLabel help={help} hint={hint}>
         {label}
       </FieldLabel>
-      <input {...props} className={cx(inputClass, !fullWidth && "w-52", className)} />
+      <input {...props} className={cx(inputClass, inputSize[size], "w-full", className)} />
     </label>
   );
 }
@@ -1373,19 +1524,32 @@ export function Field({
 export function Select({
   label,
   help,
+  size = "md",
+  width,
   className = "",
   children,
   ...props
-}: React.SelectHTMLAttributes<HTMLSelectElement> & { label?: string; help?: string }) {
+}: Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "size"> & {
+  label?: string;
+  help?: string;
+  /** Control height: `sm` 28 px for dense rows, `md` 34 px by default. */
+  size?: InputSize;
+  /** Width utility on the wrapper; without it the select sizes to its parent. */
+  width?: string;
+}) {
   const control = (
-    <span className="relative block">
-      <select {...props} className={cx(inputClass, "appearance-none pr-8", className)}>
+    <span className={cx("relative block", width)}>
+      <select
+        {...props}
+        className={cx(inputClass, inputSize[size], "w-full appearance-none pr-8", className)}
+      >
         {children}
       </select>
       <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-fg-faint" />
     </span>
   );
   if (!label) return control;
+  // The width sits on the control; the label column takes it from there.
   return (
     <label className="flex flex-col gap-1.5">
       <FieldLabel help={help}>{label}</FieldLabel>
@@ -1400,10 +1564,12 @@ export function Textarea({
   className = "",
   ...props
 }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; help?: string }) {
+  // No `size` prop here on purpose: a textarea's height is its content, not
+  // one of the two control heights.
   const control = (
     <textarea
       {...props}
-      className={cx(inputClass, "h-auto min-h-24 py-2 leading-relaxed", className)}
+      className={cx(inputClass, "min-h-24 w-full py-2 leading-relaxed", className)}
     />
   );
   if (!label) return control;
@@ -1426,7 +1592,7 @@ export function SearchInput({
       <input
         type="search"
         {...props}
-        className={cx(inputClass, "rounded-full pl-9 pr-3")}
+        className={cx(inputClass, inputSize.md, "w-full rounded-full pl-9 pr-3")}
       />
     </label>
   );
@@ -1510,7 +1676,7 @@ export function Segmented<T extends string>({
     <div
       role="radiogroup"
       className={cx(
-        "inline-flex shrink-0 gap-0.5 rounded-full bg-surface-3 p-[3px]",
+        "inline-flex shrink-0 gap-0.5 rounded-full bg-surface-3 p-0.75",
         disabled && "opacity-60",
       )}
     >
@@ -1518,7 +1684,7 @@ export function Segmented<T extends string>({
         <label
           key={o.value}
           className={cx(
-            "inline-flex items-center justify-center rounded-full px-3 font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/50",
+            "inline-flex items-center justify-center rounded-full px-3 font-medium transition-colors has-focus-visible:ring-2 has-focus-visible:ring-accent/50",
             size === "sm" ? "h-6 text-xs" : "h-7 text-[13px]",
             value === o.value
               ? "bg-surface text-fg ring-1 ring-line-strong/70"
@@ -1559,8 +1725,16 @@ export function SettingRow({
 }) {
   const id = useId();
   return (
-    <div className={cx("flex items-center justify-between gap-6 py-3", className)}>
-      <div className="min-w-0">
+    // The row wraps rather than squeezing: the text keeps a 14 rem floor, so a
+    // wide control (segmented, select) drops to its own line on a phone while a
+    // switch, which costs 40 px, stays on the label's line at any width.
+    <div
+      className={cx(
+        "flex flex-wrap items-center justify-between gap-x-6 gap-y-2 py-3",
+        className,
+      )}
+    >
+      <div className="min-w-0 flex-1 basis-56">
         <span id={id} className="flex items-center gap-1 text-sm font-medium text-fg">
           {title}
           {help ? <HelpIcon topic={help} /> : null}

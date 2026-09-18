@@ -113,7 +113,7 @@ export function UserMenu({
             type="button"
             aria-label={t("menu.user")}
             className={cx(
-              "flex w-full items-center gap-2.5 rounded-[12px] px-2 py-1.5 text-left transition-colors hover:bg-surface-2",
+              "flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-surface-2",
             )}
           >
             <Avatar me={me} className="size-8 text-xs" />

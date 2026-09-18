@@ -12,7 +12,6 @@ import {
   Lock,
   MonitorPlay,
   Play,
-  RefreshCw,
   SearchX,
 } from "lucide-react";
 import { useState } from "react";
@@ -37,6 +36,7 @@ import {
   LinkButton,
   OrgAvatar,
   PageHeader,
+  QueryError,
   SearchInput,
   Segmented,
   Skeleton,
@@ -403,7 +403,7 @@ function StudentClassroomCard({
     <section className="space-y-3">
       <div className="flex flex-wrap items-center gap-2.5">
         <OrgAvatar login={room.orgLogin} className="size-6 rounded-md" />
-        <h2 className="text-[16px] font-bold tracking-tight">{room.name}</h2>
+        <h2 className="text-base font-bold tracking-tight">{room.name}</h2>
         <span className="text-[13px] text-fg-muted">{t("student.teacher", { name: room.teacher })}</span>
       </div>
       <Card>
@@ -639,18 +639,13 @@ export function StudentHome({ me }: { me: Me }) {
           <Skeleton className="h-40 w-full rounded-card" />
         </div>
       ) : rooms.isError ? (
-        <Alert
-          tone="danger"
-          icon={AlertTriangle}
+        <QueryError
           title={t("student.loadFailed")}
-          action={
-            <Button size="sm" variant="secondary" onClick={() => void rooms.refetch()} loading={rooms.isFetching}>
-              <RefreshCw /> {t("common.retry")}
-            </Button>
-          }
-        >
-          {apiErrorMessage(rooms.error, t("error.server"))}
-        </Alert>
+          error={rooms.error}
+          onRetry={() => void rooms.refetch()}
+          retrying={rooms.isFetching}
+          fallback={t("error.server")}
+        />
       ) : !rooms.data?.length ? (
         <Card>
           <EmptyState icon={ClipboardList} title={t("student.empty.title")}>

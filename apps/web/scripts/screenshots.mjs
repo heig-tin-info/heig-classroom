@@ -47,7 +47,7 @@ const scenes = [
   { name: "teacher-home-archives", role: "teacher", path: "/", act: (p) => p.getByRole("button", { name: "Archives" }).first().click() },
   { name: "teacher-home-new", role: "teacher", path: "/", act: (p) => p.getByRole("button", { name: /create classroom/i }).first().click() },
   { name: "teacher-home-empty", role: "teacher", path: "/?empty=1" },
-  { name: "teacher-home-error", role: "teacher", path: "/?fail=1", settle: 9000 },
+  { name: "teacher-home-error", role: "teacher", path: "/?fail=1", settle: 2500 },
   { name: "teacher-home-loading", role: "teacher", path: "/?slow=1", settle: 300 },
   { name: "teacher-home-many", role: "teacher", path: "/?many=1" },
   { name: "teacher-home-many-list", role: "teacher", path: "/?many=1", ls: { "hgc-classrooms-view": "list" } },
@@ -63,7 +63,7 @@ const scenes = [
   { name: "classroom-empty", role: "teacher", path: "/classrooms/c1?empty=1" },
   { name: "classroom-empty-students", role: "teacher", path: "/classrooms/c1?tab=students&empty=1" },
   { name: "classroom-empty-staff", role: "teacher", path: "/classrooms/c1?tab=staff&empty=1" },
-  { name: "classroom-error", role: "teacher", path: "/classrooms/c1?fail=1", settle: 9000 },
+  { name: "classroom-error", role: "teacher", path: "/classrooms/c1?fail=1", settle: 2500 },
   { name: "classroom-loading", role: "teacher", path: "/classrooms/c1?slow=1", settle: 300 },
   { name: "classroom-roster-many", role: "teacher", path: "/classrooms/c1?tab=students&many=1" },
   { name: "classroom-assignments-many", role: "teacher", path: "/classrooms/c1?many=1" },
@@ -87,7 +87,7 @@ const scenes = [
   { name: "assignment-detail-milestone-add", role: "teacher", path: "/classrooms/c1/assignments/a2", act: (p) => p.getByRole("button", { name: /add milestone/i }).first().click() },
   { name: "assignment-detail-history", role: "teacher", path: "/classrooms/c1/assignments/a1", act: (p) => p.getByRole("button", { name: /grade history/i }).first().click() },
   { name: "assignment-detail-adjust", role: "teacher", path: "/classrooms/c1/assignments/a1", act: (p) => p.getByRole("button", { name: /adjust grade/i }).first().click() },
-  { name: "assignment-detail-error", role: "teacher", path: "/classrooms/c1/assignments/a2?fail=1", settle: 9000 },
+  { name: "assignment-detail-error", role: "teacher", path: "/classrooms/c1/assignments/a2?fail=1", settle: 2500 },
   { name: "assignment-detail-loading", role: "teacher", path: "/classrooms/c1/assignments/a2?slow=1", settle: 300 },
   { name: "assignment-detail-many", role: "teacher", path: "/classrooms/c1/assignments/a2?many=1" },
 
@@ -96,7 +96,7 @@ const scenes = [
   { name: "student-home-list", role: "student", path: "/", ls: { "hgc-student-view": "list" } },
   { name: "student-unlinked", role: "student", path: "/?unlinked=1" },
   { name: "student-empty", role: "student", path: "/?empty=1" },
-  { name: "student-error", role: "student", path: "/?fail=1", settle: 9000 },
+  { name: "student-error", role: "student", path: "/?fail=1", settle: 2500 },
   { name: "student-loading", role: "student", path: "/?slow=1", settle: 300 },
   { name: "student-many", role: "student", path: "/?many=1" },
   { name: "student-settings", role: "student", path: "/settings" },
@@ -106,19 +106,18 @@ const scenes = [
   { name: "settings-avatar", role: "teacher", path: "/settings", act: (p) => p.getByRole("button", { name: /change picture/i }).first().click() },
   { name: "admin", role: "admin", path: "/admin" },
   { name: "admin-empty", role: "admin", path: "/admin?empty=1" },
-  { name: "admin-error", role: "admin", path: "/admin?fail=1", settle: 9000 },
+  { name: "admin-error", role: "admin", path: "/admin?fail=1", settle: 2500 },
   { name: "admin-loading", role: "admin", path: "/admin?slow=1", settle: 300 },
 ];
 
 /**
- * Opens the overflow menu of one assignment row and picks an item. The menu
- * closes on any scroll, so the row is brought into view and left to settle
- * before the click — otherwise a narrow viewport opens and shuts it at once.
+ * Opens the overflow menu of one assignment row and picks an item. The row is
+ * brought into view first so the trigger is clickable; the menu itself now
+ * ignores the scroll its own opening causes, so no extra settling is needed.
  */
 async function openRowMenu(page, assignmentName, item) {
   const trigger = page.getByLabel(`Actions for ${assignmentName}`);
   await trigger.scrollIntoViewIfNeeded();
-  await page.waitForTimeout(400);
   await trigger.click();
   await page.getByRole("menuitem", { name: item }).click();
 }

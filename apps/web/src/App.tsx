@@ -35,12 +35,12 @@ function Landing() {
   const t = useT();
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center px-4 py-10">
-      <div className="w-full max-w-[460px] rounded-card border border-line bg-surface px-8 py-10 text-center">
+      <div className="w-full max-w-115 rounded-card border border-line bg-surface px-8 py-10 text-center">
         <Logo className="size-7" />
         <h1 className="mt-5 text-[28px] font-bold leading-tight tracking-[-0.02em]">
           {t("app.title")}
         </h1>
-        <p className="mt-3 text-[16px] leading-relaxed text-fg-muted">{t("landing.tagline")}</p>
+        <p className="mt-3 text-base leading-relaxed text-fg-muted">{t("landing.tagline")}</p>
         <LinkButton
           href="/app/auth/login"
           variant="primary"

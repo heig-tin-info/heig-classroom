@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlertTriangle,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -10,7 +9,6 @@ import {
   MonitorPlay,
   Pencil,
   Plus,
-  RefreshCw,
   Send,
   Trash2,
 } from "lucide-react";
@@ -22,7 +20,6 @@ import { api, apiErrorMessage } from "./api";
 import { AssignmentForm, compactDuration } from "./AssignmentForm";
 import { useConfirm } from "./confirm";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -31,6 +28,7 @@ import {
   IconButton,
   isoDateTime,
   Menu,
+  QueryError,
   SectionHeading,
   Skeleton,
   Tip,
@@ -277,18 +275,12 @@ export function AssignmentsSection({
           ))}
         </Card>
       ) : list.isError ? (
-        <Alert
-          tone="danger"
-          icon={AlertTriangle}
+        <QueryError
           title={showArchived ? "Could not load the archives" : "Could not load the assignments"}
-          action={
-            <Button size="sm" variant="secondary" onClick={() => void list.refetch()} loading={list.isFetching}>
-              <RefreshCw /> Retry
-            </Button>
-          }
-        >
-          {apiErrorMessage(list.error, "The server did not answer.")}
-        </Alert>
+          error={list.error}
+          onRetry={() => void list.refetch()}
+          retrying={list.isFetching}
+        />
       ) : list.data?.length ? (
         <Card>
           <ul className="divide-y divide-line">

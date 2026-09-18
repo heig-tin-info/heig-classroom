@@ -7,7 +7,6 @@ import {
   ExternalLink,
   FileSpreadsheet,
   GraduationCap,
-  RefreshCw,
   Settings as SettingsIcon,
   Trash2,
   UserMinus,
@@ -42,6 +41,7 @@ import {
   Menu,
   OrgAvatar,
   PageHeader,
+  QueryError,
   SearchInput,
   SectionHeading,
   Segmented,
@@ -559,23 +559,12 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             </EmptyState>
           </Card>
         ) : (
-          <Alert
-            tone="danger"
-            icon={AlertTriangle}
+          <QueryError
             title="Could not load this classroom"
-            action={
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => void detail.refetch()}
-                loading={detail.isFetching}
-              >
-                <RefreshCw /> Retry
-              </Button>
-            }
-          >
-            {apiErrorMessage(detail.error, "The server did not answer.")}
-          </Alert>
+            error={detail.error}
+            onRetry={() => void detail.refetch()}
+            retrying={detail.isFetching}
+          />
         )}
       </div>
     );
@@ -661,20 +650,12 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
         <InstallWizard room={room} />
       ) : null}
 
-      {/* These two buttons live in the body of their Alert, not in its
-          `action` slot: a long label there squeezes a long text down to one
-          word per line on a phone. */}
       {installed && room.org?.plan === "free" ? (
         <Alert
           tone="warning"
           icon={AlertTriangle}
           title={`${room.org.login} is on the GitHub Free plan`}
-        >
-          Private repositories get no branch protection (a student can force-push or delete their
-          history), the deadline falls back to archiving, and organization secrets are not
-          delivered, so the automatic LLM review fails silently. GitHub Team is free for teachers
-          through GitHub Education.
-          <span className="mt-2.5 block">
+          action={
             <LinkButton
               size="sm"
               href="https://education.github.com/globalcampus/teacher"
@@ -683,7 +664,12 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             >
               Request the education upgrade
             </LinkButton>
-          </span>
+          }
+        >
+          Private repositories get no branch protection (a student can force-push or delete their
+          history), the deadline falls back to archiving, and organization secrets are not
+          delivered, so the automatic LLM review fails silently. GitHub Team is free for teachers
+          through GitHub Education.
         </Alert>
       ) : null}
 
@@ -692,11 +678,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           tone="warning"
           icon={AlertTriangle}
           title="ANTHROPIC_API_KEY is missing on the organization"
-        >
-          The automatic LLM reviews (deadline and milestones) will fail until the secret exists.
-          Add it under Organization settings → Secrets and variables → Actions, with access to
-          private repositories.
-          <span className="mt-2.5 block">
+          action={
             <LinkButton
               size="sm"
               href={`https://github.com/organizations/${room.org.login}/settings/secrets/actions`}
@@ -705,7 +687,11 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             >
               Open the organization secrets
             </LinkButton>
-          </span>
+          }
+        >
+          The automatic LLM reviews (deadline and milestones) will fail until the secret exists.
+          Add it under Organization settings → Secrets and variables → Actions, with access to
+          private repositories.
         </Alert>
       ) : null}
 

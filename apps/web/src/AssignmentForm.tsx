@@ -27,10 +27,12 @@ import {
   humanize,
   IconButton,
   inputClass,
+  inputSize,
   isoDateTime,
   localDateKey,
   localDateTimeInputValue,
   Progress,
+  QueryError,
   RangeCalendar,
   Segmented,
   Select,
@@ -505,7 +507,7 @@ export function AssignmentForm({
             {existing ? (
               <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                 <FieldLabel help="assignment-source">Source repository</FieldLabel>
-                <span className="inline-flex h-[34px] items-center gap-1.5 text-sm text-fg-muted">
+                <span className="inline-flex h-8.5 items-center gap-1.5 text-sm text-fg-muted">
                   <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
                 </span>
               </div>
@@ -552,17 +554,12 @@ export function AssignmentForm({
             </Button>
           </div>
           {repos.isError && !existing ? (
-            <Alert
-              tone="danger"
+            <QueryError
               title="Could not list the organization's repositories"
-              action={
-                <Button size="sm" variant="secondary" onClick={() => void repos.refetch()} loading={repos.isFetching}>
-                  Retry
-                </Button>
-              }
-            >
-              {apiErrorMessage(repos.error, "The server did not answer.")}
-            </Alert>
+              error={repos.error}
+              onRetry={() => void repos.refetch()}
+              retrying={repos.isFetching}
+            />
           ) : repos.data?.length === 0 && !existing ? (
             <Alert tone="warning" title="This organization has no repository yet">
               Create the assignment's source repository on GitHub first, then come back here.
@@ -575,17 +572,12 @@ export function AssignmentForm({
           ) : tree.isFetching ? (
             <Progress label={`Exploring ${sourceRepo}…`} />
           ) : tree.isError ? (
-            <Alert
-              tone="danger"
+            <QueryError
               title={`Could not read ${sourceRepo}`}
-              action={
-                <Button size="sm" variant="secondary" onClick={() => void tree.refetch()} loading={tree.isFetching}>
-                  Retry
-                </Button>
-              }
-            >
-              {apiErrorMessage(tree.error, "The server did not answer.")}
-            </Alert>
+              error={tree.error}
+              onRetry={() => void tree.refetch()}
+              retrying={tree.isFetching}
+            />
           ) : tree.data ? (
             <p className="flex items-center gap-1 text-xs text-fg-muted">
               {fileCount} file{fileCount === 1 ? "" : "s"} · {protectedFiles.size} protected —
@@ -683,34 +675,27 @@ export function AssignmentForm({
           </div>
           {durationOnly ? (
             <div className={`${panel} flex flex-wrap items-center gap-2.5`}>
-              {/* The width lives on the wrapper: `inputClass` carries
-                  `w-full`, and a `w-16` next to it is not guaranteed to win
-                  the cascade. */}
-              <span className="inline-block w-16 shrink-0">
-                <input
-                  type="number"
-                  min={0}
-                  max={400}
-                  className={cx(inputClass, "px-1 text-center font-mono")}
-                  aria-label="Days"
-                  value={durationDays}
-                  onChange={(e) => setDurationDays(e.target.value)}
-                  required
-                />
-              </span>
+              <input
+                type="number"
+                min={0}
+                max={400}
+                className={cx(inputClass, inputSize.md, "w-16 shrink-0 px-1 text-center font-mono")}
+                aria-label="Days"
+                value={durationDays}
+                onChange={(e) => setDurationDays(e.target.value)}
+                required
+              />
               <span className="text-sm text-fg-muted">days</span>
-              <span className="inline-block w-16 shrink-0">
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  className={cx(inputClass, "px-1 text-center font-mono")}
-                  aria-label="Hours"
-                  value={durationHours}
-                  onChange={(e) => setDurationHours(e.target.value)}
-                  required
-                />
-              </span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                className={cx(inputClass, inputSize.md, "w-16 shrink-0 px-1 text-center font-mono")}
+                aria-label="Hours"
+                value={durationHours}
+                onChange={(e) => setDurationHours(e.target.value)}
+                required
+              />
               <span className="text-sm text-fg-muted">hours</span>
               <span
                 className={cx(
@@ -740,7 +725,7 @@ export function AssignmentForm({
                   <Field
                     label={livePublished ? "Start time" : "Start time (auto-publish)"}
                     type="time"
-                    className="w-28"
+                    width="w-32"
                     value={timeOf(startAt)}
                     disabled={startAt === ""}
                     onChange={(e) => setStartAt(`${startAt.slice(0, 10)}T${e.target.value}`)}
@@ -750,7 +735,7 @@ export function AssignmentForm({
                 <Field
                   label="Deadline time"
                   type="time"
-                  className="w-28"
+                  width="w-32"
                   value={timeOf(deadlineAt)}
                   disabled={deadlineAt === ""}
                   onChange={(e) => setDeadlineAt(`${deadlineAt.slice(0, 10)}T${e.target.value}`)}
@@ -816,7 +801,7 @@ export function AssignmentForm({
             ) : null}
             {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
               <SettingRow title="Branch to squash" help="squash-branch">
-                <Select value={branch} onChange={(e) => setBranch(e.target.value)} className="w-44">
+                <Select value={branch} onChange={(e) => setBranch(e.target.value)} width="w-44">
                   {tree.data!.branches.map((b) => (
                     <option key={b} value={b}>
                       {b}
@@ -935,36 +920,32 @@ export function AssignmentForm({
             </Eyebrow>
             {milestones.map((m, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2">
-                <span className="inline-block min-w-40 flex-1">
-                  <input
-                    className={cx(inputClass, "font-mono")}
-                    placeholder="review-1"
-                    aria-label="Milestone name"
-                    value={m.name}
-                    onChange={(e) =>
-                      setMilestones((rows) =>
-                        rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
-                      )
-                    }
-                    required
-                  />
-                </span>
-                <span className="inline-block w-16 shrink-0">
-                  <input
-                    type="number"
-                    min={1}
-                    max={365}
-                    className={cx(inputClass, "px-1 text-center font-mono")}
-                    aria-label="Days before the deadline"
-                    value={m.days}
-                    onChange={(e) =>
-                      setMilestones((rows) =>
-                        rows.map((r, j) => (j === i ? { ...r, days: e.target.value } : r)),
-                      )
-                    }
-                    required
-                  />
-                </span>
+                <input
+                  className={cx(inputClass, inputSize.md, "min-w-40 flex-1 font-mono")}
+                  placeholder="review-1"
+                  aria-label="Milestone name"
+                  value={m.name}
+                  onChange={(e) =>
+                    setMilestones((rows) =>
+                      rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
+                    )
+                  }
+                  required
+                />
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  className={cx(inputClass, inputSize.md, "w-16 shrink-0 px-1 text-center font-mono")}
+                  aria-label="Days before the deadline"
+                  value={m.days}
+                  onChange={(e) =>
+                    setMilestones((rows) =>
+                      rows.map((r, j) => (j === i ? { ...r, days: e.target.value } : r)),
+                    )
+                  }
+                  required
+                />
                 <span className="whitespace-nowrap text-[13px] text-fg-muted">
                   days before
                   {milestoneDate(m.days) ? ` → ${milestoneDate(m.days)}` : ""}

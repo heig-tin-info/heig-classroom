@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import type { ActivityData, Commit } from "@hgc/contracts";
 
-import { api, apiErrorMessage } from "../api";
+import { api } from "../api";
 import { useT } from "../i18n";
-import { Alert, Button, isoDateTime } from "../ui";
+import { isoDateTime, QueryError } from "../ui";
 import { buildGraph, laneColor } from "./graph";
 
 /**
@@ -255,23 +255,12 @@ export function ActivityPanel({
   if (activity.isError) {
     return (
       <div className="p-4">
-        <Alert
-          tone="danger"
-          icon={AlertTriangle}
+        <QueryError
           title="Could not load this repository's activity"
-          action={
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => void activity.refetch()}
-              loading={activity.isFetching}
-            >
-              <RefreshCw /> Retry
-            </Button>
-          }
-        >
-          {apiErrorMessage(activity.error, "The server did not answer.")}
-        </Alert>
+          error={activity.error}
+          onRetry={() => void activity.refetch()}
+          retrying={activity.isFetching}
+        />
       </div>
     );
   }
