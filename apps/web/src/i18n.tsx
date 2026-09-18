@@ -138,6 +138,7 @@ const en = {
   "student.noTests": "No tests reported yet.",
   "student.locked": "locked",
   "student.workspace": "Online workspace",
+  "student.workspaceSeb": "Exam workspace",
   "student.start": "Start",
   "student.openSeb": "Open in Safe Exam Browser",
   "student.sebOnly":
@@ -351,6 +352,7 @@ const fr: Record<keyof Dict, string> = {
   "student.noTests": "Aucun test rapporté pour l'instant.",
   "student.locked": "verrouillé",
   "student.workspace": "Environnement en ligne",
+  "student.workspaceSeb": "Environnement d'examen",
   "student.start": "Démarrer",
   "student.openSeb": "Ouvrir dans Safe Exam Browser",
   "student.sebOnly":
@@ -448,7 +450,8 @@ const fr: Record<keyof Dict, string> = {
   "email.org.deleted": "Organisation GitHub supprimée",
 };
 
-const DICTS: Record<Locale, Record<string, string>> = { en, fr };
+/** Les deux dictionnaires, exposés pour qu'un test puisse affirmer qu'une clé existe dans les deux. */
+export const DICTS: Record<Locale, Record<string, string>> = { en, fr };
 
 export type TFunction = (key: keyof Dict, vars?: Record<string, string | number>) => string;
 

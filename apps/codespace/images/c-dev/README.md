@@ -187,6 +187,91 @@ reçoit tels quels. `keyboard.dispatch` ne touche qu'à la résolution des
 raccourcis clavier. Un `é`, un `à` ou un `<` continuent de s'écrire comme
 ailleurs sur le poste.
 
+### Le réglage ajouté après les sessions réelles du 2026-09-18
+
+**Invite « Use the fonts on your computer » à l'ouverture de l'éditeur.**
+
+```json
+"terminal.integrated.stickyScroll.enabled": false
+```
+
+Même méthode que les deux précédents : la cause a été **cherchée dans le
+paquet embarqué**, pas devinée. La chaîne relevée, en quatre maillons :
+
+1. l'appel qui déclenche l'invite du navigateur (permission *Local Font
+   Access*) est `window.queryLocalFonts()`, dans
+   `node_modules/@xterm/addon-ligatures/lib/addon-ligatures.js` :
+
+   ```js
+   else if("undefined"!=typeof window&&"queryLocalFonts"in window){
+     const e={};try{const t=await window.queryLocalFonts(); …
+   ```
+
+2. le **défilement collant du terminal** charge cet addon **sans condition** —
+   il ne consulte pas `terminal.integrated.fontLigatures.enabled`. Relevé dans
+   le constructeur de la surcouche, `workbench.web.main.internal.js` :
+
+   ```js
+   this._stickyScrollOverlay.open(this._element),
+   …
+   this._xtermAddonLoader.importAddon("ligatures").then(c=>{ …
+     this._ligaturesAddon=new c,this._stickyScrollOverlay.loadAddon(this._ligaturesAddon) …
+   ```
+
+   C'est le deuxième des deux appels à `importAddon("ligatures")` du paquet ;
+   l'autre, dans `_refreshLigaturesAddon()`, est bien gardé
+   (`if(e?.enabled){…}`) et n'est donc pas la cause.
+
+3. la surcouche n'existe que si le réglage est vrai. `_shouldBeEnabled()` :
+
+   ```js
+   _shouldBeEnabled(){let e=this._ctx.instance.capabilities.get(2);
+     return!!(this._configurationService.getValue("terminal.integrated.stickyScroll.enabled")
+       &&e&&e.hasRichCommandDetection&&this._xterm?.raw?.element)}
+   ```
+
+4. et son défaut amont est **vrai** :
+
+   ```js
+   "terminal.integrated.stickyScroll.enabled":{markdownDescription:d(18525,…),
+     type:"boolean",default:!0}
+   ```
+
+D'où l'invite à l'ouverture, dès que l'intégration shell a détecté une
+commande, sans que personne n'ait demandé de ligatures. `false` supprime la
+surcouche, donc l'import, donc l'appel.
+
+**Le second appelant de `queryLocalFonts` ne s'exécute pas en web.** C'est la
+liste de polices proposée par l'éditeur de réglages pour `editor.fontFamily` et
+`terminal.integrated.fontFamily` :
+
+```js
+fTn=async()=>{try{return[...await ut.queryLocalFonts()].map(t=>t.family)}
+  catch(s){return console.error(`Failed to query fonts: ${s}`),[]}},
+mNt=async()=>Vhe?(await fTn()).map(e=>({body:`${e}`})):[];
+```
+
+`Vhe` est l'`isElectron` du module de plate-forme minifié
+(`Ti=eZe,yt=tZe,Fr=ZJe,HSi=Ago,Ls=Ngo,Vhe=Ogo,Bt=FSi,…`, soit
+`isWindows, isMacintosh, isLinux, isLinuxSnap, isNative, isElectron, isWeb`).
+Dans un navigateur il vaut faux et `mNt()` rend une liste vide sans rien
+demander. Aucun réglage ne le gouverne, et il n'y en a pas besoin.
+
+**Ajouté aussi, par prudence et non parce qu'il corrige quoi que ce soit :**
+
+```json
+"terminal.integrated.fontLigatures.enabled": false
+```
+
+C'est déjà le défaut amont (`default:!1`), vérifié ; le poser explicitement
+ferme le premier chemin (`_refreshLigaturesAddon`) même si ce défaut changeait.
+
+`test.sh` § 7 rejoue les cinq recherches : les deux déclarations avec leur
+défaut amont, l'import inconditionnel du défilement collant, l'appel dans
+l'addon, et la liste complète des fichiers du paquet qui mentionnent
+`queryLocalFonts` — toute nouvelle famille de fichiers fait échouer le test
+plutôt que réapparaître l'invite.
+
 ## Extension de barre d'état `heig.codespace-statusbar`
 
 Retour 3 de [docs/pistes.md](../../docs/pistes.md). Éditeur `heig`, nom
@@ -210,9 +295,8 @@ Français dès que `vscode.env.language` commence par `fr`, anglais sinon.
 
 ### Ce qu'elle lit
 
-Trois variables d'environnement du conteneur, et rien d'autre. Elles sont
-posées par le portail au `podman run` (`src/sessions/manager.ts`,
-`CONTAINER_ENV_KEYS`, puis `src/engine/index.ts`) :
+Trois des sept variables d'environnement que le portail pose au `podman run`
+(`src/sessions/manager.ts`, `CONTAINER_ENV_KEYS`, puis `src/engine/index.ts`) :
 
 | Variable | Contenu | Absente |
 | --- | --- | --- |
@@ -222,9 +306,59 @@ posées par le portail au `podman run` (`src/sessions/manager.ts`,
 
 **Aucun secret n'y entre** (invariant 1). Un test unitaire
 (`src/sessions/containerEnv.test.ts`) affirme que le portail ne pose jamais de
-quatrième clé, et `test.sh` § 9 compare l'environnement d'un conteneur lancé
-par le portail à celui d'un conteneur nu : exactement trois lignes d'écart,
-toutes en `CODESPACE_`.
+clé hors de `CONTAINER_ENV_KEYS`, et `test.sh` § 9 compare l'environnement d'un
+conteneur lancé par le portail à celui d'un conteneur nu : exactement sept
+lignes d'écart, toutes en `CODESPACE_` ou `GIT_`.
+
+## Identité git de l'étudiant
+
+Retour des sessions réelles du 2026-09-18 : un étudiant n'a pas pu commiter
+depuis VS Code, son conteneur n'ayant aucune identité git (`git config
+user.name` vide), alors que le portail connaît son nom et son adresse
+académique (table `users`, alimentée par le jeton de lancement de classroom).
+
+Le portail pose donc quatre variables de plus au `podman run` :
+
+| Variable | Source |
+| --- | --- |
+| `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME` | `users.display_name`, à défaut `users.login` |
+| `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_EMAIL` | `users.email` |
+
+**Tout ou rien** : sans adresse exploitable, aucune des quatre n'est posée —
+une moitié d'identité ferait tomber git sur sa détection automatique
+(`student@<nom du conteneur>`), ce qui est pire qu'une absence franche. Ce ne
+sont pas des secrets : l'étudiant lit déjà les deux dans classroom.
+
+### Pourquoi les variables suffisent, et ce qui est écrit en plus
+
+Git honore `GIT_AUTHOR_*` / `GIT_COMMITTER_*` **sans aucun fichier de
+configuration** : `test.sh` § 9 fait un vrai `git commit` dans le conteneur et
+vérifie que `%an|%ae|%cn|%ce` porte les quatre valeurs, avec un
+`git config --local --get user.name` resté vide.
+
+L'extension git de VS Code s'en contente aussi. Relevé dans
+`extensions/git/dist/main.js` de l'image : elle ne lit `user.name` /
+`user.email` que **dans la branche d'erreur**, pour qualifier un `git commit`
+qui a déjà échoué —
+
+```js
+try{await this.exec(["config","--get-all","user.name"])}
+catch(t){throw t.gitErrorCode=X.NoUserNameConfigured,t}
+```
+
+— et elle lance git avec `process.env` en base, sans le filtrer :
+
+```js
+t.env=Sm({},process.env,this.env,t.env||{},
+  {VSCODE_GIT_COMMAND:e[0],LANGUAGE:"en",LC_ALL:"en_US.UTF-8",LANG:"en_US.UTF-8",GIT_PAGER:"cat"});
+```
+
+Le portail écrit **en plus** `user.name` / `user.email` dans
+`work/.git/config`, parce qu'un étudiant qui tape `git config user.name` doit
+lire quelque chose. C'est fait depuis l'hôte tant que `work/` lui appartient
+(avant le premier `:U`), et par `engine.exec` ensuite — même contrainte, et
+même mécanisme, que l'achèvement de l'espace de travail. Une identité déjà
+posée par l'étudiant n'est **jamais** écrasée.
 
 ### Comment elle reçoit cet environnement
 
@@ -455,6 +589,18 @@ listés ici.
   observer à la première répétition en salle. Le domaine de classroom est déjà
   autorisé par le filtre (`sebAllowedHosts`), donc le refus, s'il arrive,
   viendra de la politique de fenêtres de SEB, pas du filtre d'hôtes.
+
+- `TODO(verify)` **VS Code 1.137.0** —
+  `terminal.integrated.stickyScroll.enabled: false` : la chaîne de cause est
+  relevée dans le paquet embarqué et rejouée par `test.sh`, mais la disparition
+  effective de l'invite « Use the fonts on your computer » demande un
+  navigateur. À constater à la prochaine session réelle. Effet de bord assumé :
+  l'étudiant perd le rappel de la commande en cours en haut du terminal.
+- `TODO(verify)` **code-server 4.137.0** — l'identité git vue **par l'extension
+  git de VS Code** : la lecture du paquet dit que `process.env` est transmis
+  tel quel au `git commit` de l'extension, et `test.sh` § 9 mesure le commit en
+  ligne de commande. Le bouton « Valider » de l'interface, lui, demande un
+  navigateur ; à constater à la prochaine session réelle.
 
 ## Ce qui n'est pas couvert par P1
 

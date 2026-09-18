@@ -136,6 +136,61 @@ function RepoMetrics({
   );
 }
 
+/**
+ * What one assignment row offers, by work mode. Pure on purpose: the rules
+ * are the same in the card view and in the list view, and they are what the
+ * test asserts.
+ *
+ * ADR-013 and the 2026-09-18 feedback on the real student view:
+ *
+ *  - `free` — unchanged: the name links to the repository and the « open your
+ *    repository » button sits with the actions;
+ *  - `online` — the student only reads that repository, so the button goes;
+ *    the name keeps its discreet link, and `Start` is the one action;
+ *  - `online_seb` — no access to the repository at all, so no link either.
+ *
+ * In both online modes the mode itself is said under the name rather than on
+ * the name line, where a badge crowded the title.
+ */
+export type WorkModeOf = StudentAssignment["workMode"];
+
+export interface RowAffordances {
+  /** The assignment name is a link to the GitHub repository. */
+  nameIsLink: boolean;
+  /** The « open your repository » button, in the actions column. */
+  repoButton: boolean;
+  /** The « Start » button, the main action of an online assignment. */
+  startButton: boolean;
+  /** Translation key of the note under the name; null in free mode. */
+  modeNote: "student.workspace" | "student.workspaceSeb" | null;
+}
+
+export function rowAffordances(a: {
+  workMode: WorkModeOf;
+  accepted: boolean;
+  locked: boolean;
+}): RowAffordances {
+  const examOnly = a.workMode === "online_seb";
+  const online = a.workMode !== "free";
+  return {
+    nameIsLink: a.accepted && !examOnly,
+    repoButton: a.accepted && !online,
+    startButton: online && !a.locked,
+    modeNote: online ? (examOnly ? "student.workspaceSeb" : "student.workspace") : null,
+  };
+}
+
+/** The mode said under the assignment name, discreetly. */
+function ModeNote({ note }: { note: Exclude<RowAffordances["modeNote"], null> }) {
+  const t = useT();
+  return (
+    <span className="mt-0.5 inline-flex items-center gap-1 text-xs font-normal text-zinc-500 dark:text-zinc-400">
+      <MonitorPlay className="size-3 shrink-0" />
+      {t(note)}
+    </span>
+  );
+}
+
 /** One assignment as a table row; the action (accept / open repo) sits right. */
 function StudentAssignmentRow({
   a,
@@ -160,35 +215,33 @@ function StudentAssignmentRow({
   const locked = a.state === "locked" || a.repo?.lockedAt != null;
   const accepted = a.repo?.provisionStatus === "ok" && a.repo.fullName;
   const cell = "px-4 py-2.5 align-middle";
-  // ADR-013. In exam mode the student has no access to the repository at all,
-  // so the GitHub link disappears entirely and the Start button takes its
-  // place; in plain online mode both are shown.
-  const online = a.workMode !== "free";
   const examOnly = a.workMode === "online_seb";
-  const showRepoLink = accepted && !examOnly;
+  const { nameIsLink, repoButton, startButton, modeNote } = rowAffordances({
+    workMode: a.workMode,
+    accepted: Boolean(accepted),
+    locked,
+  });
 
   return (
     <tr className={`text-sm ${locked ? "opacity-60" : ""}`}>
       <td className={`${cell} font-medium`}>
-        <span className="inline-flex items-center gap-1.5">
-          {locked ? <Lock className="size-3.5 shrink-0 text-zinc-400" /> : null}
-          {showRepoLink ? (
-            <a
-              href={`https://github.com/${a.repo!.fullName}`}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-accent hover:underline"
-            >
-              {a.name}
-            </a>
-          ) : (
-            a.name
-          )}
-          {online ? (
-            <Badge tone="zinc" icon={MonitorPlay}>
-              {t("student.workspace")}
-            </Badge>
-          ) : null}
+        <span className="flex flex-col">
+          <span className="inline-flex items-center gap-1.5">
+            {locked ? <Lock className="size-3.5 shrink-0 text-zinc-400" /> : null}
+            {nameIsLink ? (
+              <a
+                href={`https://github.com/${a.repo!.fullName}`}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:text-accent hover:underline"
+              >
+                {a.name}
+              </a>
+            ) : (
+              a.name
+            )}
+          </span>
+          {modeNote ? <ModeNote note={modeNote} /> : null}
         </span>
       </td>
       <td className={cell}>
@@ -233,7 +286,7 @@ function StudentAssignmentRow({
         {accepted ? (
           <div className="flex flex-col items-end gap-1.5">
             <div className="flex flex-wrap items-center justify-end gap-2">
-              {showRepoLink ? (
+              {repoButton ? (
                 <a
                   href={`https://github.com/${a.repo!.fullName}`}
                   target="_blank"
@@ -243,7 +296,7 @@ function StudentAssignmentRow({
                   <GithubIcon className="size-4" /> {t("student.openRepo")}
                 </a>
               ) : null}
-              {online && !locked ? (
+              {startButton ? (
                 // Plain navigation: this URL is also the SEB startURL, so it
                 // must work as a link, not as a fetch.
                 <a
@@ -489,22 +542,35 @@ export function StudentHome({ me }: { me: Me }) {
                     <tr key={a.id} className={locked ? "opacity-60" : ""}>
                       <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>{room.name}</td>
                       <td className={`${cell} font-medium`}>
-                        <span className="inline-flex items-center gap-1.5">
-                          {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
-                          {a.repo?.provisionStatus === "ok" &&
-                          a.repo.fullName &&
-                          a.workMode !== "online_seb" ? (
-                            <a
-                              href={`https://github.com/${a.repo.fullName}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="hover:text-accent hover:underline"
-                            >
-                              {a.name}
-                            </a>
-                          ) : (
-                            a.name
-                          )}
+                        <span className="flex flex-col">
+                          <span className="inline-flex items-center gap-1.5">
+                            {locked ? <Lock className="size-3.5 text-zinc-400" /> : null}
+                            {rowAffordances({
+                              workMode: a.workMode,
+                              accepted: a.repo?.provisionStatus === "ok" && Boolean(a.repo.fullName),
+                              locked,
+                            }).nameIsLink ? (
+                              <a
+                                href={`https://github.com/${a.repo!.fullName}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="hover:text-accent hover:underline"
+                              >
+                                {a.name}
+                              </a>
+                            ) : (
+                              a.name
+                            )}
+                          </span>
+                          {a.workMode !== "free" ? (
+                            <ModeNote
+                              note={
+                                a.workMode === "online_seb"
+                                  ? "student.workspaceSeb"
+                                  : "student.workspace"
+                              }
+                            />
+                          ) : null}
                         </span>
                       </td>
                       <td className={cell}>
