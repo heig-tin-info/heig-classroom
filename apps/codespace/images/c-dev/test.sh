@@ -78,8 +78,21 @@ echo "seccomp : ${REPO_ROOT}/infra/seccomp/codespace.json"
 # --------------------------------------------------------------------------
 head2 "0. demarrage sous run-hardened.sh et mesure jusqu'a /healthz"
 # --------------------------------------------------------------------------
+# Les trois variables que le portail pose au `podman run` (sessions/manager.ts,
+# CONTAINER_ENV_KEYS). Le conteneur A les porte, le conteneur B non : la
+# section 9 compare les deux environnements et exige exactement trois lignes
+# d'ecart. Aucun secret n'y entre, c'est tout le propos de l'invariant 1.
+ENV_DEADLINE=2026-10-01T12:00:00.000Z
+ENV_RETURN_URL=https://classroom.chevallier.io/
+# Sans espace : run-hardened.sh decoupe EXTRA_ARGS par le shell. Le portail,
+# lui, passe la valeur telle quelle a execFile (aucun shell), donc un titre
+# avec des espaces lui convient ; c'est ce script qui est contraint.
+ENV_ASSIGNMENT_NAME=TP3-pointeurs
+PORTAL_ENV="-e CODESPACE_DEADLINE=${ENV_DEADLINE} -e CODESPACE_RETURN_URL=${ENV_RETURN_URL} -e CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}"
+
 T0=$(date +%s.%N)
-CTR_NAME="$CTR_A" VOL_DIR="${VOL_BASE}/a" IMAGE="$IMAGE" "${HERE}/run-hardened.sh" >/dev/null \
+CTR_NAME="$CTR_A" VOL_DIR="${VOL_BASE}/a" IMAGE="$IMAGE" EXTRA_ARGS="$PORTAL_ENV" \
+  "${HERE}/run-hardened.sh" >/dev/null \
   || fail "run-hardened.sh n'a pas demarre le conteneur A"
 
 HEALTH=""
@@ -193,10 +206,28 @@ ok "install-extension vise sur /opt/code-server/extensions : refuse (rc=$RC)"
 
 LIST=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/ud --list-extensions' 2>/dev/null | sort | tr '\n' ' ')
 case "$LIST" in
-  "llvm-vs-code-extensions.vscode-clangd webfreak.debug "*) : ;;
-  *) fail "la liste des extensions du serveur n'est pas exactement les deux attendues : [$LIST]" ;;
+  "heig.codespace-statusbar llvm-vs-code-extensions.vscode-clangd webfreak.debug "*) : ;;
+  *) fail "la liste des extensions du serveur n'est pas exactement les trois attendues : [$LIST]" ;;
 esac
-ok "le serveur ne connait que les deux extensions preinstallees : $LIST"
+ok "le serveur ne connait que les trois extensions preinstallees : $LIST"
+
+# L'extension de barre d'etat est cuite dans l'image, comme les deux autres :
+# elle apparait dans `--list-extensions` et dans le manifeste d'extensions.
+VERS=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/ud --list-extensions --show-versions' 2>/dev/null | tr -d '\r')
+case "$VERS" in
+  *"heig.codespace-statusbar@0.1.0"*) : ;;
+  *) fail "heig.codespace-statusbar@0.1.0 absent de --list-extensions --show-versions" "$VERS" ;;
+esac
+ok "heig.codespace-statusbar@0.1.0 installee et listee par code-server"
+
+cexec 'grep -qF "heig.codespace-statusbar" /etc/code-server/extensions.lock' >/dev/null 2>&1 \
+  || fail "heig.codespace-statusbar absent de /etc/code-server/extensions.lock"
+cexec 'test -f /opt/code-server/extensions/heig.codespace-statusbar-0.1.0/extension.js' >/dev/null 2>&1 \
+  || fail "le code de l'extension de barre d'etat n'est pas dans le repertoire d'extensions"
+if cexec 'touch /opt/code-server/extensions/heig.codespace-statusbar-0.1.0/extension.js' >/dev/null 2>&1; then
+  fail "l'extension de barre d'etat est modifiable a l'execution"
+fi
+ok "extension de barre d'etat inscrite dans extensions.lock et en lecture seule"
 
 # --------------------------------------------------------------------------
 head2 "4. racine en lecture seule, aucune capacite"
@@ -302,7 +333,9 @@ for f in /run/code-server/User/settings.json /run/code-server/Machine/settings.j
   cexec "test -f $f" >/dev/null 2>&1 || fail "reglages machine non copies dans $f"
   for k in '"files.autoSave": "afterDelay"' '"files.autoSaveDelay": 1000' \
            '"extensions.autoUpdate": false' '"update.mode": "none"' \
-           '"telemetry.telemetryLevel": "off"' '"chat.disableAIFeatures": true'; do
+           '"telemetry.telemetryLevel": "off"' '"chat.disableAIFeatures": true' \
+           '"workbench.secondarySideBar.defaultVisibility": "hidden"' \
+           '"keyboard.dispatch": "keyCode"'; do
     cexec "grep -qF '$k' $f" >/dev/null 2>&1 || fail "reglage absent de $f : $k"
   done
 done
@@ -310,7 +343,24 @@ ok "reglages machine copies dans le user-data-dir tmpfs (User et Machine)"
 
 cexec "grep -qF '\"extensions.allowed\"' /run/code-server/User/settings.json" >/dev/null 2>&1 \
   || fail "extensions.allowed absent des reglages"
-ok "extensions.allowed present et restreint aux deux extensions"
+cexec "grep -qF '\"heig.codespace-statusbar\": true' /run/code-server/User/settings.json" >/dev/null 2>&1 \
+  || fail "heig.codespace-statusbar absent de extensions.allowed"
+ok "extensions.allowed present et restreint aux trois extensions"
+
+# Les deux reglages ajoutes le 2026-09-18 doivent exister **dans le paquet VS
+# Code embarque**, pas seulement dans notre fichier : un nom inexistant serait
+# ignore en silence. Recherche litterale dans le bundle du workbench.
+WB=/usr/lib/code-server/lib/vscode/out/vs/workbench/workbench.web.main.internal.js
+cexec "grep -q 'workbench.secondarySideBar.defaultVisibility' $WB" >/dev/null 2>&1 \
+  || fail "workbench.secondarySideBar.defaultVisibility inconnu du paquet VS Code embarque"
+cexec "grep -q 'keyboard.dispatch' $WB" >/dev/null 2>&1 \
+  || fail "keyboard.dispatch inconnu du paquet VS Code embarque"
+# La valeur posee doit etre dans l'enumeration declaree, sinon VS Code la rejette.
+cexec "grep -qF '\"workbench.secondarySideBar.defaultVisibility\":{type:\"string\",enum:[\"hidden\"' $WB" >/dev/null 2>&1 \
+  || fail "« hidden » n'est pas la premiere valeur de l'enumeration de workbench.secondarySideBar.defaultVisibility"
+cexec "grep -qF '\"keyboard.dispatch\":{scope:1,type:\"string\",enum:[\"code\",\"keyCode\"]' $WB" >/dev/null 2>&1 \
+  || fail "« keyCode » n'est pas une valeur declaree de keyboard.dispatch"
+ok "les deux reglages existent dans VS Code 1.137.0 embarque, avec les valeurs posees dans leur enumeration"
 
 podman_remote logs "$CTR_A" 2>&1 | grep -q 'Using custom extensions gallery' \
   || fail "code-server n'a pas pris EXTENSIONS_GALLERY (galerie par defaut active)"
@@ -353,6 +403,65 @@ RES_ELAPSED=$(python3 -c "print(round($(date +%s.%N)-${R0}, 2))")
 python3 -c "import sys; sys.exit(0 if ${RES_ELAPSED} < 2 else 1)" \
   || fail "getent hosts example.invalid a mis ${RES_ELAPSED}s, au-dela des 2 s exigees"
 ok "getent hosts example.invalid echoue en ${RES_ELAPSED}s (< 2 s)"
+
+# --------------------------------------------------------------------------
+head2 "9. environnement du conteneur : les trois variables du portail, et rien d'autre"
+# --------------------------------------------------------------------------
+# Ce que le portail pose au `podman run` (sessions/manager.ts,
+# CONTAINER_ENV_KEYS) : l'echeance, l'URL de retour, le titre du devoir.
+# L'extension `heig.codespace-statusbar` les lit dans `process.env`.
+
+for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" \
+          "CODESPACE_RETURN_URL=${ENV_RETURN_URL}" \
+          "CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}"; do
+  cexec "tr '\\0' '\\n' < /proc/1/environ | grep -qxF '$kv'" >/dev/null 2>&1 \
+    || fail "variable absente de l'environnement de code-server (pid 1) : $kv" \
+            "$(cexec "tr '\\0' '\\n' < /proc/1/environ" 2>&1)"
+done
+ok "les trois variables du portail sont dans l'environnement de code-server (pid 1)"
+
+# Exactement trois lignes d'ecart avec un conteneur lance sans EXTRA_ARGS : le
+# portail n'ajoute rien d'autre a l'image, aucun secret au premier chef.
+ENV_A=$(podman_remote exec "$CTR_A" env | sort)
+ENV_B=$(podman_remote exec "$CTR_B" env | sort)
+EXTRA=$(comm -23 <(printf '%s\n' "$ENV_A") <(printf '%s\n' "$ENV_B") | grep -v '^HOSTNAME=' | grep -v '^container=')
+EXTRA_COUNT=$(printf '%s\n' "$EXTRA" | grep -c .)
+[ "$EXTRA_COUNT" = "3" ] \
+  || fail "le conteneur du portail porte $EXTRA_COUNT variable(s) de plus que l'image, attendu 3" "$EXTRA"
+printf '%s\n' "$EXTRA" | grep -qv '^CODESPACE_' \
+  && fail "une variable hors CODESPACE_* est posee sur le conteneur" "$EXTRA"
+ok "exactement trois variables en plus de celles de l'image, toutes en CODESPACE_ : $(printf '%s' "$EXTRA" | tr '\n' ' ')"
+
+# L'hote d'extensions herite de cet environnement en deux temps. Premier
+# temps, mesure : code-server (pid 1) engendre le serveur VS Code, qui porte
+# bien les trois variables.
+SRV_PID=$(cexec "pgrep -f 'code-server/out/node/entry' | head -1" 2>/dev/null | tr -d '[:space:]')
+case "$SRV_PID" in
+  ''|*[!0-9]*) fail "processus serveur VS Code (out/node/entry) introuvable dans le conteneur" "$(cexec 'ps -eo pid,args --no-headers' 2>&1)" ;;
+esac
+for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" "CODESPACE_RETURN_URL=${ENV_RETURN_URL}"; do
+  cexec "tr '\\0' '\\n' < /proc/${SRV_PID}/environ | grep -qxF '$kv'" >/dev/null 2>&1 \
+    || fail "le serveur VS Code (pid ${SRV_PID}) n'a pas herite de $kv"
+done
+ok "le serveur VS Code (pid ${SRV_PID}, engendre par code-server) a herite des trois variables"
+
+# Second temps : c'est ce serveur qui fork l'hote d'extensions, et il construit
+# son environnement a partir du sien. Verifie dans le paquet embarque, pas de
+# memoire — l'hote d'extensions lui-meme n'existe qu'une fois qu'un navigateur
+# s'est connecte, ce que ce test ne fait pas (voir README, TODO(verify)).
+cexec "grep -qF 'ExtensionHostConnection#buildUserEnvironment' /usr/lib/code-server/lib/vscode/out/server-main.js" >/dev/null 2>&1 \
+  || fail "buildUserEnvironment introuvable dans le serveur VS Code embarque"
+cexec "grep -aqE 'buildUserEnvironment.{0,400}[{][.][.][.]process[.]env' /usr/lib/code-server/lib/vscode/out/server-main.js" >/dev/null 2>&1 \
+  || fail "buildUserEnvironment ne construit pas l'environnement de l'hote d'extensions a partir de process.env"
+ok "buildUserEnvironment fork l'hote d'extensions avec {...process.env} : l'heritage est complet"
+
+# L'extension, une fois activee, depose un temoin dans /tmp. Il n'existe pas
+# tant qu'aucun navigateur n'a ouvert l'editeur : on verifie seulement qu'il
+# n'est pas la par accident (il serait alors dans l'image).
+if cexec 'test -e /tmp/codespace-statusbar.json' >/dev/null 2>&1; then
+  fail "le temoin d'activation existe avant toute connexion : il vient de l'image"
+fi
+ok "aucun temoin d'activation dans l'image (il n'apparait qu'a l'ouverture de l'editeur)"
 
 printf '\n%d assertions, toutes vertes.\n' "$NTEST"
 printf 'MESURE_DEMARRAGE_SECONDES=%s\n' "$BOOT"

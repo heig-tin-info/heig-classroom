@@ -54,6 +54,15 @@ export interface ManagerOptions {
   /** Hôte du remote `origin` écrit dans l'espace de travail : `portal.internal`. */
   gitRemoteHost: string;
   gitRemotePort: number;
+  /**
+   * Origine publique de classroom (`CLASSROOM_URL`) et du portail
+   * (`PUBLIC_URL`). Elles ne servent qu'à une chose : l'URL de retour passée
+   * au conteneur pour le bouton « Fermer » de l'extension de barre d'état
+   * (`images/c-dev/extension`). Vides, aucune URL n'est transmise et le bouton
+   * n'apparaît pas.
+   */
+  classroomUrl?: string;
+  publicUrl?: string;
   log: {
     info: (o: object, m: string) => void;
     warn: (o: object, m: string) => void;
@@ -132,6 +141,58 @@ export function stagingSourceFor(
   }
   const from = targetRepoUrl ?? assignment.templateRepo;
   return from ? { mode: "lab", mirrorFrom: from } : { mode: "empty" };
+}
+
+/**
+ * **Les seules** variables d'environnement que le portail pose sur un
+ * conteneur étudiant, en plus de celles de l'image. Invariant 1 : aucun secret
+ * ne sort du portail, et cette liste est ce qu'un test affirme.
+ *
+ * Elles sont lues par `heig.codespace-statusbar`, l'extension de barre d'état
+ * cuite dans l'image (`images/c-dev/extension`).
+ */
+export const CONTAINER_ENV_KEYS = [
+  "CODESPACE_DEADLINE",
+  "CODESPACE_RETURN_URL",
+  "CODESPACE_ASSIGNMENT_NAME",
+] as const;
+
+/** Base d'URL rendue absolue, ou `undefined` si elle n'est pas exploitable. */
+function rootUrl(base: string | undefined): string | undefined {
+  if (!base || base.trim() === "") return undefined;
+  try {
+    return new URL("/", base).href;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Ce que le conteneur apprend de sa session, et rien de plus.
+ *
+ *  - `CODESPACE_DEADLINE` : l'échéance du devoir (`deadlineAt` de classroom,
+ *    stockée dans `assignments.closesAt`). Absente quand le devoir n'en a
+ *    pas : l'extension n'affiche alors aucun compte à rebours ;
+ *  - `CODESPACE_RETURN_URL` : classroom pour une session née d'un jeton de
+ *    lancement (`launchJti`), le portail sinon. C'est là que ramène le bouton
+ *    « Fermer » ;
+ *  - `CODESPACE_ASSIGNMENT_NAME` : le titre du devoir, montré dans l'infobulle.
+ *
+ * Aucune de ces valeurs n'est un secret, et il n'en existe pas de quatrième.
+ */
+export function containerEnvFor(
+  session: Pick<SessionRow, "launchJti">,
+  assignment: Pick<AssignmentRow, "title" | "closesAt">,
+  urls: { classroomUrl?: string; publicUrl?: string },
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (assignment.closesAt) env.CODESPACE_DEADLINE = assignment.closesAt.toISOString();
+  // La session vient de classroom si et seulement si un jeton de lancement
+  // l'a ouverte ou reprise : c'est `launchJti` qui le dit, pas le devoir.
+  const back = rootUrl(session.launchJti ? urls.classroomUrl : urls.publicUrl);
+  if (back) env.CODESPACE_RETURN_URL = back;
+  if (assignment.title.trim() !== "") env.CODESPACE_ASSIGNMENT_NAME = assignment.title;
+  return env;
 }
 
 export interface ManagerDeps extends ManagerOptions {
@@ -378,6 +439,10 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       sessionId: session.id,
       name,
       workDir: paths.workDir,
+      env: containerEnvFor(session, assignment, {
+        ...(opts.classroomUrl !== undefined ? { classroomUrl: opts.classroomUrl } : {}),
+        ...(opts.publicUrl !== undefined ? { publicUrl: opts.publicUrl } : {}),
+      }),
       ...(assignment.image ? { image: assignment.image } : {}),
     });
     if (!info.ip) {

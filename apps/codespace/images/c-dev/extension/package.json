@@ -1,0 +1,35 @@
+{
+  "name": "codespace-statusbar",
+  "displayName": "Codespace",
+  "description": "Temps restant jusqu'a l'echeance du devoir et retour au portail, dans la barre d'etat.",
+  "publisher": "heig",
+  "version": "0.1.0",
+  "license": "SEE LICENSE IN LICENSE.txt",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "codespace.close",
+        "title": "Codespace : fermer la session"
+      }
+    ]
+  }
+}
