@@ -14,21 +14,23 @@ the code follows.
 
 What you will find here, in reading order:
 
-1. **Needs analysis** (French): the original idea, actors, domain model, risks
+1. **Needs analysis**: the original idea, actors, domain model, risks
    and the decisions that shaped everything else.
-2. **Requirements** (French): user stories with acceptance criteria,
+2. **Requirements**: user stories with acceptance criteria,
    non-functional requirements, constraints, and the validated hypotheses
    (H1 to H12, with their revisions).
-3. **Functional specifications** (French): the precise behavior of every
+3. **Functional specifications**: the precise behavior of every
    subsystem, from Switch edu-ID login to grading collection.
-4. **Architecture** (French): the consolidated design, a Fastify monolith over
-   PostgreSQL driving GitHub through a GitHub App, plus twelve architecture
+4. **Architecture**: the consolidated design, a Fastify monolith over
+   PostgreSQL driving GitHub through a GitHub App, plus thirteen architecture
    decision records under `docs/adr/` in the repository.
 5. **Spike reports**: what was actually measured against the real GitHub API
    before committing to a design, including the traps discovered along the way
    (Octokit retry on empty repositories, `safe.bareRepository`, and friends).
 
-The specification documents are written in French and typeset with
+Everything in the repository is written in English — code, comments,
+documentation and commit messages; only the end-user interface follows the
+user's language (the portal ships English and French). The specification
+documents are typeset with
 [TeXSmith](https://github.com/heig-tin-info/texsmith); each one builds to a PDF
-with `texsmith docs/<doc>.md --build`. Everything user-facing (portal, guide,
-this site) is in English.
+with `texsmith docs/<doc>.md --build`.

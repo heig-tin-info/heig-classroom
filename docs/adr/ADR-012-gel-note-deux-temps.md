@@ -1,56 +1,57 @@
-# ADR-012 — Gel de note : heure de réception écrite synchronement, gel en deux temps
+# ADR-012 — Grade freezing: receipt time written synchronously, two-step freeze
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-La note gelée à la deadline est la donnée la plus litigieuse du système. La référence du gel
-est l'heure de réception serveur du webhook push, persistée par SHA (GR-14, H6) — jamais
-l'horodatage git, falsifiable. Un run portant sur un commit reçu avant la deadline mais
-terminé après compte pour la note gelée, dans la limite d'un délai de grâce (GR-14.4,
-défaut 30 min). Les webhooks sont traités en asynchrone via une file (GH-60) : si l'heure de
-réception dépendait du traitement, un retard de file changerait des notes.
+The grade frozen at the deadline is the most disputable piece of data in the system. The
+reference for the freeze is the server receipt time of the push webhook, persisted per SHA
+(GR-14, H6) — never the git timestamp, which can be forged. A run on a commit received before
+the deadline but finished after it counts towards the frozen grade, within the limit of a
+grace period (GR-14.4, default 30 min). Webhooks are processed asynchronously through a queue
+(GH-60): if the receipt time depended on the processing, a queue delay would change grades.
 
-## Décision
+## Decision
 
-1. **Écriture synchrone de `push_receipts`** dans le handler HTTP du webhook, avant
-   l'enfilage du job : l'heure de réception (donnée légale du gel) ne dépend jamais du
-   retard de la file. L'acquittement reste sous 5 s (deux INSERT).
-2. **Table `bot_commits`** (`student_repo_id`, `sha`, `kind`) alimentée à chaque push bot
-   (revert, deadline, synchro) : filtre **déterministe** d'éligibilité GR-05/GH-44, plus
-   fiable que l'inférence par acteur au moment du run.
-3. **Gel en deux temps** (lecture littérale de GR-12 et GR-14.4, empruntée à la proposition
-   productivité) :
-   1. À l'application de la deadline, `frozen_grade_run_id` est posé **provisoirement**
-      (note courante GR-09 à cet instant).
-   2. Pendant le délai de grâce, seuls les runs portant sur des commits reçus avant la
-      deadline (présents dans `push_receipts`) peuvent encore améliorer ce pointeur.
-   3. À `deadline + grace_minutes`, le ticker pose `frozen_at` et `frozen_final` : la note
-      gelée devient définitive et immuable, les runs postérieurs ne la modifient jamais.
-4. Un SHA sans heure de réception connue (webhook perdu, réconcilié après coup) est traité
-   `after_deadline = true` dès que la deadline est passée — choix conservateur GR-14.3,
-   arbitrable par le teacher au vu de l'historique.
-5. Le délai de grâce est paramétrable par assignment ; le portail recommande 60 min quand
-   l'effectif rend la capacité runner limitante (ADR-007).
+1. **Synchronous write of `push_receipts`** in the webhook's HTTP handler, before the job is
+   enqueued: the receipt time (the legally decisive data of the freeze) never depends on the
+   queue lag. Acknowledgement stays under 5 s (two INSERTs).
+2. A **`bot_commits` table** (`student_repo_id`, `sha`, `kind`) fed on every bot push
+   (revert, deadline, sync): a **deterministic** GR-05/GH-44 eligibility filter, more reliable
+   than inferring from the actor at run time.
+3. **A two-step freeze** (a literal reading of GR-12 and GR-14.4, borrowed from the
+   productivity proposal):
+   1. When the deadline is applied, `frozen_grade_run_id` is set **provisionally** (the
+      current GR-09 grade at that instant).
+   2. During the grace period, only runs on commits received before the deadline (present in
+      `push_receipts`) can still improve that pointer.
+   3. At `deadline + grace_minutes`, the ticker sets `frozen_at` and `frozen_final`: the
+      frozen grade becomes definitive and immutable, and later runs never change it.
+4. A SHA with no known receipt time (lost webhook, reconciled after the fact) is treated as
+   `after_deadline = true` as soon as the deadline has passed — the conservative GR-14.3
+   choice, open to a teacher's arbitration in the light of the history.
+5. The grace period is configurable per assignment; the portal recommends 60 min when the
+   class size makes runner capacity the limiting factor (ADR-007).
 
-## Conséquences
+## Consequences
 
-- Le gel est **insensible au retard de traitement** : une rafale de deadline ne produit que
-  du retard d'affichage, jamais une note erronée.
-- Les litiges se tranchent sur des faits persistés : `push_receipts.received_at` par SHA,
-  `bot_commits` pour l'exclusion des commits bot, historique complet des GradeRuns.
-- Le pipeline de grading et le gel sont découplés de la disponibilité du runner : un runner
-  en panne retarde les notes, le gel attend la grâce puis fige.
+- The freeze is **insensitive to processing delay**: a deadline burst only produces display
+  lag, never a wrong grade.
+- Disputes are settled on persisted facts: `push_receipts.received_at` per SHA, `bot_commits`
+  for excluding bot commits, the full history of the GradeRuns.
+- The grading pipeline and the freeze are decoupled from runner availability: a failed runner
+  delays the grades, and the freeze waits for the grace period and then locks in.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Heure de réception écrite par le worker asynchrone** (proposition productivité, non
-   explicité) : un retard de file déplacerait l'heure de référence vers l'heure de
-   traitement — inacceptable pour une donnée qui départage un rendu à la seconde près.
-2. **Gel en un temps à `deadline + grâce` uniquement** : plus simple mais n'offre aucune
-   note provisoire à afficher pendant la grâce, et la lecture littérale de GR-12 (gel à la
-   deadline) serait perdue.
-3. **Filtre bot par `github.actor` du run seulement** : dépend du contexte d'exécution du
-   workflow ; la table `bot_commits` par SHA est vérifiable a posteriori et rejouable.
+1. **Receipt time written by the asynchronous worker** (productivity proposal, not spelled
+   out): a queue delay would shift the reference time towards the processing time —
+   unacceptable for a piece of data that separates submissions to the second.
+2. **A single-step freeze at `deadline + grace` only**: simpler, but it offers no provisional
+   grade to display during the grace period, and the literal reading of GR-12 (freeze at the
+   deadline) would be lost.
+3. **A bot filter based on the run's `github.actor` only**: it depends on the workflow's
+   execution context; the per-SHA `bot_commits` table can be verified after the fact and
+   replayed.

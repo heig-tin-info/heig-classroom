@@ -1,215 +1,215 @@
-# Analyse critique du dossier de cadrage
+# Critical analysis of the framing document
 
-Réponse à [project.md](../project.md) · 2026-09-17
+Answer to [project.md](../project.md) · 2026-09-17
 
-Ce document fait ce que la section 1 du dossier demande : contester les choix des sections 7, 9 et 10, nommer les angles morts, et proposer un découpage réaliste. Les sections 3 et 4 (exigences, non-objectifs) sont prises comme contrat et ne sont pas rouvertes. Chaque arbitrage se termine par une décision, pas par une liste d'options.
+This document does what section 1 of the framing document asks for: challenge the choices of sections 7, 9 and 10, name the blind spots, and propose a realistic breakdown. Sections 3 and 4 (requirements, non-goals) are taken as a contract and are not reopened. Every trade-off ends in a decision, not in a list of options.
 
-Contexte matériel vérifié sur le poste de développement (WSL2, Ubuntu 26.04) : noyau 6.18 avec `nf_tables`, `nft_reject`, `br_netfilter` chargé, cgroup v2, systemd actif, sous-UID déjà alloués à l'utilisateur, 24 cœurs, 31 Go. Podman et nftables sont installables depuis les dépôts (podman 5.7, nftables 1.1, netavark 1.16, passt) mais **non installés**. Docker Desktop est présent côté Windows mais non intégré à cette distro, et il ne doit pas l'être (voir D1).
+Hardware context verified on the development workstation (WSL2, Ubuntu 26.04): kernel 6.18 with `nf_tables`, `nft_reject`, `br_netfilter` loaded, cgroup v2, systemd active, sub-UIDs already allocated to the user, 24 cores, 31 GB. Podman and nftables are installable from the repositories (podman 5.7, nftables 1.1, netavark 1.16, passt) but **not installed**. Docker Desktop is present on the Windows side but not integrated into this distro, and it must not be (see D1).
 
-## 1. Verdict d'ensemble
+## 1. Overall verdict
 
-Le dossier est solide sur le fond : les deux régimes, les points d'application par exigence, le refus de Codespaces pour E10, la position "portail mince au-dessus de briques", l'ordre des jalons. Rien de tout cela n'est remis en cause.
+The framing document is sound on substance: the two regimes, the enforcement points per requirement, the rejection of Codespaces for E10, the "thin portal on top of existing building blocks" stance, the order of the milestones. None of that is called into question.
 
-Il pêche sur trois points, tous en section 7, et tous dans le même sens : il construit un mécanisme là où une propriété structurelle donnerait la même garantie pour moins de code.
+It falls short on three points, all in section 7, and all in the same direction: it builds a mechanism where a structural property would give the same guarantee for less code.
 
-1. **Le filtrage réseau** est pensé comme une politique nftables dynamique par conteneur. Un réseau `internal` sans passerelle donne la même garantie sans une seule règle par session.
-2. **Le canal Git** implémente le protocole HTTP intelligent dans le portail et injecte un jeton dans le conteneur. Un dépôt nu de transit servi par `git http-backend`, authentifié par l'adresse source du conteneur, supprime le protocole à écrire et le secret dans le conteneur.
-3. **La sauvegarde périodique** commit dans le dépôt de l'étudiant toutes les deux minutes. Cela pollue son historique et répond à un risque que le volume persistant couvre déjà ; le vrai risque (tampons non enregistrés, disque hôte) se traite par l'autosave de l'éditeur et un instantané côté hôte.
+1. **Network filtering** is conceived as a dynamic per-container nftables policy. An `internal` network without a gateway gives the same guarantee without a single per-session rule.
+2. **The Git channel** implements the smart HTTP protocol inside the portal and injects a token into the container. A bare staging repository served by `git http-backend`, authenticated by the container's source address, removes both the protocol to be written and the secret inside the container.
+3. **Periodic saving** commits into the student's repository every two minutes. That pollutes their history and answers a risk the persistent volume already covers; the real risk (unsaved buffers, host disk) is handled by the editor's autosave and a host-side snapshot.
 
-Il a en outre deux angles morts sécuritaires (section 4 ci-dessous) : le conteneur atteint l'hôte lui-même, et l'espace de travail d'examen ne doit jamais être amorcé depuis le dépôt de l'étudiant.
+It also has two security blind spots (section 4 below): the container reaches the host itself, and the exam workspace must never be seeded from the student's repository.
 
-## 2. Décisions ouvertes : arbitrages
+## 2. Open decisions: trade-offs
 
-### D1. Podman rootful, réseau `internal`, pas Docker Desktop
+### D1. Rootful Podman, `internal` network, no Docker Desktop
 
-**Décision : Podman en mode privilégié (rootful), `--userns=auto`, un réseau ponté `internal` dédié, DNS désactivé dans les conteneurs.**
+**Decision: Podman in privileged (rootful) mode, `--userns=auto`, a dedicated `internal` bridged network, DNS disabled inside the containers.**
 
-Le dossier a raison sur le rootless : pasta et slirp4netns déplacent la pile réseau en espace utilisateur et rendent nftables inopérant sur ce trafic. Il a aussi raison sur le compromis "moteur privilégié + espaces de noms utilisateur". Ce qui tranche entre Docker et Podman, c'est la granularité de l'espace de noms :
+The framing document is right about rootless: pasta and slirp4netns move the network stack into user space and make nftables ineffective on that traffic. It is also right about the "privileged engine + user namespaces" compromise. What settles the matter between Docker and Podman is the granularity of the namespace:
 
-- Docker `userns-remap` applique **une seule** plage de sous-UID à tous les conteneurs du démon. Deux étudiants qui s'évadent atterrissent sur le même UID hôte.
-- Podman `--userns=auto` alloue **une plage distincte par conteneur**. C'est littéralement l'exigence de la section 7 ("un espace de noms utilisateur distinct par conteneur"). Docker ne la satisfait pas.
+- Docker `userns-remap` applies **a single** sub-UID range to all the containers of the daemon. Two students who escape land on the same host UID.
+- Podman `--userns=auto` allocates **a distinct range per container**. That is literally the requirement of section 7 ("a distinct user namespace per container"). Docker does not satisfy it.
 
-Sur le filtrage, le dossier surestime le travail. Un réseau créé avec `podman network create --internal --disable-dns --gateway <ip>` n'a ni route par défaut ni NAT : un processus dans le conteneur ne joint **rien** hors du sous-réseau du pont, par construction. La liste blanche se réduit alors à ce qui écoute sur l'IP du pont côté hôte, c'est-à-dire le portail. **Vérifié le 2026-09-17 sur ce poste** (Podman 5.7, netavark) : avec la passerelle explicite, le pont porte l'adresse côté hôte, un serveur HTTP lié à cette adresse répond au conteneur, et `1.1.1.1` est injoignable par absence de route. Sans `--gateway`, un réseau `internal` n'attribue **aucune** adresse au pont et l'hôte est injoignable : l'option est obligatoire, pas cosmétique. Il reste deux règles nftables **fixes**, jamais modifiées par session :
+On filtering, the framing document overestimates the work. A network created with `podman network create --internal --disable-dns --gateway <ip>` has neither a default route nor NAT: a process inside the container reaches **nothing** outside the bridge's subnet, by construction. The allow list then boils down to whatever listens on the bridge IP on the host side, that is, the portal. **Verified on 2026-09-17 on this workstation** (Podman 5.7, netavark): with the explicit gateway, the bridge carries the host-side address, an HTTP server bound to that address answers the container, and `1.1.1.1` is unreachable for lack of a route. Without `--gateway`, an `internal` network assigns **no** address to the bridge and the host is unreachable: the option is mandatory, not cosmetic. Two **fixed** nftables rules remain, never modified per session:
 
-1. Interdire le trafic conteneur ↔ conteneur sur le pont. Sans elle, deux étudiants communiquent par le réseau pendant un examen ; mesuré ouvert sur ce poste, **y compris en IPv6 lien-local** (`fe80::/64`), que Podman attribue même sur un réseau sans IPv6. **Correction après P2** : la famille `bridge` de nftables n'existe pas dans le noyau WSL (module absent). La règle est donc écrite en famille `inet`, hook `forward`, `iifname cs0 oifname cs0 drop`, avec `br_netfilter` chargé et `bridge-nf-call-iptables` et `-ip6tables` à 1 ; c'est le mécanisme de `docker --icc=false`, et `inet` couvre les deux protocoles. La variante `bridge` est livrée à part pour la VM de production. Le réseau est créé avec `--interface-name cs0` pour que les règles désignent un nom stable.
-2. Restreindre ce que le pont peut atteindre sur l'hôte (famille `inet`, hook `input`, `iifname` du pont) au seul port du proxy Git. Voir l'angle mort 4.1.
+1. Forbid container ↔ container traffic on the bridge. Without it, two students communicate over the network during an exam; measured as open on this workstation, **including over link-local IPv6** (`fe80::/64`), which Podman assigns even on a network without IPv6. **Correction after P2**: the nftables `bridge` family does not exist in the WSL kernel (module absent). The rule is therefore written in the `inet` family, `forward` hook, `iifname cs0 oifname cs0 drop`, with `br_netfilter` loaded and `bridge-nf-call-iptables` and `-ip6tables` set to 1; that is the mechanism of `docker --icc=false`, and `inet` covers both protocols. The `bridge` variant is shipped separately for the production VM. The network is created with `--interface-name cs0` so that the rules can name a stable interface.
+2. Restrict what the bridge can reach on the host (family `inet`, `input` hook, the bridge's `iifname`) to the Git proxy port alone. See blind spot 4.1.
 
-Le DNS disparaît : `--dns=none` et `--add-host portal.internal:<ip du pont>`. Pas de résolveur à vues restreintes à exploiter, et le vecteur d'exfiltration DNS de la section 9 n'existe plus. Détail mesuré : sans `/etc/resolv.conf`, la libc retombe sur `127.0.0.1` et attend cinq secondes par résolution ratée ; l'image livre donc un `resolv.conf` sans `nameserver` avec `options timeout:1 attempts:1`, et l'échec prend deux millisecondes.
+DNS disappears: `--dns=none` and `--add-host portal.internal:<bridge ip>`. No split-view resolver left to exploit, and the DNS exfiltration vector of section 9 no longer exists. A measured detail: without `/etc/resolv.conf`, libc falls back to `127.0.0.1` and waits five seconds per failed resolution; the image therefore ships a `resolv.conf` with no `nameserver` and `options timeout:1 attempts:1`, and the failure takes two milliseconds.
 
-**Cycle de vie du pont.** netavark crée le pont quand le premier conteneur rejoint le réseau et le supprime quand le dernier le quitte. Un portail qui veut se lier à `10.77.0.254` avant la première session échouerait. Décision P2 : un **conteneur d'ancrage** permanent (`codespace-anchor`, alpine en `sleep infinity`, toutes capacités retirées, racine en lecture seule) maintient le pont et l'adresse. L'alternative, écouter sur `0.0.0.0` et filtrer en applicatif, exposerait le port Git sur toutes les interfaces et demanderait une règle nftables de plus pour moins de sûreté. Le ramasse-miettes du portail doit ignorer ce conteneur (label `heig-codespace.role=anchor`).
+**Bridge lifecycle.** netavark creates the bridge when the first container joins the network and deletes it when the last one leaves. A portal that wants to bind to `10.77.0.254` before the first session would fail. Decision P2: a permanent **anchor container** (`codespace-anchor`, alpine in `sleep infinity`, all capabilities dropped, read-only root) keeps the bridge and the address alive. The alternative, listening on `0.0.0.0` and filtering in the application, would expose the Git port on every interface and would require one more nftables rule for less safety. The portal's garbage collector must ignore that container (label `heig-codespace.role=anchor`).
 
-Le critère d'arbitrage du dossier est le bon et devient le test d'acceptation de la preuve C : depuis le conteneur, `curl` vers l'IP du pont sur le port Git réussit ; vers le pont sur tout autre port, vers 1.1.1.1, vers un autre conteneur, et toute résolution DNS échouent.
+The framing document's arbitration criterion is the right one and becomes the acceptance test of proof C: from the container, `curl` to the bridge IP on the Git port succeeds; to the bridge on any other port, to 1.1.1.1, to another container, and any DNS resolution fail.
 
-Deux pièges sur le poste de développement :
+Two pitfalls on the development workstation:
 
-- **Docker Desktop est disqualifié.** Son démon tourne dans une autre distro WSL ; les règles nftables posées ici ne s'appliqueraient pas à ses ponts, et `--userns=auto` n'existe pas. Le projet doit vivre sur un Podman natif installé dans cette Ubuntu.
-- Le portail doit parler au socket rootful (`/run/podman/podman.sock`). Qui contrôle ce socket est root ; le portail est donc **le** composant privilégié de l'hôte, et il faut l'assumer plutôt que le masquer par un sudo cosmétique.
-- **Le binaire `podman` reste en mode local rootless tant qu'on ne passe pas `--remote`.** `CONTAINER_HOST` seul est ignoré. Une demi-journée de tests a été perdue le 2026-09-17 à mesurer un réseau pasta en croyant mesurer le pont rootful. Le module moteur invoque toujours `podman --remote --url unix:///run/podman/podman.sock`, et le poste déclare une connexion par défaut (`podman system connection add --default`). Détails dans [setup-poste.md](setup-poste.md).
+- **Docker Desktop is disqualified.** Its daemon runs in another WSL distro; the nftables rules laid down here would not apply to its bridges, and `--userns=auto` does not exist. The project must live on a native Podman installed inside this Ubuntu.
+- The portal must talk to the rootful socket (`/run/podman/podman.sock`). Whoever controls that socket is root; the portal is therefore **the** privileged component of the host, and that must be owned rather than hidden behind a cosmetic sudo.
+- **The `podman` binary stays in local rootless mode as long as `--remote` is not passed.** `CONTAINER_HOST` alone is ignored. Half a day of tests was lost on 2026-09-17 measuring a pasta network while believing it was the rootful bridge. The engine module always invokes `podman --remote --url unix:///run/podman/podman.sock`, and the workstation declares a default connection (`podman system connection add --default`). Details in [setup-poste.md](setup-poste.md).
 
-### D2. gVisor : non en v1, décision reportée à la première séance d'examen réelle
+### D2. gVisor: not in v1, decision deferred to the first real exam session
 
-L'argument juridique est réel mais prématuré. gVisor ajoute une compatibilité ptrace à éprouver, une seconde configuration de runtime à maintenir et à tester avant chaque examen, sur un système qui n'a pas encore fait une séance de travaux pratiques. Le durcissement de base (userns par conteneur, capacités nulles, seccomp, racine en lecture seule, pas de réseau) place déjà la barre au niveau d'un exploit noyau, hors modèle de menace de la section 9.
+The legal argument is real but premature. gVisor adds ptrace compatibility to be proven, a second runtime configuration to maintain and to test before every exam, on a system that has not yet run a single lab session. The baseline hardening (per-container userns, no capabilities, seccomp, read-only root, no network) already sets the bar at a kernel exploit, outside the threat model of section 9.
 
-Le module moteur doit exposer le runtime comme paramètre d'image (`runtime: crun | runsc`) pour que le basculement soit un changement de configuration. C'est tout ce qu'on lui demande en v1.
+The engine module does expose the runtime as an option (`EngineOptions.runtime` in `src/engine/index.ts`, passed straight through as `--runtime`), but **nothing wires it to configuration yet**: there is no environment variable for it, so switching to gVisor would still be a code change today. Wiring it is all that is asked of the engine in v1.
 
-### D3. Provisionnement des dépôts : consommer heig-classroom, ne rien réimplémenter
+### D3. Repository provisioning: consume heig-classroom, reimplement nothing
 
-Le dossier hésite entre réimplémenter et consommer GitHub Classroom. Il oublie que [heig-classroom](/home/ycr/heig-classroom) fait déjà exactement cela : création des dépôts étudiants depuis un modèle, correspondance identité institutionnelle ↔ GitHub, GitHub App installée sur l'organisation, rattachement de compte. Le portail codespace ne crée pas de dépôt ; il reçoit l'URL du dépôt cible et la pousse.
+The framing document hesitates between reimplementing and consuming GitHub Classroom. It forgets that [heig-classroom](/home/ycr/heig-classroom) already does exactly that: creating student repositories from a template, mapping institutional identity ↔ GitHub, a GitHub App installed on the organisation, account linking. The codespace portal does not create repositories; it receives the target repository URL and pushes to it.
 
-Pour le portail de test, le dépôt cible est une ligne dans le fichier de devoir. Pour la production, c'est une requête à heig-classroom (ou une table partagée si les deux finissent dans le même processus, voir section 6).
+For the test portal, the target repository is a line in the assignment file. For production, it is a request to heig-classroom (or a shared table if the two end up in the same process, see section 6).
 
-### D4. SEB Server : ignoré
+### D4. SEB Server: ignored
 
-SEB Server est une pile Spring + base relationnelle + interface web dimensionnée pour un service d'examens à l'échelle d'une université. Pour vingt postes et une configuration SEB par devoir, générer un fichier `.seb` et servir un lien `sebs://` prend une centaine de lignes. La surveillance en temps réel qu'il apporte est déjà dans le tableau des sessions actives du portail. Position 1 du dossier. À rouvrir uniquement si l'établissement exploite déjà un SEB Server.
+SEB Server is a Spring stack plus a relational database plus a web interface, sized for a university-scale examination service. For twenty workstations and one SEB configuration per assignment, generating a `.seb` file and serving a `sebs://` link takes about a hundred lines. The real-time monitoring it brings is already in the portal's active sessions dashboard. Position 1 of the framing document. To be reopened only if the institution already operates a SEB Server.
 
-### D5. Session simultanée : reprise dans les deux modes, alerte en mode examen
+### D5. Concurrent session: resume in both modes, alert in exam mode
 
-code-server est conçu pour plusieurs onglets sur le même serveur ; "reprendre la session existante" est gratuit, c'est le comportement d'un second onglet sur un VS Code Web. Refuser demanderait de suivre les connexions websocket et d'en tuer une, avec un risque réel de refuser l'étudiant légitime dont l'onglet a planté.
+code-server is designed for several tabs on the same server; "resume the existing session" is free, it is the behaviour of a second tab on a VS Code Web. Refusing would require tracking the websocket connections and killing one of them, with a real risk of refusing the legitimate student whose tab has crashed.
 
-Décision : une session vivante par couple (étudiant, devoir). Toute nouvelle ouverture y revient. En mode examen, si une requête arrive d'une **adresse client différente** de celle de la vérification SEB initiale, le proxy refuse et le tableau enseignant affiche une alerte. La sémantique est la même dans les deux modes ; seule la vérification de provenance diffère, ce qui est déjà le cas.
+Decision: one live session per (student, assignment) pair. Any new opening returns to it. In exam mode, if a request arrives from a **different client address** than the one of the initial SEB verification, the proxy refuses and the teacher dashboard displays an alert. The semantics are the same in both modes; only the provenance check differs, which is already the case.
 
-### D6. Un répertoire par couple (étudiant, devoir), monté par bind
+### D6. One directory per (student, assignment) pair, bind-mounted
 
-Le dilemme "multiplie les objets" disparaît si le volume est un répertoire hôte `/srv/codespace/volumes/<étudiant>/<devoir>/` plutôt qu'un volume nommé du moteur. La sauvegarde est un `rsync` de l'arborescence ; l'inspection par l'administrateur est un `ls`. Le conteneur ne monte que le sous-répertoire `work/` ; le dépôt de transit et les instantanés vivent à côté, invisibles pour l'étudiant (section 3).
+The "multiplies the objects" dilemma disappears if the volume is a host directory `/srv/codespace/volumes/<student>/<assignment>/` rather than a named volume of the engine. The backup is an `rsync` of the tree; inspection by the administrator is an `ls`. The container mounts only the `work/` subdirectory; the staging repository and the snapshots live next to it, invisible to the student (section 3).
 
-Piège concret pour les agents : avec `--userns=auto`, l'UID du conteneur est mappé sur une plage hôte différente à chaque démarrage. Le montage doit utiliser l'option `:U` de Podman (chown récursif vers la plage mappée) ou le portail doit fixer l'UID mappé par session avec `--uidmap`. C'est le genre de détail qui coûte une journée si on le découvre en jalon 3.
+A concrete pitfall for agents: with `--userns=auto`, the container's UID is mapped onto a different host range at every start. The mount must use Podman's `:U` option (recursive chown to the mapped range) or the portal must pin the mapped UID per session with `--uidmap`. That is the kind of detail that costs a day if it is discovered at milestone 3.
 
-Pédagogie : l'isolement par devoir en mode examen est souhaitable (l'étudiant ne consulte pas ses travaux pratiques). En mode travaux pratiques, un enseignant qui veut un espace partagé entre devoirs le résout par un seul devoir "semestre". Pas d'option à exposer.
+Pedagogy: isolation per assignment in exam mode is desirable (the student does not consult their lab work). In lab mode, a teacher who wants a shared space across assignments solves it with a single "semester" assignment. No option to expose.
 
-### D7. Supprimer la liste réseau de l'interface enseignant
+### D7. Remove the network list from the teacher interface
 
-Oui, sans réserve. Avec le réseau `internal` et les miroirs de documentation servis par le portail, la seule destination que le conteneur atteint est le portail, et ce n'est pas un réglage mais une propriété. Une liste d'exceptions, si elle devient nécessaire (un serveur de test d'un enseignant), est un attribut **d'image ou de profil administrateur**, posé en fichier de configuration sur l'hôte, pas un champ du formulaire de devoir.
+Yes, without reservation. With the `internal` network and the documentation mirrors served by the portal, the only destination the container reaches is the portal, and that is not a setting but a property. A list of exceptions, should it become necessary (a teacher's test server), is an attribute **of an image or of an administrator profile**, set in a configuration file on the host, not a field of the assignment form.
 
-### D8. Pile : celle de heig-classroom, sans discussion
+### D8. Stack: heig-classroom's, no discussion
 
-Le dossier dit "aucune contrainte forte" et propose de choisir sur la qualité des bibliothèques. Les trois besoins qu'il cite sont couverts en Node : `@fastify/http-proxy` relaie les websockets, `git http-backend` se pilote en CGI depuis n'importe quel langage, et le moteur se pilote par sa ligne de commande ou son API REST. Aucune pile ne l'emporte techniquement ; ce qui l'emporte est la **réutilisation** :
+The framing document says "no strong constraint" and proposes choosing on library quality. The three needs it cites are covered in Node: `@fastify/http-proxy` relays websockets, `git http-backend` is driven as CGI from any language, and the engine is driven through its command line or its REST API. No stack wins technically; what wins is **reuse**:
 
-- Fastify 5, TypeScript strict, Zod, Drizzle, `openid-client`, `octokit` : déjà en production dans heig-classroom, avec ADR et conventions.
-- Le realm Keycloak de développement, le flux GitHub App et son rattachement de compte : réutilisables tels quels.
-- Le mainteneur est le même et le code sera largement écrit par des assistants : un seul langage et un seul style comptent plus que tout.
+- Fastify 5, strict TypeScript, Zod, Drizzle, `openid-client`, `octokit`: already in production in heig-classroom, with ADRs and conventions.
+- The development Keycloak realm, the GitHub App flow and its account linking: reusable as they are.
+- The maintainer is the same and the code will largely be written by assistants: a single language and a single style matter more than anything.
 
-Deux divergences assumées pour le portail de test :
+Two divergences accepted for the test portal:
 
-- **SQLite via Drizzle** plutôt que PostgreSQL : un fichier, zéro service, sauvegarde par copie. Drizzle isole le choix ; le passage à Postgres est mécanique si les deux portails fusionnent.
-- **Pas de React en v0.** Quelques pages HTML servies par Fastify suffisent au parcours étudiant et au tableau enseignant du jalon 1. L'interface riche vient au jalon 4, quand on saura ce qu'elle doit montrer.
+- **SQLite through Drizzle** rather than PostgreSQL: one file, zero service, backup by copy. Drizzle isolates the choice; moving to Postgres is mechanical if the two portals merge.
+- **No React in v0.** A few HTML pages served by Fastify are enough for the student path and for the teacher dashboard of milestone 1. The rich interface comes at milestone 4, when we know what it has to show.
 
-Pilotage du moteur : la **ligne de commande `podman`** enveloppée dans un module unique (`engine.ts`), avec sortie `--format json`. Transparent, débogable à la main, et l'API libpod n'apporte rien à vingt conteneurs. Le module est le seul endroit qui connaisse Podman.
+Driving the engine: the **`podman` command line** wrapped in a single module (`engine.ts`), with `--format json` output. Transparent, debuggable by hand, and the libpod API brings nothing for twenty containers. The module is the only place that knows about Podman.
 
-## 3. Section 7 : trois simplifications de fond
+## 3. Section 7: three substantive simplifications
 
-### 3.1 Canal Git : un dépôt de transit au lieu d'un protocole à écrire
+### 3.1 Git channel: a staging repository instead of a protocol to write
 
-Le dossier propose que le portail implémente le protocole Git HTTP intelligent et relaie vers GitHub, avec un jeton de session injecté dans la configuration Git du conteneur. Trois objections.
+The framing document proposes that the portal implement the smart Git HTTP protocol and relay to GitHub, with a session token injected into the container's Git configuration. Three objections.
 
-Un jeton de session dans le conteneur **est** un secret dans le conteneur. Court et révocable, mais exfiltrable pendant sa vie, ce qui contredit le titre de la section ("sans secret dans le conteneur"). Sur un pont géré par le portail, avec le trafic inter-conteneurs bloqué, **l'adresse IP source identifie la session** de façon fiable. Le portail sait quelle IP il a donnée à quel conteneur. Le remote est `http://portal.internal:<port>/git/<session>` et le proxy vérifie que la requête vient de l'IP de cette session. Zéro secret, zéro révocation.
+A session token inside the container **is** a secret inside the container. Short-lived and revocable, but exfiltrable while it lives, which contradicts the title of the section ("no secret inside the container"). On a bridge managed by the portal, with inter-container traffic blocked, **the source IP address identifies the session** reliably. The portal knows which IP it gave to which container. The remote is `http://portal.internal:<port>/git/<session>` and the proxy checks that the request comes from that session's IP. Zero secret, zero revocation.
 
-Implémenter receive-pack est inutile : `git http-backend` le fait, en CGI, depuis vingt ans. Le portail pose les variables d'environnement (`PATH_INFO`, `REQUEST_METHOD`, `QUERY_STRING`, `CONTENT_TYPE`, `GIT_PROJECT_ROOT`), pipe le corps, relit les en-têtes CGI. Soixante lignes de Node, aucun protocole.
+Implementing receive-pack is pointless: `git http-backend` has been doing it, as CGI, for twenty years. The portal sets the environment variables (`PATH_INFO`, `REQUEST_METHOD`, `QUERY_STRING`, `CONTENT_TYPE`, `GIT_PROJECT_ROOT`), pipes the body, reads back the CGI headers. Sixty lines of Node, no protocol.
 
-Relayer en direct vers GitHub fait dépendre le rendu d'un examen de la disponibilité de GitHub à l'instant du push. Un **dépôt nu de transit** par couple (étudiant, devoir), sur l'hôte à côté du volume, découple : le push de l'étudiant aboutit localement en quelques millisecondes et constitue la preuve de rendu horodatée (le `PushEvent` du dossier), puis un travail de fond relaie vers GitHub avec le jeton d'installation, avec reprise sur erreur. Le jeton ne quitte jamais la mémoire du portail.
+Relaying directly to GitHub makes the submission of an exam depend on GitHub's availability at the moment of the push. A **bare staging repository** per (student, assignment) pair, on the host next to the volume, decouples them: the student's push lands locally in a few milliseconds and constitutes the timestamped proof of submission (the framing document's `PushEvent`), then a background job relays to GitHub with the installation token, with retry on error. The token never leaves the portal's memory.
 
-Architecture retenue :
+Chosen architecture:
 
+```text
+container ──push──▶ portal:/git/<session>  (auth by source IP)
+                       │  git http-backend  →  volumes/<s>/<a>/staging.git
+                       │  records PushEvent (ref, sha, timestamp)
+                       └─ relay job ──push (installation token)──▶ GitHub
 ```
-conteneur ──push──▶ portail:/git/<session>  (auth par IP source)
-                       │  git http-backend  →  volumes/<e>/<d>/staging.git
-                       │  enregistre PushEvent (ref, sha, horodatage)
-                       └─ job relais ──push (jeton d'installation)──▶ GitHub
-```
 
-Effets secondaires bienvenus : le dépôt de transit est une seconde copie de l'historique poussé (E15, E17), et il donne la réponse à la question de section 13 sur `upload-pack` (3.2).
+Welcome side effects: the staging repository is a second copy of the pushed history (E15, E17), and it answers the section 13 question about `upload-pack` (3.2).
 
-### 3.2 Le refus d'upload-pack ne protège pas ce qu'il croit protéger
+### 3.2 Refusing upload-pack does not protect what it thinks it protects
 
-Le dossier interdit le clonage et la récupération pour fermer "la voie par laquelle un étudiant introduirait un fichier d'extension". Deux failles dans le raisonnement.
+The framing document forbids cloning and fetching in order to close "the path by which a student would introduce an extension file". Two flaws in the reasoning.
 
-D'abord, la voie n'est pas fermée : le dossier prévoit un clonage **au provisionnement**, depuis le dépôt de l'étudiant. Tout ce que l'étudiant a poussé depuis chez lui avant l'examen (un `.vsix`, un antisèche, une solution) arrive dans le conteneur. Voir l'angle mort 4.2.
+First, the path is not closed: the framing document plans a clone **at provisioning time**, from the student's repository. Everything the student pushed from home before the exam (a `.vsix`, a cheat sheet, a solution) lands in the container. See blind spot 4.2.
 
-Ensuite, la présence d'un fichier `.vsix` dans le conteneur n'est dangereuse que si l'installation est possible. Or l'étudiant a un terminal et peut invoquer le binaire code-server avec `--install-extension`. La seule barrière qui tienne est que le **répertoire d'extensions soit en lecture seule** (il est sur la racine en lecture seule) et que le répertoire de données utilisateur ne permette pas d'en créer un second. Avec cela, un `.vsix` dans le conteneur est un fichier inerte, qu'il arrive par pull, par frappe au clavier ou par encodage base64 dans un commit. E5 se joue dans l'image, pas dans le proxy Git.
+Second, the presence of a `.vsix` file in the container is only dangerous if installing it is possible. Now, the student has a terminal and can invoke the code-server binary with `--install-extension`. The only barrier that holds is for the **extensions directory to be read-only** (it is on the read-only root) and for the user data directory not to allow creating a second one. With that, a `.vsix` in the container is an inert file, whether it arrives by pull, by typing it in, or base64-encoded in a commit. E5 is played out in the image, not in the Git proxy.
 
-Décision : `upload-pack` est **autorisé** sur le dépôt de transit dans les deux modes. Ce qui change entre les modes est **ce que le portail met dans le dépôt de transit** :
+Decision: `upload-pack` is **allowed** on the staging repository in both modes. What changes between the modes is **what the portal puts into the staging repository**:
 
-- Travaux pratiques : miroir du dépôt GitHub de l'étudiant, synchronisé au démarrage de session et sur demande. L'étudiant pull ses propres commits faits ailleurs. Confort normal.
-- Examen : amorcé depuis le **modèle de l'enseignant** uniquement, jamais depuis le dépôt de l'étudiant. Pendant l'épreuve, l'enseignant peut pousser un correctif d'énoncé sur le modèle ; le portail le propage aux dépôts de transit ; les étudiants font `git pull`. C'est exactement la fonctionnalité que le dossier craignait de perdre.
+- Lab work: a mirror of the student's GitHub repository, synchronised at session start and on demand. The student pulls their own commits made elsewhere. Normal comfort.
+- Exam: seeded from the **teacher's template** only, never from the student's repository. During the exam, the teacher can push a fix to the assignment text onto the template; the portal propagates it to the staging repositories; the students run `git pull`. That is exactly the feature the framing document feared losing.
 
-### 3.3 Sauvegarde : autosave dans l'éditeur, instantanés côté hôte, pas de commit fantôme
+### 3.3 Saving: autosave in the editor, host-side snapshots, no ghost commits
 
-Un commit automatique toutes les deux minutes sur une branche de travail dans le dépôt de l'étudiant pose plus de problèmes qu'il n'en résout : il interfère avec un merge ou un rebase en cours, il embrouille un débutant qui découvre des commits qu'il n'a pas faits, et il n'apporte rien contre les deux pertes réelles.
+An automatic commit every two minutes on a working branch in the student's repository creates more problems than it solves: it interferes with a merge or a rebase in progress, it confuses a beginner who discovers commits they did not make, and it brings nothing against the two real losses.
 
-Les deux pertes réelles sont : un tampon d'éditeur jamais écrit sur disque, et la disparition du disque hôte. Le volume, lui, survit déjà à la coupure réseau, à la fermeture de l'onglet et à la mort du conteneur : c'est le point de la section "Persistance" et il est acquis.
+The two real losses are: an editor buffer never written to disk, and the disappearance of the host disk. The volume already survives a network outage, a closed tab and the death of the container: that is the point of the "Persistence" section and it is settled.
 
-Décision :
+Decision:
 
-1. `files.autoSave: afterDelay` (une seconde) imposé dans les réglages machine de code-server, non modifiable par l'étudiant. Le tampon n'existe plus comme risque.
-2. Un **dépôt fantôme côté hôte** (`volumes/<e>/<d>/shadow.git`, work-tree = `work/`), commité toutes les deux à trois minutes, invisible du conteneur. Il capture l'arbre de travail y compris ce que l'étudiant n'a pas commité, sans toucher à son dépôt. Il tranche les litiges ("j'avais écrit la fonction, elle a disparu") mieux qu'une branche visible. **Mesuré en V1** : le volume appartient à la plage d'UID du conteneur (`:U`) ; le portail en uid 1000 lit l'arbre grâce à l'umask 022, mais un `chmod 600` de l'étudiant fait échouer l'instantané, réduit alors à un commit partiel journalisé. Décision pour la production : l'instantané est pris par un **temporisateur systemd root**, le portail ne fait que déclarer les volumes actifs. C'est cohérent avec le fait que le portail ne doit pas pouvoir supprimer un volume non plus.
-3. Sauvegarde hors hôte de `/srv/codespace/volumes` (rsync ou instantané du fournisseur de la VM), c'est l'exploitation ordinaire du jalon 5.
+1. `files.autoSave: afterDelay` (one second) enforced in the machine settings of code-server, not modifiable by the student. The buffer no longer exists as a risk.
+2. A **host-side ghost repository** (`volumes/<s>/<a>/shadow.git`, work-tree = `work/`), committed every two to three minutes, invisible from the container. It captures the working tree including what the student has not committed, without touching their repository. It settles disputes ("I had written the function, it disappeared") better than a visible branch. **Measured in V1**: the volume belongs to the container's UID range (`:U`); the portal running as uid 1000 reads the tree thanks to umask 022, but a `chmod 600` by the student makes the snapshot fail, reduced then to a logged partial commit. Decision for production: the snapshot is taken by a **root systemd timer**, the portal only declares the active volumes. That is consistent with the fact that the portal must not be able to delete a volume either.
+3. Off-host backup of `/srv/codespace/volumes` (rsync or a VM provider snapshot); that is ordinary operations, milestone 5.
 
-### 3.4 Pool préchauffé : à ne pas construire avant d'avoir mesuré
+### 3.4 Pre-warmed pool: not to be built before measuring
 
-**Mesuré par P1 le 2026-09-17** sur l'image durcie (1,5 Go, code-server 4.137) : `podman run` rend la main en 0,18 s, `/healthz` répond en 0,6 à 1,0 s, la page du workbench est servie en 1 s. Le clone depuis le dépôt de transit est local. L'objectif de dix secondes est tenu avec un ordre de grandeur de marge. Le pool compliquerait l'appariement volume ↔ userns et introduirait une classe d'états ("préchauffé mais non attribué") dans l'orchestrateur. **Décision : pas de pool.** À remesurer à vingt sessions simultanées au jalon 1 ; seule une dégradation d'un facteur cinq rouvrirait la question.
+**Measured by P1 on 2026-09-17** on the hardened image (1.5 GB, code-server 4.137): `podman run` returns in 0.18 s, `/healthz` answers in 0.6 to 1.0 s, the workbench page is served in 1 s. The clone from the staging repository is local. The ten-second target is met with an order of magnitude of margin. The pool would complicate the volume ↔ userns pairing and would introduce a class of states ("pre-warmed but not assigned") into the orchestrator. **Decision: no pool.** To be measured again at twenty concurrent sessions at milestone 1; only a degradation by a factor of five would reopen the question.
 
-### 3.5 Durcissement : détails qui comptent
+### 3.5 Hardening: details that matter
 
-- **CAP_SYS_PTRACE n'est pas nécessaire** pour `gdb ./prog` : gdb trace ses propres enfants, ce que Yama en portée 1 (valeur sur ce poste, et par défaut sur Ubuntu) autorise, et le profil seccomp par défaut permet `ptrace` depuis le noyau 4.8. Elle ne sert qu'à `gdb -p <pid>` sur un processus lancé depuis un autre terminal. Confinée par l'userns, elle est peu dangereuse ; décision : retirée par défaut, activable par profil d'image si l'enseignant l'exige.
-- **`personality`** : le dossier a raison. Le profil par défaut n'autorise que cinq valeurs et exclut `ADDR_NO_RANDOMIZE` (0x40000). Sans cette entrée, gdb ne désactive pas l'ASLR et les adresses changent à chaque exécution, ce qui ruine un cours de débogage. Le profil seccomp du projet est le profil par défaut de `containers-common` plus cette valeur, rien d'autre.
-- **Mémoire** : deux gigaoctets × vingt = quarante sur une machine de trente-deux. Surengagement tolérable (clangd sur un TP en C consomme quelques centaines de mégaoctets), mais poser la limite à 1,5 Go évite qu'un seul `make -j` déclenche l'OOM killer sur le voisin.
-- **code-server** plutôt qu'openvscode-server : maintenance active, et surtout les options `--disable-file-downloads` et `--disable-file-uploads` qui n'existent pas ailleurs (angle mort 4.3). `--auth none` derrière le proxy, liaison sur l'IP du conteneur uniquement. Galerie neutralisée par `EXTENSIONS_GALLERY` vide en plus du `product.json`.
-- **Extensions C** : `ms-vscode.cpptools` a une licence qui interdit son usage hors des produits Microsoft ; elle n'est pas sur Open VSX. L'image embarque `llvm-vs-code-extensions.vscode-clangd` avec le binaire `clangd` (sinon l'extension tente de le télécharger et échoue, réseau coupé) et `webfreak.debug` pour gdb. Les deux sont sur Open VSX et se sont installées au build sans incident (P1).
-- **Réglages machine : pas immuables.** P1 n'a pas pu établir que code-server 4.137 honore la portée machine pour les sept réglages posés ; un étudiant peut donc les modifier depuis l'interface pendant sa session (ils reviennent au démarrage suivant, le répertoire de données étant un tmpfs). Conséquence : `extensions.allowed` et `files.autoSave` sont du confort, pas des barrières. La barrière E5 mesurée est le répertoire d'extensions en lecture seule ; le filet E15 doit donc être le dépôt fantôme côté hôte (3.3), pas seulement l'autosave.
-- **Deux contraintes Podman 5.7 découvertes** : `--dns=none` est refusé avec `--network none` (le script ne le pose que sur un vrai réseau) ; les tmpfs `/run` et `~/.cache` doivent être montés `mode=1777` parce que Podman les crée `root:755` et que le conteneur tourne en uid 1000, les options `uid=`/`gid=` n'étant pas acceptées sur `--tmpfs`.
+- **CAP_SYS_PTRACE is not necessary** for `gdb ./prog`: gdb traces its own children, which Yama at scope 1 (the value on this workstation, and the default on Ubuntu) allows, and the default seccomp profile has permitted `ptrace` since kernel 4.8. It is only needed for `gdb -p <pid>` on a process started from another terminal. Confined by the userns, it is not very dangerous; decision: dropped by default, enableable per image profile if the teacher requires it.
+- **`personality`**: the framing document is right. The default profile allows only five values and excludes `ADDR_NO_RANDOMIZE` (0x40000). Without that entry, gdb does not disable ASLR and the addresses change at every run, which ruins a debugging course. The project's seccomp profile is the default `containers-common` profile plus that value, nothing else.
+- **Memory**: two gigabytes × twenty = forty on a thirty-two gigabyte machine. Tolerable overcommitment (clangd on a C lab consumes a few hundred megabytes), but setting the limit at 1.5 GB prevents a single `make -j` from triggering the OOM killer on the neighbour.
+- **code-server** rather than openvscode-server: active maintenance, and above all the `--disable-file-downloads` and `--disable-file-uploads` options, which do not exist elsewhere (blind spot 4.3). `--auth none` behind the proxy, binding on the container IP only. Gallery neutralised by an empty `EXTENSIONS_GALLERY` in addition to `product.json`.
+- **C extensions**: `ms-vscode.cpptools` has a licence that forbids its use outside Microsoft products; it is not on Open VSX. The image embeds `llvm-vs-code-extensions.vscode-clangd` with the `clangd` binary (otherwise the extension tries to download it and fails, network cut off) and `webfreak.debug` for gdb. Both are on Open VSX and installed at build time without incident (P1).
+- **Machine settings: not immutable.** P1 could not establish that code-server 4.137 honours the machine scope for the seven settings that are set; a student can therefore modify them from the interface during their session (they come back at the next start, the data directory being a tmpfs). Consequence: `extensions.allowed` and `files.autoSave` are comfort, not barriers. The measured E5 barrier is the read-only extensions directory; the E15 safety net must therefore be the host-side ghost repository (3.3), not only autosave.
+- **Two Podman 5.7 constraints discovered**: `--dns=none` is refused together with `--network none` (the script only sets it on a real network); the `/run` and `~/.cache` tmpfs must be mounted `mode=1777` because Podman creates them `root:755` while the container runs as uid 1000, the `uid=`/`gid=` options not being accepted on `--tmpfs`.
 
-## 4. Angles morts du modèle de menace
+## 4. Blind spots of the threat model
 
-### 4.1 Le conteneur atteint l'hôte
+### 4.1 The container reaches the host
 
-Sur un réseau `internal`, le conteneur ne sort pas, mais il joint **tout ce qui écoute sur l'IP du pont** : le portail entier (interface enseignant, callback OIDC), et en développement Keycloak, Forgejo, la base. Un étudiant en examen pourrait appeler l'API enseignant depuis son terminal si un jeton traînait, ou simplement sonder les services. Le dossier ne le mentionne pas.
+On an `internal` network the container does not get out, but it reaches **everything that listens on the bridge IP**: the whole portal (teacher interface, OIDC callback), and in development Keycloak, Forgejo, the database. A student in an exam could call the teacher API from their terminal if a token were lying around, or simply probe the services. The framing document does not mention it.
 
-Contre-mesure double : la surface Git écoute **seulement** sur l'IP du pont ; les autres surfaces du portail écoutent sur les autres interfaces. Et une règle nftables `input` sur le pont ne laisse passer que le port Git. Les deux, parce qu'une liaison d'adresse se casse par une variable d'environnement.
+Double counter-measure: the Git surface listens **only** on the bridge IP; the portal's other surfaces listen on the other interfaces. Plus an nftables `input` rule on the bridge that lets only the Git port through. Both, because an address binding can be broken by an environment variable.
 
-### 4.2 L'espace d'examen amorcé depuis le dépôt de l'étudiant
+### 4.2 The exam workspace seeded from the student's repository
 
-Traité en 3.2. C'est le contournement le plus simple et le plus probable du dispositif : préparer chez soi, pousser, retrouver en examen. Il faut l'inscrire dans le modèle de menace et dans le modèle de données : un devoir en mode examen a un dépôt **modèle** comme source et un dépôt **cible** par étudiant, créé vide ou depuis le modèle, jamais l'inverse.
+Handled in 3.2. It is the simplest and most likely way around the scheme: prepare at home, push, get it back in the exam. It has to be written into the threat model and into the data model: an assignment in exam mode has a **template** repository as its source and a **target** repository per student, created empty or from the template, never the other way round.
 
-### 4.3 Entrée et sortie de fichiers par le navigateur
+### 4.3 File in and out through the browser
 
-L'explorateur de VS Code accepte le glisser-déposer de fichiers depuis le poste, et propose "Télécharger" au clic droit. En examen, c'est un canal d'entrée (antisèche depuis une clé USB si SEB laisse l'explorateur de fichiers accessible) et de sortie. Deux couches : `allowDownUploads` à faux dans la configuration SEB, et `--disable-file-downloads --disable-file-uploads` dans code-server. Le presse-papiers relève de SEB (`enablePrivateClipboard`).
+VS Code's explorer accepts drag-and-drop of files from the workstation and offers "Download" on right click. In an exam, that is an inbound channel (a cheat sheet from a USB stick if SEB leaves the file explorer reachable) and an outbound one. Two layers: `allowDownUploads` false in the SEB configuration, and `--disable-file-downloads --disable-file-uploads` in code-server. The clipboard is SEB's business (`enablePrivateClipboard`).
 
-### 4.4 Les clés SEB dans un parc mixte
+### 4.4 SEB keys in a mixed fleet
 
-Le Browser Exam Key dépend du **binaire** SEB (plateforme et version) et de la configuration. Une salle avec des Windows et des Mac produit deux BEK pour un même devoir. Le modèle de données doit porter une **liste** de BEK acceptés par devoir, pas un scalaire, et la procédure enseignant doit expliquer d'où on les lit (l'outil de configuration SEB les affiche).
+The Browser Exam Key depends on the SEB **binary** (platform and version) and on the configuration. A room with Windows and Mac machines produces two BEKs for the same assignment. The data model must carry a **list** of accepted BEKs per assignment, not a scalar, and the teacher procedure must explain where to read them (the SEB configuration tool displays them).
 
-La Config Key, elle, se calcule côté serveur depuis la configuration générée. L'algorithme de normalisation JSON (tri des clés, exclusion d'`originatorVersion`, sérialisation exacte) est piégeux ; les agents doivent porter l'implémentation de référence du plugin Moodle `quizaccess_seb` plutôt que la réinventer.
+The Config Key, on the other hand, is computed server-side from the generated configuration. The JSON normalisation algorithm (key sorting, exclusion of `originatorVersion`, exact serialisation) is treacherous; the agents must port the reference implementation of the Moodle plugin `quizaccess_seb` rather than reinvent it.
 
-Le chiffrement du fichier `.seb` n'apporte rien à l'intégrité (la Config Key la garantit) et un mot de passe à saisir crée de la friction en salle. Décision : fichier non chiffré en v1.
+Encrypting the `.seb` file brings nothing to integrity (the Config Key guarantees it) and a password to type creates friction in the room. Decision: unencrypted file in v1.
 
-### 4.5 Les en-têtes SEB et les websockets
+### 4.5 SEB headers and websockets
 
-Le dossier prévoit avec raison de vérifier à l'ouverture puis d'émettre un cookie. Il faut l'énoncer plus fort : il n'y a **aucune garantie** que SEB ajoute ses en-têtes aux mises à niveau websocket ni aux requêtes de service worker. Le proxy vers code-server ne doit **jamais** attendre d'en-tête SEB ; il ne connaît que le cookie de session, lié à la vérification initiale et à l'adresse client (D5). La preuve B doit tester précisément ce chemin.
+The framing document rightly plans to verify on opening and then issue a cookie. It must be said more strongly: there is **no guarantee** that SEB adds its headers to websocket upgrades or to service worker requests. The proxy to code-server must **never** expect a SEB header; it only knows the session cookie, bound to the initial verification and to the client address (D5). Proof B must test precisely that path.
 
-### 4.6 L'URL sur laquelle SEB calcule ses hachés
+### 4.6 The URL on which SEB computes its hashes
 
-Les deux en-têtes SEB sont `sha256(url + clé)` où l'URL est celle que le navigateur a demandée. Derrière un frontal TLS, le portail la reconstruit ; s'il la reconstruit depuis l'en-tête `Host` ou `X-Forwarded-Host`, l'étudiant choisit l'URL sur laquelle le haché est vérifié. Décision P4 : en production, l'origine publique est une constante de configuration (`SEB_PUBLIC_ORIGIN`), rien de ce que le client envoie n'entre dans le calcul.
+The two SEB headers are `sha256(url + key)` where the URL is the one the browser requested. Behind a TLS front end, the portal reconstructs it; if it reconstructs it from the `Host` or `X-Forwarded-Host` header, the student chooses the URL on which the hash is verified. Decision P4: in production the public origin is a configuration constant (`SEB_PUBLIC_ORIGIN`), nothing the client sends enters the computation.
 
-## 5. Réponses aux quatre questions de la section 13
+## 5. Answers to the four questions of section 13
 
-**Le canal Git sans secret est-il la bonne réponse ?** Oui sur le principe, non sur la forme. La forme la plus simple à garanties égales est : identification par IP source, `git http-backend` sur un dépôt de transit local, relais asynchrone vers GitHub par le portail. Moins de code, aucun secret dans le conteneur, rendu indépendant de GitHub.
+**Is the Git channel without a secret the right answer?** Yes in principle, no in form. The simplest form with equal guarantees is: identification by source IP, `git http-backend` on a local staging repository, asynchronous relay to GitHub by the portal. Less code, no secret in the container, submission independent of GitHub.
 
-**Le refus d'upload-pack est-il tenable ?** Il n'est ni tenable ni utile. La garantie visée se tient dans l'image (répertoire d'extensions en lecture seule, galerie neutralisée). Le pull est autorisé, et la protection d'examen consiste à amorcer le dépôt de transit depuis le modèle de l'enseignant.
+**Is refusing upload-pack tenable?** It is neither tenable nor useful. The intended guarantee is held in the image (read-only extensions directory, neutralised gallery). Pulling is allowed, and the exam protection consists in seeding the staging repository from the teacher's template.
 
-**Ne pas partir de Coder est-il justifié ?** Oui. Ce que Coder remplacerait, l'orchestrateur, représente quelques centaines de lignes autour de `podman run`. Ce qui fait la valeur du projet (vérification SEB, canal Git, réseau coupé, réglages d'image) serait de toute façon à écrire à côté de Coder, et le réseau `internal` serait à imposer contre son modèle par défaut.
+**Is not starting from Coder justified?** Yes. What Coder would replace, the orchestrator, amounts to a few hundred lines around `podman run`. What makes the value of the project (SEB verification, Git channel, cut-off network, image settings) would have to be written next to Coder anyway, and the `internal` network would have to be imposed against its default model.
 
-**L'interface enseignant tardive est-elle soutenable ?** Oui, parce que le premier enseignant est l'auteur du projet. Un devoir est un fichier YAML jusqu'au pilote. Une maquette non fonctionnelle n'apprendrait rien à n = 1 ; une séance de travaux pratiques vécue, si.
+**Is a late teacher interface sustainable?** Yes, because the first teacher is the author of the project. An assignment is a YAML file until the pilot. A non-functional mock-up would teach nothing at n = 1; a lived lab session would.
 
-## 6. Relation avec heig-classroom
+## 6. Relationship with heig-classroom
 
-Les deux portails partagent l'identité (Switch edu-ID), la GitHub App, la notion de devoir et les étudiants. La tentation de fusionner est légitime et sera forte. Position pour maintenant : **dépôt séparé, pile identique, frontières de module dessinées pour un montage ultérieur comme plugin Fastify** dans heig-classroom. Concrètement : le portail codespace ne connaît les dépôts GitHub que par une interface `RepoProvider` (fichier YAML en v0, client heig-classroom ensuite), et sa base ne duplique pas la table des étudiants au-delà de l'identifiant institutionnel et du login GitHub.
+The two portals share identity (Switch edu-ID), the GitHub App, the notion of an assignment and the students. The temptation to merge them is legitimate and will be strong. Position for now: **separate repository, identical stack, module boundaries drawn for a later mounting as a Fastify plugin** inside heig-classroom. Concretely: the codespace portal knows GitHub repositories only through a `RepoProvider` interface (YAML file in v0, heig-classroom client afterwards), and its database does not duplicate the student table beyond the institutional identifier and the GitHub login.
 
-Fusionner maintenant coûterait la vitesse d'itération du portail de test et exposerait la production de heig-classroom à un composant qui pilote un moteur de conteneurs en root. Plus tard, quand les invariants tiendront.
+Merging now would cost the test portal's iteration speed and would expose heig-classroom's production to a component that drives a container engine as root. Later, when the invariants hold.
 
-## 7. Ce que les agents ne peuvent pas faire
+## 7. What the agents cannot do
 
-La **preuve A** (code-server dans le navigateur de SEB, sur la plateforme de la salle) demande un poste Windows ou macOS avec SEB installé. C'est un test manuel de l'auteur, cinq minutes, à faire tôt : ouvrir n'importe quelle instance code-server publique de test depuis SEB, vérifier l'éditeur, le terminal, et le rechargement de page. La probabilité d'échec est faible (SEB Windows 3 embarque Chromium, SEB macOS WebKit, les deux font tourner VS Code Web) mais un échec change le projet.
+**Proof A** (code-server in SEB's browser, on the platform of the exam room) requires a Windows or macOS workstation with SEB installed. It is a manual test by the author, five minutes, to be done early: open any public test code-server instance from SEB, check the editor, the terminal, and reloading the page. The probability of failure is low (SEB Windows 3 embeds Chromium, SEB macOS WebKit, both run VS Code Web) but a failure changes the project.
 
-L'**installation de Podman** sur ce poste demande un mot de passe sudo. Commandes à passer une fois, à la main, avant de lancer les agents :
+**Installing Podman** on this workstation requires a sudo password. Commands to run once, by hand, before launching the agents:
 
 ```bash
 sudo apt install podman nftables crun netavark aardvark-dns passt uidmap
@@ -218,4 +218,4 @@ sudo systemctl enable --now podman.socket
 sudo podman info --format '{{.Host.NetworkBackend}} {{.Host.OCIRuntime.Name}}'
 ```
 
-Ces commandes ont été passées le 2026-09-17 ; la procédure complète, avec les deux pièges rencontrés (répertoire du socket recréé en 0700 par tmpfiles, mode distant à forcer), est dans [setup-poste.md](setup-poste.md). Tout le reste du jalon 0 et du jalon 1 se fait en agents, voir [jalon-0.md](jalon-0.md).
+These commands were run on 2026-09-17; the complete procedure, with the two pitfalls encountered (socket directory recreated as 0700 by tmpfiles, remote mode to be forced), is in [setup-poste.md](setup-poste.md). All the rest of milestone 0 and milestone 1 is done by agents, see [jalon-0.md](jalon-0.md).

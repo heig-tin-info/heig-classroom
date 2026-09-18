@@ -1,164 +1,164 @@
-# Déploiement du portail sur une VM
+# Deploying the portal on a VM
 
-Recette versionnée, rejouable, de la VM nue au poste de travail servi en HTTPS.
-Tout ce qui est décrit ici est exécuté par `deploy/bootstrap.sh` et
-`deploy/push.sh` ; rien n'est laissé à une manipulation manuelle.
+A versioned, replayable recipe, from the bare VM to a workspace served over
+HTTPS. Everything described here is executed by `deploy/bootstrap.sh` and
+`deploy/push.sh`; nothing is left to a manual step.
 
-Cible de référence : `code.chevallier.io` (Hetzner, Ubuntu 26.04.1, noyau 7.0,
-2 vCPU, 3,7 Go de RAM, 38 Go de disque, pas de swap, ports 80 et 443 ouverts
-par le pare-feu du fournisseur). Exécutée de bout en bout le 2026-09-17.
+Reference target: `code.chevallier.io` (Hetzner, Ubuntu 26.04.1, kernel 7.0,
+2 vCPU, 3.7 GB of RAM, 38 GB of disk, no swap, ports 80 and 443 open on the
+provider's firewall). Executed end to end on 2026-09-17.
 
 ---
 
-## 1. La recette, en deux commandes
+## 1. The recipe, in two commands
 
 ```bash
-# VM neuve : paquets, socket Podman, réseau clos, unités, Caddy, /etc/codespace/env
+# fresh VM: packages, Podman socket, closed network, units, Caddy, /etc/codespace/env
 apps/codespace/deploy/push.sh --bootstrap
 
-# ensuite, à chaque déploiement
+# afterwards, on every deployment
 apps/codespace/deploy/push.sh
 ```
 
-`push.sh --bootstrap` fait, dans l'ordre : construction locale, `rsync` de
-`deploy/ infra/ images/` vers `/srv/codespace/src`, exécution de
-`bootstrap.sh` sur la VM, `rsync` de la release, bascule du lien, construction
-de l'image étudiante si elle manque, redémarrage, attente de `/healthz` en
-local puis en HTTPS.
+`push.sh --bootstrap` does, in order: local build, `rsync` of
+`deploy/ infra/ images/` to `/srv/codespace/src`, execution of `bootstrap.sh`
+on the VM, `rsync` of the release, switching the symlink, building the student
+image if it is missing, restart, waiting for `/healthz` locally and then over
+HTTPS.
 
-Les deux scripts sont **idempotents** : rejoués, ils ne cassent rien et
-n'écrivent pas deux fois. `bootstrap.sh` a été rejoué deux fois sur la VM déjà
-en service, sans effet de bord ; `/etc/codespace/env`, qui porte les secrets,
-n'est écrit que s'il n'existe pas.
+Both scripts are **idempotent**: replayed, they break nothing and do not write
+twice. `bootstrap.sh` has been replayed twice on the VM already in service,
+without side effects; `/etc/codespace/env`, which carries the secrets, is
+written only if it does not exist.
 
-Variables d'environnement reconnues par les deux scripts :
-`CODESPACE_SSH` (défaut `root@code.chevallier.io`), `CODESPACE_DOMAIN`,
+Environment variables recognised by both scripts:
+`CODESPACE_SSH` (default `root@code.chevallier.io`), `CODESPACE_DOMAIN`,
 `CODESPACE_CLASSROOM_URL`, `CODESPACE_IMAGE_TAG`.
 
-Un pas manuel subsiste, et il ne s'automatise pas : la clé privée de la
-GitHub App, qui vient du droplet de classroom (§ 5). Sans elle, les dépôts des
-étudiants — privés — sont inaccessibles.
+One manual step remains, and it cannot be automated: the private key of the
+GitHub App, which comes from the classroom droplet (§ 5). Without it, the
+students' repositories — private ones — are unreachable.
 
-Deux outils accompagnent la recette, tous deux jouant le rôle de classroom en
-signant un jeton de lancement avec le secret partagé :
+Two tools accompany the recipe, both playing the role of classroom by signing a
+launch token with the shared secret:
 
-| commande | ce qu'elle fait |
+| command | what it does |
 | --- | --- |
-| `deploy/smoke.ts` | preuve fonctionnelle complète sur un devoir de fumée (§ 10) |
-| `deploy/resume.ts` | rouvre **une session existante**, par son `sub`, son devoir et son dépôt (§ 5) |
+| `deploy/smoke.ts` | complete functional proof on a smoke assignment (§ 10) |
+| `deploy/resume.ts` | reopens **an existing session**, by its `sub`, its assignment and its repository (§ 5) |
 
-### Ce que `bootstrap.sh` pose
+### What `bootstrap.sh` sets up
 
-| # | Élément | Détail |
+| # | Item | Detail |
 | --- | --- | --- |
-| 1 | swap | `/swapfile` de 2 Go, `/etc/fstab`, `vm.swappiness=10` |
-| 2 | paquets | `podman crun netavark aardvark-dns passt uidmap nftables caddy git curl rsync python3 nodejs` |
-| 3 | `--userns=auto` | ligne `containers:2147483647:2147483648` dans `/etc/subuid` et `/etc/subgid` |
-| 4 | socket Podman rootful | groupe `podman`, drop-in `SocketGroup`/`SocketMode`, **surcharge tmpfiles** |
-| 5 | utilisateur | `codespace`, système, sans shell, membre de `podman`, `$HOME` en `/srv/codespace/var/home` |
-| 6 | arborescence | voir § 2 |
+| 1 | swap | 2 GB `/swapfile`, `/etc/fstab`, `vm.swappiness=10` |
+| 2 | packages | `podman crun netavark aardvark-dns passt uidmap nftables caddy git curl rsync python3 nodejs` |
+| 3 | `--userns=auto` | line `containers:2147483647:2147483648` in `/etc/subuid` and `/etc/subgid` |
+| 4 | rootful Podman socket | group `podman`, `SocketGroup`/`SocketMode` drop-in, **tmpfiles override** |
+| 5 | user | `codespace`, system, no shell, member of `podman`, `$HOME` in `/srv/codespace/var/home` |
+| 6 | directory tree | see § 2 |
 | 7 | `br_netfilter` | `/etc/modules-load.d/codespace.conf` + `/etc/sysctl.d/99-codespace-bridge.conf` |
-| 8 | configuration | `/etc/codespace/env`, secrets tirés de `/dev/urandom` |
+| 8 | configuration | `/etc/codespace/env`, secrets drawn from `/dev/urandom` |
 | 9 | systemd | `codespace.service`, `codespace-net.service`, `codespace-shadow.{service,timer}` |
-| 10 | Caddy | `/etc/caddy/Caddyfile`, TLS Let's Encrypt automatique |
-| 11 | réseau clos | `infra/net/setup.sh` : réseau `codespace`, ancrage, tables nft |
+| 10 | Caddy | `/etc/caddy/Caddyfile`, automatic Let's Encrypt TLS |
+| 11 | closed network | `infra/net/setup.sh`: `codespace` network, anchor, nft tables |
 
-Les deux pièges Podman de [setup-poste.md](setup-poste.md) sont traités :
+The two Podman pitfalls of [setup-poste.md](setup-poste.md) are handled:
 
-- **`/run/podman` recréé en `0700 root:root`.** `/usr/lib/tmpfiles.d/podman.conf`
-  le refait à chaque démarrage ; la surcharge `/etc/tmpfiles.d/podman.conf` du
-  même nom (`D! /run/podman 0750 root podman`) prime. Vérifié après un
-  redémarrage réel : `/run/podman` est en `750 root:podman`, et le service, qui
-  tourne en `codespace`, joint le socket.
-- **`--remote` obligatoire.** Aucun script de `deploy/` n'appelle `podman` nu :
-  `push.sh` et les scripts d'`infra/` passent tous par
-  `podman --remote --url unix:///run/podman/podman.sock`, via une fonction
-  `pd()`. Sans lui le binaire bascule en rootless local et mesure autre chose.
+- **`/run/podman` recreated as `0700 root:root`.** `/usr/lib/tmpfiles.d/podman.conf`
+  redoes it at every boot; the `/etc/tmpfiles.d/podman.conf` override of the
+  same name (`D! /run/podman 0750 root podman`) takes precedence. Verified after
+  a real reboot: `/run/podman` is `750 root:podman`, and the service, which runs
+  as `codespace`, reaches the socket.
+- **`--remote` mandatory.** No script under `deploy/` calls `podman` bare:
+  `push.sh` and the `infra/` scripts all go through
+  `podman --remote --url unix:///run/podman/podman.sock`, via a `pd()`
+  function. Without it the binary falls back to local rootless and measures
+  something else.
 
 ---
 
-## 2. Arborescence sur la VM
+## 2. Directory tree on the VM
 
-```
+```text
 /srv/codespace/
-├── src/                     rsync de apps/codespace/{deploy,infra,images}
+├── src/                     rsync of apps/codespace/{deploy,infra,images}
 │   ├── deploy/              bootstrap.sh, push.sh, shadow-snapshot.sh, Caddyfile
-│   ├── infra/               net/, nft/, seccomp/   <- SECCOMP_PROFILE pointe ici
-│   └── images/c-dev/        Containerfile de l'image étudiante
+│   ├── infra/               net/, nft/, seccomp/   <- SECCOMP_PROFILE points here
+│   └── images/c-dev/        Containerfile of the student image
 ├── releases/
-│   └── 20260917-201030/     arbre autonome (dist/, node_modules/, drizzle/) ~114 Mo
+│   └── 20260917-201030/     self-contained tree (dist/, node_modules/, drizzle/) ~114 MB
 ├── app -> releases/20260917-201030
-├── volumes/                 <login>/<devoir>/{work,staging.git,shadow.git}   0750 codespace
+├── volumes/                 <login>/<assignment>/{work,staging.git,shadow.git}   0750 codespace
 └── var/
-    ├── codespace.sqlite     + -wal, -shm (WAL)                              0640 codespace
-    └── home/                $HOME de l'utilisateur du service
+    ├── codespace.sqlite     + -wal, -shm (WAL)                                  0640 codespace
+    └── home/                $HOME of the service user
 
-/etc/codespace/env           0640 root:codespace — TOUTE la configuration, trois secrets
+/etc/codespace/env           0640 root:codespace — ALL the configuration, three secrets
 /etc/caddy/Caddyfile
 /etc/systemd/system/codespace{,-net,-shadow}.{service,timer}
 /etc/tmpfiles.d/podman.conf  /etc/systemd/system/podman.socket.d/group.conf
 /etc/modules-load.d/codespace.conf  /etc/sysctl.d/99-codespace-{bridge,swap}.conf
 ```
 
-`infra/` existe en deux exemplaires : celui de `/srv/codespace/src` — le seul
-utilisé à l'exécution, par les unités systemd et par `SECCOMP_PROFILE` — et
-celui qui voyage dans la release parce que `pnpm deploy` copie tout le paquet.
-Le second est inerte. Conséquence à connaître : **un retour arrière de
-l'application ne revient pas en arrière sur `infra/`**. Le profil seccomp et
-les règles nft sont versionnés et changent bien plus rarement que le code ; si
-un jour l'un des deux devait suivre la release, il faudrait faire pointer
-`SECCOMP_PROFILE` sur `/srv/codespace/app/infra/…`.
+`infra/` exists in two copies: the one under `/srv/codespace/src` — the only one
+used at run time, by the systemd units and by `SECCOMP_PROFILE` — and the one
+that travels inside the release because `pnpm deploy` copies the whole package.
+The second is inert. A consequence to be aware of: **rolling the application
+back does not roll `infra/` back**. The seccomp profile and the nft rules are
+versioned and change far less often than the code; if one day one of the two
+had to follow the release, `SECCOMP_PROFILE` would have to point at
+`/srv/codespace/app/infra/…`.
 
-`seed/` voyage aussi et ne sert à rien en production : la graine YAML est le
-mode autonome, elle passe par `scripts/seed.ts` qui n'est pas déployé (`tsx`
-est une dépendance de développement). `push.sh` vérifie explicitement la
-présence de `dist/server.js`, `drizzle/meta/_journal.json`,
-`node_modules/better-sqlite3` et des deux paquets d'espace de travail, et
-refuse un arbre qui contiendrait des dépendances de développement.
+`seed/` travels too and is useless in production: the YAML seed is the
+standalone mode, it goes through `scripts/seed.ts`, which is not deployed
+(`tsx` is a development dependency). `push.sh` explicitly checks for the
+presence of `dist/server.js`, `drizzle/meta/_journal.json`,
+`node_modules/better-sqlite3` and of the two workspace packages, and refuses a
+tree that would contain development dependencies.
 
-Détail qui a coûté une passe : **`pnpm deploy` applique les règles de
-publication npm**, donc `dist/` — présent dans le `.gitignore` du paquet — n'est
-pas copié. `push.sh` le recopie à la main, exactement comme le `Dockerfile` de
-classroom recopie `apps/server/drizzle`.
+A detail that cost one pass: **`pnpm deploy` applies the npm publication
+rules**, so `dist/` — which is in the package's `.gitignore` — is not copied.
+`push.sh` copies it back by hand, exactly as classroom's `Dockerfile` copies
+`apps/server/drizzle` back.
 
 ---
 
-## 3. Configuration et secrets
+## 3. Configuration and secrets
 
-Tout vit dans **`/etc/codespace/env`**, lu par `EnvironmentFile=` de
-`codespace.service`. Le fichier est en `0640 root:codespace` : le service le
-lit, personne d'autre.
+Everything lives in **`/etc/codespace/env`**, read by the `EnvironmentFile=` of
+`codespace.service`. The file is `0640 root:codespace`: the service reads it,
+nobody else.
 
-Trois secrets y sont tirés de `/dev/urandom` à la création, 48 caractères
-alphanumériques chacun, et ne sont **jamais** réécrits par un `bootstrap.sh`
-rejoué :
+Three secrets are drawn there from `/dev/urandom` at creation time, 48
+alphanumeric characters each, and are **never** rewritten by a replayed
+`bootstrap.sh`:
 
-| Clé | Rôle |
+| Key | Role |
 | --- | --- |
-| `CODESPACE_LAUNCH_SECRET` | HS256 partagé avec classroom. **La même valeur doit être posée côté classroom**, sans quoi `/launch` refuse tous les jetons. |
-| `COOKIE_SECRET` | signature du cookie de connexion du portail |
-| `EXAM_COOKIE_SECRET` | HMAC du cookie `exam_session` |
+| `CODESPACE_LAUNCH_SECRET` | HS256 shared with classroom. **The same value must be set on the classroom side**, otherwise `/launch` refuses every token. |
+| `COOKIE_SECRET` | signature of the portal's login cookie |
+| `EXAM_COOKIE_SECRET` | HMAC of the `exam_session` cookie |
 
-Un quatrième secret n'est **pas** dans ce fichier et ne s'invente pas : la clé
-privée de la GitHub App, `/etc/codespace/github-app.pem`, en `0640
-root:codespace`. Elle est copiée depuis le droplet de classroom — c'est la
-même App — et `GITHUB_APP_PRIVATE_KEY_PATH` la désigne. Procédure en § 5. Une
-PEM tient sur plusieurs lignes : elle ne pourrait pas vivre dans un
-`EnvironmentFile=`.
+A fourth secret is **not** in that file and cannot be invented: the private key
+of the GitHub App, `/etc/codespace/github-app.pem`, in `0640
+root:codespace`. It is copied from the classroom droplet — it is the same App —
+and `GITHUB_APP_PRIVATE_KEY_PATH` points at it. Procedure in § 5. A PEM spans
+several lines: it could not live in an `EnvironmentFile=`.
 
-Le secret de lancement se lit sur la VM, et nulle part ailleurs :
+The launch secret is read on the VM, and nowhere else:
 
 ```bash
 ssh root@code.chevallier.io "sed -n 's/^CODESPACE_LAUNCH_SECRET=//p' /etc/codespace/env"
 ```
 
-Valeurs de production notables :
+Notable production values:
 
-```
+```text
 NODE_ENV=production   HOST=127.0.0.1   PORT=3100
 PUBLIC_URL=https://code.chevallier.io   SEB_PUBLIC_ORIGIN=https://code.chevallier.io
 CLASSROOM_URL=https://classroom.chevallier.io
-SEB_VERIFIER=real                      (le mode simulé est refusé par loadConfig en production)
+SEB_VERIFIER=real                      (the simulated mode is refused by loadConfig in production)
 DATABASE_PATH=/srv/codespace/var/codespace.sqlite
 VOLUMES_ROOT=/srv/codespace/volumes
 SECCOMP_PROFILE=/srv/codespace/src/infra/seccomp/codespace.json
@@ -166,23 +166,23 @@ PODMAN_URL=unix:///run/podman/podman.sock
 CODESPACE_NETWORK=codespace  CODESPACE_GATEWAY=10.77.0.254  CODESPACE_GIT_PORT=9418
 CODESPACE_IMAGE=codespace/c-dev:4.137.0  CODESPACE_MEMORY=1536m  CODESPACE_CPUS=1
 SESSION_GRACE_MS=600000  SESSION_GC_INTERVAL_MS=60000  SHADOW_INTERVAL_MS=86400000
-OIDC_ISSUER=            (vide : voir § 4)
-FORGE_KIND=github  FORGE_URL=https://github.com  FORGE_TOKEN=   (voir § 5)
-GITHUB_APP_ID=<identifiant de l'App>  GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
-TRUST_PROXY=            (interdit en production : voir § 6)
+OIDC_ISSUER=            (empty: see § 4)
+FORGE_KIND=github  FORGE_URL=https://github.com  FORGE_TOKEN=   (see § 5)
+GITHUB_APP_ID=<the App identifier>  GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
+TRUST_PROXY=            (forbidden in production: see § 6)
 ```
 
-**Plafond de sessions simultanées** : 3,7 Go de RAM, `CODESPACE_MEMORY=1536m`
-par session, environ 600 Mo pour l'hôte et le portail. Deux sessions tiennent,
-une troisième entame le swap. Le quota par enseignant (`quota.maxActiveSessions`
-du `PUT`) est le seul garde-fou ; il vient de classroom et doit être posé en
-conséquence sur cette VM.
+**Ceiling of simultaneous sessions**: 3.7 GB of RAM, `CODESPACE_MEMORY=1536m`
+per session, about 600 MB for the host and the portal. Two sessions fit, a
+third one starts eating into the swap. The per-teacher quota
+(`quota.maxActiveSessions` of the `PUT`) is the only safeguard; it comes from
+classroom and must be set accordingly for this VM.
 
-### Surcharger un réglage pour un essai
+### Overriding a setting for a trial
 
-Un `Environment=` de drop-in **ne l'emporte pas** sur l'`EnvironmentFile=` du
-fichier principal — mesuré, la valeur du fichier gagne. Il faut un second
-`EnvironmentFile`, appliqué après :
+An `Environment=` in a drop-in **does not win** over the `EnvironmentFile=` of
+the main file — measured, the file's value wins. A second `EnvironmentFile` is
+needed, applied afterwards:
 
 ```bash
 printf 'SESSION_GRACE_MS=5000\nSESSION_GC_INTERVAL_MS=2000\n' > /etc/codespace/env.test
@@ -191,64 +191,63 @@ mkdir -p /etc/systemd/system/codespace.service.d
 printf '[Service]\nEnvironmentFile=/etc/codespace/env.test\n' \
   > /etc/systemd/system/codespace.service.d/zz-test.conf
 systemctl daemon-reload && systemctl restart codespace.service
-# … puis, sans faute, retour à la production :
+# … then, without fail, back to production:
 rm -f /etc/systemd/system/codespace.service.d/zz-test.conf /etc/codespace/env.test
 systemctl daemon-reload && systemctl restart codespace.service
 ```
 
 ---
 
-## 4. Pas de fournisseur d'identité sur cette VM
+## 4. No identity provider on this VM
 
-Switch edu-ID n'est pas déclaré et il n'y a pas de Keycloak de production. Les
-étudiants arrivent **tous** par le jeton de lancement de classroom
-([integration-classroom.md](integration-classroom.md)). `OIDC_ISSUER` vide dit
-exactement cela :
+Switch edu-ID is not declared and there is no production Keycloak. The students
+**all** arrive through classroom's launch token
+([integration-classroom.md](integration-classroom.md)). An empty `OIDC_ISSUER`
+says exactly that:
 
-- `/auth/login`, `/auth/callback` et `/auth/logout` ne sont **pas enregistrées**
-  et répondent 404 ;
-- une page qui exige un utilisateur (`/`, `/teacher/sessions`) répond **503**
-  avec un texte qui nomme la cause, au lieu de rediriger vers un 404 ;
-- `/launch`, `/api/assignments/*`, le proxy et le canal Git sont entiers.
+- `/auth/login`, `/auth/callback` and `/auth/logout` are **not registered** and
+  answer 404;
+- a page that requires a user (`/`, `/teacher/sessions`) answers **503** with a
+  text that names the cause, instead of redirecting to a 404;
+- `/launch`, `/api/assignments/*`, the proxy and the Git channel are whole.
 
-Ce n'est pas un raccourci d'identité : l'invariant 4 dit que la connexion OIDC
-est réelle, et elle l'est — elle est absente, pas remplacée. Il n'existe aucune
-autre façon de devenir `request.user`. La découverte OIDC était **déjà
-paresseuse** avant ce déploiement (`OidcProvider.configuration()` : un IdP
-injoignable n'empêche pas le démarrage) ; ce qui manquait était le cas
-« aucun IdP du tout ». Quatre tests unitaires le couvrent
+This is not an identity shortcut: invariant 4 says that the OIDC login is real,
+and it is — it is absent, not replaced. There is no other way of becoming
+`request.user`. OIDC discovery was **already lazy** before this deployment
+(`OidcProvider.configuration()`: an unreachable IdP does not prevent start-up);
+what was missing was the "no IdP at all" case. Four unit tests cover it
 (`src/auth/oidcDisabled.test.ts`).
 
-Pour brancher l'IdP plus tard : poser `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
-`OIDC_CLIENT_SECRET`, et **ajouter les hôtes d'edu-ID à
-`SEB_EXTRA_ALLOWED_HOSTS`** — sans quoi le filtre d'URL de Safe Exam Browser
-bloquerait la page de connexion (analyse.md, docs/pistes.md).
+To connect the IdP later: set `OIDC_ISSUER`, `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, and **add the edu-ID hosts to
+`SEB_EXTRA_ALLOWED_HOSTS`** — without which Safe Exam Browser's URL filter
+would block the login page (analyse.md, docs/pistes.md).
 
 ---
 
-## 5. La GitHub App, et ce qui arrive sans elle
+## 5. The GitHub App, and what happens without it
 
-C'est **la même App que heig-classroom** — mêmes noms de variables, même
-fichier PEM — parce que c'est elle qui a créé les dépôts des étudiants et que
-personne d'autre n'y a accès.
+It is **the same App as heig-classroom** — same variable names, same PEM file —
+because it is the one that created the students' repositories and nobody else
+has access to them.
 
-| Clé de `/etc/codespace/env` | Valeur |
+| Key of `/etc/codespace/env` | Value |
 | --- | --- |
 | `FORGE_KIND` | `github` |
 | `FORGE_URL` | `https://github.com` |
-| `GITHUB_APP_ID` | l'identifiant numérique de l'App, recopié du `.env.prod` de classroom |
+| `GITHUB_APP_ID` | the numeric identifier of the App, copied from classroom's `.env.prod` |
 | `GITHUB_APP_PRIVATE_KEY_PATH` | `/etc/codespace/github-app.pem` |
 
-L'installation n'est **pas** un réglage : le portail la résout par
-`GET /orgs/{org}/installation`, organisation par organisation, à partir du
-`owner` du dépôt — un portail sert plusieurs classes, donc plusieurs
-organisations GitHub. Le jeton d'installation vaut une heure ; il est mis en
-cache par installation et renouvelé une minute avant son expiration.
+The installation is **not** a setting: the portal resolves it through
+`GET /orgs/{org}/installation`, organisation by organisation, from the `owner`
+of the repository — one portal serves several classes, hence several GitHub
+organisations. The installation token is valid for one hour; it is cached per
+installation and renewed one minute before it expires.
 
-### Copier la clé privée, sans la poser sur le disque du poste
+### Copying the private key without putting it on the workstation's disk
 
-La PEM vit déjà sur le droplet de classroom. Elle passe d'un droplet à l'autre
-en un seul tuyau, sans jamais toucher le poste :
+The PEM already lives on the classroom droplet. It goes from one droplet to the
+other in a single pipe, without ever touching the workstation:
 
 ```bash
 ssh root@classroom.chevallier.io 'cat /opt/heig-classroom/secrets/heig-classroom.private-key.pem' \
@@ -256,296 +255,293 @@ ssh root@classroom.chevallier.io 'cat /opt/heig-classroom/secrets/heig-classroom
       && chown root:codespace /etc/codespace/github-app.pem \
       && chmod 0640 /etc/codespace/github-app.pem'
 
-# /etc/codespace doit être TRAVERSABLE par le portail : `env` est lu par
-# systemd (en root) avant le démarrage, mais la PEM est lue par le processus.
+# /etc/codespace must be TRAVERSABLE by the portal: `env` is read by
+# systemd (as root) before start-up, but the PEM is read by the process.
 ssh root@code.chevallier.io 'chgrp codespace /etc/codespace && chmod 0750 /etc/codespace'
 
-# l'identifiant, lui, n'est pas un secret
+# the identifier, for its part, is not a secret
 ssh root@classroom.chevallier.io "sed -n 's/^GITHUB_APP_ID=//p' /opt/heig-classroom/.env.prod"
-# … puis, sur la VM du portail, dans /etc/codespace/env :
-#   GITHUB_APP_ID=<la valeur lue>
+# … then, on the portal's VM, in /etc/codespace/env:
+#   GITHUB_APP_ID=<the value read>
 #   GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
 systemctl restart codespace.service
 ```
 
-`deploy/bootstrap.sh` fait partie de la recette : il écrit les deux clés dans
-un `/etc/codespace/env` neuf, **les ajoute** à un fichier existant qui ne les
-a pas (elles ne portent aucun secret), remet la PEM en `0640 root:codespace`
-si elle est là, et rappelle la commande de copie si elle manque. Il ne crée
-jamais la clé : elle ne s'invente pas.
+`deploy/bootstrap.sh` is part of the recipe: it writes the two keys into a
+fresh `/etc/codespace/env`, **adds them** to an existing file that does not
+have them (they carry no secret), puts the PEM back to `0640 root:codespace`
+if it is there, and reminds the copy command if it is missing. It never creates
+the key: that cannot be invented.
 
-### Ce qui arrive sans App
+### What happens without the App
 
-Le portail construit une forge **partielle** : tout ce qui ne demande pas de
-jeton fonctionne — l'URL de clonage d'un dépôt **public** —, et tout le reste
-refuse explicitement.
+The portal builds a **partial** forge: everything that does not require a token
+works — the clone URL of a **public** repository —, and everything else refuses
+explicitly.
 
-- Le relais : le push de l'étudiant **réussit** et le `PushEvent` est écrit
-  (invariant 7) ; la ligne reste `pending` avec, dans `last_error`, « GitHub
-  App non configurée : GITHUB_APP_ID et GITHUB_APP_PRIVATE_KEY_PATH sont
-  absents de /etc/codespace/env. Seuls les dépôts publics sont accessibles. »
-  Elle ne passe **jamais** `failed` : une forge non configurée n'est pas une
-  panne, et épuiser le budget de tentatives ferait perdre un rendu qui n'a
-  jamais eu de destination. Poser les identifiants suffit à vider la file, le
-  relais reprend seul. Le service n'est pas affecté : une tentative toutes les
-  minutes, sans appel réseau (l'erreur est levée avant).
-- L'amorçage de l'espace de travail : le dépôt d'un étudiant provisionné par
-  classroom est **privé**, le `git fetch` est refusé, et **la session ne
-  démarre pas**. Voir la section suivante.
+- The relay: the student's push **succeeds** and the `PushEvent` is written
+  (invariant 7); the row stays `pending` with, in `last_error`, "GitHub App
+  not configured: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH are missing
+  from /etc/codespace/env. Only public repositories are reachable."
+  It **never** goes to `failed`: an unconfigured forge is not an outage, and
+  exhausting the retry budget would lose a submission that never had a
+  destination. Setting the credentials is enough to drain the queue, the relay
+  resumes on its own. The service is not affected: one attempt per minute, with
+  no network call (the error is raised before).
+- Workspace seeding: the repository of a student provisioned by classroom is
+  **private**, the `git fetch` is refused, and **the session does not start**.
+  See the next section.
 
-### Échec d'amorçage : la session ne démarre pas
+### Seeding failure: the session does not start
 
-Mesuré en production le 2026-09-17, et c'est ce que ce correctif change : le
-portail ouvrait l'éditeur sur un `work/` vide, sans un mot, et l'étudiant
-travaillait à côté de son rendu. Désormais :
+Measured in production on 2026-09-17, and that is what this fix changes: the
+portal used to open the editor on an empty `work/`, without a word, and the
+student worked next to their submission. From now on:
 
-- aucun conteneur n'est lancé ;
-- l'étudiant reçoit une page 503 « Espace de travail impossible à préparer :
+- no container is started;
+- the student gets a 503 page « Espace de travail impossible à préparer :
   &lt;cause courte&gt; ; signalez-le à votre enseignant. » — `dépôt org/x
   introuvable`, `accès refusé au dépôt org/x`, `le portail n'a pas les accès à
-  org/x` ;
-- le journal porte un `warn` avec la cause complète, le dépôt, le mode et
-  l'identifiant de session. Le jeton n'y figure jamais : il ne passe que par
-  `GIT_CONFIG_VALUE_0`, et `redactSecrets` le retire des messages d'erreur.
+  org/x`;
+- the log carries a `warn` with the full cause, the repository, the mode and
+  the session identifier. The token never appears there: it only travels
+  through `GIT_CONFIG_VALUE_0`, and `redactSecrets` removes it from error
+  messages.
 
-**Une exception, et une seule** : un dépôt cible **sans aucune branche** en
-mode travaux pratiques. C'est l'état d'un dépôt que classroom vient de créer
-et que l'étudiant n'a jamais poussé. Le `fetch` réussit, rapporte zéro
-référence, l'espace de travail s'ouvre légitimement vide et le journal le dit
-en `info` (« dépôt cible sans aucune branche »). En mode examen, au contraire,
-un modèle sans branche refuse la session : l'étudiant n'aurait pas l'énoncé.
+**One exception, and only one**: a target repository **with no branch at all**
+in lab mode. That is the state of a repository classroom has just created and
+that the student has never pushed to. The `fetch` succeeds, reports zero refs,
+the workspace legitimately opens empty and the log says so at `info` level
+("target repository with no branch at all"). In exam mode, on the contrary, a
+template with no branch refuses the session: the student would not have the
+assignment text.
 
-### Mesuré sur la VM le 2026-09-17
+### Measured on the VM on 2026-09-17
 
-Session réelle `21ad5a11-…` (dépôt privé
-`heig-test-classroom2/labo-02-quadratic-yves-chevallier`, branche `master`),
-reprise par un jeton de lancement signé depuis le poste
-(`deploy/resume.ts`) :
+Real session `21ad5a11-…` (private repository
+`heig-test-classroom2/labo-02-quadratic-yves-chevallier`, branch `master`),
+resumed by a launch token signed from the workstation
+(`deploy/resume.ts`):
 
-- `/launch` répond `303` en 4,9 s, aucun conteneur supplémentaire ;
-- `/work` contient les 15 entrées du dépôt (`quadratic.c`, `Makefile`,
-  `tests/`, `.vscode/`, …) et le fichier `test` que l'étudiant avait écrit,
-  toujours non suivi ;
-- `git status` : `## master...origin/master`, arbre propre ;
-- `git push` **sans argument** depuis le conteneur arrive dans `staging.git`,
-  le `PushEvent` passe `relayed` en 2,2 s, et `heads/master` du dépôt GitHub
-  privé pointe sur le commit poussé. C'est la première preuve du relais réel
-  vers GitHub.
+- `/launch` answers `303` in 4.9 s, no additional container;
+- `/work` contains the 15 entries of the repository (`quadratic.c`, `Makefile`,
+  `tests/`, `.vscode/`, …) and the `test` file the student had written, still
+  untracked;
+- `git status`: `## master...origin/master`, clean tree;
+- `git push` **with no argument** from the container lands in `staging.git`,
+  the `PushEvent` goes `relayed` in 2.2 s, and `heads/master` of the private
+  GitHub repository points at the pushed commit. That is the first proof of the
+  real relay to GitHub.
 
-Trois choses se sont vues à cette occasion, et sont corrigées ici :
+Three things showed up on that occasion, and are fixed here:
 
-1. `/etc/codespace` était en `0750 root:root` : le portail ne pouvait pas le
-   **traverser** pour lire la PEM (`EACCES`). Le répertoire est désormais en
-   `0750 root:codespace`, posé par `bootstrap.sh`.
-2. Le transport git de github.com refuse un jeton d'installation en `Bearer`
-   (« remote: invalid credentials ») : il faut `Basic x-access-token:<jeton>`.
-   Voir `git/forge.ts`.
-3. `ensureStagingRepo` ne recevait pas la branche par défaut du dépôt et
-   retombait sur la première branche venue — `grading`, écrite par la CI de
-   classroom, au lieu de `master`. La branche vient maintenant du jeton de
-   lancement (`defaultBranchOf`).
+1. `/etc/codespace` was `0750 root:root`: the portal could not **traverse** it
+   to read the PEM (`EACCES`). The directory is now `0750 root:codespace`, set
+   by `bootstrap.sh`.
+2. The github.com git transport refuses an installation token as `Bearer`
+   ("remote: invalid credentials"): `Basic x-access-token:<token>` is required.
+   See `git/forge.ts`.
+3. `ensureStagingRepo` was not given the repository's default branch and fell
+   back on whichever branch came first — `grading`, written by classroom's CI,
+   instead of `master`. The branch now comes from the launch token
+   (`defaultBranchOf`).
 
-**Reste ouvert** : la GitHub App n'est pas installée sur l'organisation
-`heig-tin-info`. Le `PushEvent` de la session de fumée reste donc `pending`
-avec « GitHub App non installée sur l'organisation heig-tin-info ». C'est le
-comportement voulu — installer l'App sur cette organisation suffit à vider la
-file.
+**Still open**: the GitHub App is not installed on the `heig-tin-info`
+organisation. The `PushEvent` of the smoke session therefore stays `pending`
+with "GitHub App not installed on organisation heig-tin-info". That is the
+intended behaviour — installing the App on that organisation is enough to drain
+the queue.
 
-### Le miroir n'est repris qu'au premier amorçage
+### The mirror is only taken at the first seeding
 
-En mode travaux pratiques, le dépôt de transit est amorcé depuis le dépôt de
-l'étudiant **tant qu'il n'a aucune référence**. Ensuite, il ne l'est plus : un
-`fetch --prune` de force ramènerait les références de GitHub par dessus celles
-que l'étudiant a poussées mais que le relais n'a pas encore transmises. En
-mode examen le modèle est repris à chaque ouverture, et c'est voulu — c'est
-ainsi qu'un correctif d'énoncé se propage en cours d'épreuve (invariant 6).
+In lab mode, the staging repository is seeded from the student's repository
+**as long as it has no ref at all**. Afterwards, it is not any more: a forced
+`fetch --prune` would bring GitHub's refs back over those the student has
+pushed but that the relay has not transmitted yet. In exam mode the template is
+taken again at every opening, and that is intended — that is how a fix to the
+assignment text propagates during the exam (invariant 6).
 
-### Reprise d'une session dont l'espace de travail est resté vide
+### Resuming a session whose workspace stayed empty
 
-À l'ouverture d'une session existante dont `staging.git` n'a **aucune
-référence**, le portail réamorce avant de relancer le conteneur, puis met
-`work/` en état : branche locale sur la branche par défaut du dépôt (`master`
-aussi bien que `main`), avec suivi de `origin/<branche>` — sans quoi `git
-pull` et `git push` sans argument ne marchent pas dans le conteneur.
+When opening an existing session whose `staging.git` has **no ref**, the portal
+seeds it again before restarting the container, then puts `work/` in shape: a
+local branch on the repository's default branch (`master` as well as `main`),
+tracking `origin/<branch>` — without which `git pull` and `git push` with no
+argument do not work inside the container.
 
-Un détail de propriété commande la manœuvre : après le premier `podman run`,
-l'option `:U` a donné `work/` à la plage d'UID du conteneur et le portail
-**n'y écrit plus**. L'achèvement passe alors par `podman exec` dans le
-conteneur qui vient de démarrer (`sessions/workspace.ts`,
-`completionScript`) : `git fetch origin`, `git checkout -B <branche>
-origin/<branche>`, `git branch --set-upstream-to`. Le `fetch` va sur
-`portal.internal:9418`, authentifié par l'adresse IP source : **aucun secret
-n'entre dans le conteneur** (invariant 1).
+An ownership detail governs the manoeuvre: after the first `podman run`, the
+`:U` option has given `work/` to the container's UID range and the portal
+**writes into it no more**. Completion then goes through `podman exec` inside
+the container that has just started (`sessions/workspace.ts`,
+`completionScript`): `git fetch origin`, `git checkout -B <branch>
+origin/<branch>`, `git branch --set-upstream-to`. The `fetch` goes to
+`portal.internal:9418`, authenticated by the source IP address: **no secret
+enters the container** (invariant 1).
 
-Deux garde-fous :
+Two safeguards:
 
-- un `work/` qui porte déjà **un commit** n'est jamais retouché : l'étudiant
-  est maître de son dépôt ;
-- les fichiers **non suivis** qu'il a écrits dans un espace de travail vide
-  sont conservés — `checkout -B` depuis une branche non née n'y touche pas. Si
-  l'un d'eux porte le nom d'un fichier qu'apporte le dépôt, `checkout` refuse
-  plutôt que de l'écraser : le journal le dit en `warn` et la session s'ouvre
-  quand même, avec un espace de travail incomplet. C'est le seul cas où le
-  dépôt n'est pas récupéré, et il vaut mieux que la perte du travail.
-
----
-
-## 6. L'adresse du client derrière Caddy
-
-`TRUST_PROXY` est, dans `src/auth/config.ts`, un **booléen de développement** :
-il pose `trustProxy: true` sur Fastify, ce qui rend `request.ip` contrôlable
-par n'importe quel `X-Forwarded-For` venu de n'importe où. `loadConfig()`
-refuse de démarrer avec, en production. C'est correct et on ne l'a pas touché.
-
-Conséquence assumée ici : **derrière Caddy, `request.ip` vaut `127.0.0.1` pour
-tout le monde.** Ce que cela change, exactement :
-
-- le canal Git n'est **pas** concerné : il écoute sur `10.77.0.254:9418`, pas
-  derrière Caddy, et l'authentification par adresse source du conteneur
-  (invariant 1) est intacte ;
-- le cookie de session du proxy n'est pas concerné : il est lié à la session,
-  pas à l'adresse ;
-- **le mode examen l'est.** Le cookie `exam_session` porte l'adresse du client
-  relevée à la vérification SEB, et `checkExamRequest` la recompare à chaque
-  requête du proxy (analyse.md D5). Avec `127.0.0.1` des deux côtés, la
-  comparaison est vraie pour tout le monde : elle ne distingue plus deux postes.
-
-Ce n'est pas bloquant tant qu'aucun examen ne tourne sur cette VM — le
-déploiement actuel ne sert que le mode travaux pratiques — mais **c'est à
-corriger avant la première épreuve**. Proposition, à instruire avec son test :
-
-> Une variable distincte, par exemple `TRUSTED_PROXY_IPS=127.0.0.1,::1`,
-> passée telle quelle à `trustProxy` de Fastify, qui accepte une liste
-> d'adresses ou de CIDR. Fastify ne remonte alors la chaîne `X-Forwarded-For`
-> que pour un saut dont l'adresse figure dans la liste ; un client qui forge
-> l'en-tête depuis l'extérieur ne peut rien, puisque son saut immédiat vers
-> Caddy n'est pas de confiance. C'est le réglage correct derrière un frontal
-> maîtrisé, et il n'a rien à voir avec le `TRUST_PROXY` booléen, qui doit
-> rester interdit en production.
-
-Le repli sans code, si l'échéance pressait : lier le portail à une seconde
-adresse et faire passer les sessions d'examen par un chemin qui ne traverse pas
-le frontal. Il n'est pas recommandé — il casse TLS.
+- a `work/` that already carries **a commit** is never touched again: the
+  student is the master of their repository;
+- the **untracked** files they wrote into an empty workspace are kept —
+  `checkout -B` from an unborn branch does not touch them. If one of them bears
+  the name of a file the repository brings, `checkout` refuses rather than
+  overwrite it: the log says so at `warn` level and the session opens anyway,
+  with an incomplete workspace. That is the only case where the repository is
+  not retrieved, and it is better than losing the work.
 
 ---
 
-## 7. Le dépôt fantôme, pris en root
+## 6. The client address behind Caddy
 
-`analyse.md § 3.3` et `docs/v1.md § D-V1-1` laissaient deux pistes pour
-l'instantané du dépôt fantôme ; la piste préférée — **un temporisateur systemd
-root** — est celle qui est déployée.
+`TRUST_PROXY` is, in `src/auth/config.ts`, a **development boolean**: it sets
+`trustProxy: true` on Fastify, which makes `request.ip` controllable by any
+`X-Forwarded-For` coming from anywhere. `loadConfig()` refuses to start with it
+in production. That is correct and it was not touched.
 
-`codespace-shadow.timer` lance `deploy/shadow-snapshot.sh` toutes les trois
-minutes. Le script fait exactement ce que fait `snapshot()` de
-`sessions/shadow.ts` — `info/exclude` à `.git`, `add -A --ignore-errors`, commit
-seulement s'il y a de l'indexé, identité du portail — mais en root, donc sans le
-problème de permissions. Le dépôt reste la propriété de `codespace`, et le
-script passe `-c safe.directory='*'`.
+Accepted consequence here: **behind Caddy, `request.ip` is `127.0.0.1` for
+everyone.** What that changes, exactly:
 
-Vérifié sur la VM : un fichier créé dans le conteneur en `chmod 600` — le cas
-exact que `sessions/shadow.ts` ne sait pas capturer — **est dans l'instantané**.
+- the Git channel is **not** concerned: it listens on `10.77.0.254:9418`, not
+  behind Caddy, and authentication by the container's source address
+  (invariant 1) is intact;
+- the proxy's session cookie is not concerned: it is bound to the session, not
+  to the address;
+- **exam mode is.** The `exam_session` cookie carries the client address
+  recorded at the SEB verification, and `checkExamRequest` compares it again on
+  every proxy request (analyse.md D5). With `127.0.0.1` on both sides, the
+  comparison is true for everyone: it no longer distinguishes two workstations.
 
-Le temporisateur interne du portail est repoussé à 24 h
-(`SHADOW_INTERVAL_MS=86400000`) pour qu'il n'y ait qu'un seul écrivain sur
-`shadow.git`. L'instantané de fermeture de session, lui, reste en place : c'est
-un filet, et il fonctionne.
+This is not blocking as long as no exam runs on this VM — the current
+deployment only serves lab mode — but **it must be fixed before the first
+exam**. A proposal, to be worked out with its test:
 
-Détail lié, et c'est une décision de l'unité : **`UMask=0022`, pas `0027`.**
-`work/` est créé par le portail puis rechown par Podman (`:U`) vers la plage
-d'UID du conteneur, **modes conservés**. En `0750`, le portail ne peut plus
-entrer dans l'arbre de travail qu'il vient de créer et son instantané de
-fermeture échoue sur « this operation must be run in a work tree ». Mesuré, puis
-corrigé. L'arborescence au-dessus est en `0750 codespace:codespace`, donc aucun
-autre utilisateur de l'hôte ne traverse.
+> A distinct variable, for example `TRUSTED_PROXY_IPS=127.0.0.1,::1`, passed as
+> is to Fastify's `trustProxy`, which accepts a list of addresses or of CIDRs.
+> Fastify then walks the `X-Forwarded-For` chain only for a hop whose address
+> is in the list; a client forging the header from the outside can do nothing,
+> since its immediate hop to Caddy is not trusted. That is the correct setting
+> behind a controlled front end, and it has nothing to do with the boolean
+> `TRUST_PROXY`, which must remain forbidden in production.
+
+The code-free fallback, if the deadline pressed: bind the portal to a second
+address and route the exam sessions through a path that does not cross the
+front end. It is not recommended — it breaks TLS.
 
 ---
 
-## 8. Redéployer, revenir en arrière, reconstruire
+## 7. The ghost repository, taken as root
 
-### Redéployer
+`analyse.md § 3.3` and `docs/v1.md § D-V1-1` left two options for the ghost
+repository snapshot; the preferred one — **a root systemd timer** — is the one
+that is deployed.
+
+`codespace-shadow.timer` runs `deploy/shadow-snapshot.sh` every three minutes.
+The script does exactly what `snapshot()` of `sessions/shadow.ts` does —
+`info/exclude` set to `.git`, `add -A --ignore-errors`, commit only if
+something is staged, the portal's identity — but as root, hence without the
+permission problem. The repository remains owned by `codespace`, and the script
+passes `-c safe.directory='*'`.
+
+Verified on the VM: a file created inside the container with `chmod 600` — the
+exact case `sessions/shadow.ts` cannot capture — **is in the snapshot**.
+
+The portal's internal timer is pushed out to 24 h
+(`SHADOW_INTERVAL_MS=86400000`) so that there is only one writer on
+`shadow.git`. The session-closing snapshot stays in place: it is a safety net,
+and it works.
+
+A related detail, and it is a decision of the unit: **`UMask=0022`, not
+`0027`.** `work/` is created by the portal and then re-chowned by Podman (`:U`)
+to the container's UID range, **modes preserved**. At `0750`, the portal can no
+longer enter the working tree it has just created and its closing snapshot
+fails with "this operation must be run in a work tree". Measured, then fixed.
+The tree above is `0750 codespace:codespace`, so no other user of the host can
+traverse it.
+
+---
+
+## 8. Redeploying, rolling back, rebuilding
+
+### Redeploying
 
 ```bash
 apps/codespace/deploy/push.sh
 ```
 
-Une nouvelle release horodatée, bascule du lien, redémarrage, attente de
-`/healthz`. Les cinq dernières releases sont conservées, les plus anciennes
-élaguées.
+A new timestamped release, symlink switch, restart, waiting for `/healthz`. The
+last five releases are kept, the older ones pruned.
 
-### Revenir en arrière
+### Rolling back
 
 ```bash
 ssh root@code.chevallier.io bash -s <<'EOF'
-ls -1 /srv/codespace/releases        # choisir la précédente
-ln -sfnT releases/<horodatage> /srv/codespace/app
+ls -1 /srv/codespace/releases        # pick the previous one
+ln -sfnT releases/<timestamp> /srv/codespace/app
 systemctl restart codespace.service
 curl -sf http://127.0.0.1:3100/healthz
 EOF
 ```
 
-Les migrations Drizzle sont appliquées à l'ouverture de la base
-(`openDb()` → `migrate()`), à chaque démarrage. Elles ne sont pas réversibles :
-une release **antérieure** à une migration ne sait pas lire le schéma que la
-release suivante a posé. Avant tout retour arrière qui franchit une migration,
-restaurer la sauvegarde de la base prise avant le déploiement (§ 9). Tant que
-`drizzle/` n'a pas changé entre les deux releases, le retour est immédiat et
-sans risque.
+The Drizzle migrations are applied when the database is opened
+(`openDb()` → `migrate()`), at every start. They are not reversible: a release
+**older** than a migration cannot read the schema the following release laid
+down. Before any rollback that crosses a migration, restore the database backup
+taken before the deployment (§ 9). As long as `drizzle/` has not changed
+between the two releases, the rollback is immediate and risk-free.
 
-### Reconstruire la VM de zéro
+### Rebuilding the VM from scratch
 
-1. VM Ubuntu 26.04 neuve, clé SSH root en place, DNS `A`/`AAAA` posés, ports 80
-   et 443 ouverts ;
-2. `apps/codespace/deploy/push.sh --bootstrap` ;
-3. restaurer `/srv/codespace/volumes` et `/srv/codespace/var/codespace.sqlite`
-   depuis la sauvegarde, avec le service arrêté ;
-4. recopier `CODESPACE_LAUNCH_SECRET` **depuis l'ancienne VM** dans
-   `/etc/codespace/env` avant le premier démarrage, sinon classroom émet des
-   jetons que la nouvelle VM refuse — ou poser la nouvelle valeur des deux
-   côtés ;
+1. a fresh Ubuntu 26.04 VM, root SSH key in place, `A`/`AAAA` DNS records set,
+   ports 80 and 443 open;
+2. `apps/codespace/deploy/push.sh --bootstrap`;
+3. restore `/srv/codespace/volumes` and `/srv/codespace/var/codespace.sqlite`
+   from the backup, with the service stopped;
+4. copy `CODESPACE_LAUNCH_SECRET` **from the old VM** into
+   `/etc/codespace/env` before the first start, otherwise classroom issues
+   tokens that the new VM refuses — or set the new value on both sides;
 5. `systemctl restart codespace.service`.
 
-L'image étudiante est reconstruite automatiquement (1 à 2 min) si elle manque.
+The student image is rebuilt automatically (1 to 2 min) if it is missing.
 
-### Changer l'image sans changer son étiquette
+### Changing the image without changing its tag
 
-`push.sh` ne reconstruit l'image que si `podman image exists` la dit absente :
-une modification de `images/c-dev/` qui garde l'étiquette
-`codespace/c-dev:4.137.0` **ne serait pas prise**. Dans ce cas, et c'est le
-cas courant (réglages machine, extension cuite dans l'image), le déploiement
-est :
+`push.sh` rebuilds the image only if `podman image exists` says it is absent: a
+modification of `images/c-dev/` that keeps the tag
+`codespace/c-dev:4.137.0` **would not be picked up**. In that case, and it is
+the common case (machine settings, an extension baked into the image), the
+deployment is:
 
 ```bash
 apps/codespace/deploy/push.sh --rebuild-image
 ```
 
-Le `rsync` de `images/` vers `/srv/codespace/src` a lieu de toute façon ; seule
-la reconstruction est conditionnelle. Depuis le 2026-09-18, le build de l'image
-comporte une étape multi-stage `node:22-slim` qui empaquette l'extension de
-barre d'état : la VM télécharge cette image de base la première fois (~80 Mo)
-et `npx @vscode/vsce` va chercher son paquet sur npm. Les deux demandent du
-réseau sortant sur la VM, qui l'a.
+The `rsync` of `images/` to `/srv/codespace/src` happens in any case; only the
+rebuild is conditional. Since 2026-09-18, the image build has a multi-stage
+`node:22-slim` step that packages the status bar extension: the VM downloads
+that base image the first time (~80 MB) and `npx @vscode/vsce` fetches its
+package from npm. Both require outbound network on the VM, which it has.
 
-### Redémarrage de l'hôte
+### Host reboot
 
-Rien n'est à faire : vérifié par un redémarrage réel. `podman.socket`,
-`codespace-net.service` (qui recrée le réseau, l'ancrage et les deux tables nft
-— aucun des trois ne survit à un `reboot`), `codespace.service`,
-`codespace-shadow.timer` et Caddy remontent seuls, `/run/podman` revient en
-`750 root:podman`, le pont `cs0` porte `10.77.0.254`, et `/healthz` répond en
-HTTPS moins d'une minute après le retour de la machine.
+Nothing to do: verified by a real reboot. `podman.socket`,
+`codespace-net.service` (which recreates the network, the anchor and the two
+nft tables — none of the three survives a `reboot`), `codespace.service`,
+`codespace-shadow.timer` and Caddy come back on their own, `/run/podman`
+returns to `750 root:podman`, the `cs0` bridge carries `10.77.0.254`, and
+`/healthz` answers over HTTPS less than a minute after the machine comes back.
 
 ---
 
-## 9. Sauvegarde
+## 9. Backup
 
-Rien d'automatique n'est en place aujourd'hui, et c'est un manque assumé de ce
-jalon. Les deux choses à sauvegarder :
+Nothing automatic is in place today, and that is an accepted gap of this
+milestone. The two things to back up:
 
 ```bash
-# 1. les volumes des étudiants (travail + dépôts de transit + dépôts fantômes)
+# 1. the students' volumes (work + staging repositories + ghost repositories)
 rsync -a --delete root@code.chevallier.io:/srv/codespace/volumes/ ./sauvegarde/volumes/
 
-# 2. la base, à chaud et de façon cohérente (WAL) — pas un simple cp
+# 2. the database, hot and consistently (WAL) — not a plain cp
 ssh root@code.chevallier.io "python3 - <<'PY'
 import sqlite3
 s = sqlite3.connect('/srv/codespace/var/codespace.sqlite')
@@ -555,89 +551,89 @@ PY"
 rsync -a root@code.chevallier.io:/srv/codespace/var/backup.sqlite ./sauvegarde/
 ```
 
-`sqlite3` en ligne de commande n'est pas installé ; l'API `backup` de `python3`
-fait le même travail et est cohérente avec le journal WAL. Un `cp` du seul
-fichier `.sqlite`, sans `-wal` ni `-shm`, rendrait une base amputée des
-dernières écritures.
+The `sqlite3` command line is not installed; `python3`'s `backup` API does the
+same job and is consistent with the WAL journal. A `cp` of the `.sqlite` file
+alone, without `-wal` or `-shm`, would produce a database missing its latest
+writes.
 
-Ce qu'il faudrait, et qui reste à faire :
+What would be needed, and remains to be done:
 
-- une unité `codespace-backup.timer` quotidienne qui fait les deux ci-dessus
-  vers un stockage **hors de la VM** (Hetzner Storage Box en `rsync`/`sftp`, ou
-  un instantané de volume du fournisseur) ;
-- une rétention (7 quotidiennes, 4 hebdomadaires) et surtout **une restauration
-  vérifiée** : une sauvegarde qu'on n'a jamais restaurée n'est pas une
-  sauvegarde ;
-- les volumes appartiennent à des plages d'UID de conteneur (`--userns=auto`),
-  donc la sauvegarde doit être prise en root et restaurée en root avec
-  `--numeric-ids`, sinon les propriétaires sont perdus.
+- a daily `codespace-backup.timer` unit that does both of the above towards a
+  storage **outside the VM** (Hetzner Storage Box over `rsync`/`sftp`, or a
+  provider volume snapshot);
+- a retention policy (7 daily, 4 weekly) and above all **a verified restore**: a
+  backup that has never been restored is not a backup;
+- the volumes belong to container UID ranges (`--userns=auto`), so the backup
+  must be taken as root and restored as root with `--numeric-ids`, otherwise the
+  owners are lost.
 
-Ce qui n'a **pas** besoin d'être sauvegardé : `/srv/codespace/releases` (rejouer
-`push.sh`), `/srv/codespace/src` (le dépôt), l'image étudiante (reconstruite).
-`/etc/codespace/env` doit l'être, ou au minimum ses trois secrets.
+What does **not** need to be backed up: `/srv/codespace/releases` (replay
+`push.sh`), `/srv/codespace/src` (the repository), the student image (rebuilt).
+`/etc/codespace/env` does, or at least its three secrets.
 
 ---
 
-## 10. Vérifications, et ce qu'elles ont donné
+## 10. Checks, and what they gave
 
-### Réseau clos
+### Closed network
 
 ```bash
 ssh root@code.chevallier.io bash -s <<'EOF'
-systemctl stop codespace.service      # test.sh lie lui-même 10.77.0.254:9418
+systemctl stop codespace.service      # test.sh binds 10.77.0.254:9418 itself
 /srv/codespace/src/infra/net/test.sh
 systemctl start codespace.service
 EOF
 ```
 
-L'arrêt du portail est **nécessaire** : `test.sh` lie ses deux serveurs de test
-sur la passerelle, dont le port Git que le portail occupe déjà.
+Stopping the portal is **necessary**: `test.sh` binds its two test servers on
+the gateway, including the Git port that the portal already occupies.
 
-Résultat sur la VM, en root : **10 PASS, 1 FAIL, 0 BLOQUÉ**. Les dix assertions
-d'invariant sont vertes, y compris les deux qui étaient `BLOQUÉ` sur le poste de
-développement faute de root, et y compris l'IPv6 lien-local.
+Result on the VM, as root: **10 PASS, 1 FAIL, 0 BLOCKED**. The ten invariant
+assertions are green, including the two that were `BLOCKED` on the development
+workstation for lack of root, and including link-local IPv6.
 
-Le `FAIL` unique est une limite du **test**, pas une violation de l'invariant 2,
-et le diagnostic a été fait :
+The single `FAIL` is a limitation of the **test**, not a violation of invariant
+2, and the diagnosis has been made:
 
-> `sans la règle ICC, A -> B:8080 échoue quand même : autre chose bloque`
+> `without the ICC rule, A -> B:8080 still fails: something else blocks`
 
-« Autre chose », c'est `table bridge codespace`. Le noyau de cette VM a la
-famille `bridge` de nftables, que le noyau WSL du poste n'a pas : `setup.sh`
-charge donc **aussi** `infra/nft/codespace-bridge.nft`, la défense en profondeur
-prévue par `analyse.md D1`. La régression, elle, ne retire que la règle ICC de
-la table `inet` ; la règle L2 reste et bloque. Mesuré, dans cet ordre :
+"Something else" is `table bridge codespace`. This VM's kernel has the nftables
+`bridge` family, which the workstation's WSL kernel does not: `setup.sh`
+therefore **also** loads `infra/nft/codespace-bridge.nft`, the defence in depth
+foreseen by `analyse.md D1`. The regression test, for its part, only removes
+the ICC rule from the `inet` table; the L2 rule remains and blocks. Measured,
+in this order:
 
-| état | A → B:8080 |
+| state | A → B:8080 |
 | --- | --- |
-| les deux tables chargées | bloqué |
-| sans la règle ICC de `inet`, table `bridge` présente | bloqué |
-| sans la règle ICC de `inet` **et** sans la table `bridge` | **joignable** |
-| les deux tables rechargées | bloqué |
+| both tables loaded | blocked |
+| without the ICC rule of `inet`, `bridge` table present | blocked |
+| without the ICC rule of `inet` **and** without the `bridge` table | **reachable** |
+| both tables reloaded | blocked |
 
-Autrement dit les deux règles bloquent, chacune suffit, et la défense en
-profondeur est réelle sur cette VM. `TODO(verify)` / correction à porter dans
-`infra/net/test.sh` (hors périmètre de ce travail) : la régression ICC doit
-retirer la règle des **deux** familles avant de conclure, sinon elle est
-structurellement rouge sur tout noyau qui supporte `bridge`.
+In other words both rules block, either one suffices, and the defence in depth
+is real on this VM. `TODO(verify)` / fix to be carried into
+`infra/net/test.sh` (out of scope of this work): the ICC regression must remove
+the rule from **both** families before concluding, otherwise it is structurally
+red on any kernel that supports `bridge`.
 
-### Surfaces exposées
+### Exposed surfaces
 
-Depuis le poste, vers `code.chevallier.io` :
+From the workstation, towards `code.chevallier.io`:
 
-| port | attendu | mesuré |
+| port | expected | measured |
 | --- | --- | --- |
-| 443 | ouvert | ouvert, TLS Let's Encrypt valide (`CN=code.chevallier.io`, `issuer=Let's Encrypt`) |
-| 80 | ouvert (redirection, ACME) | ouvert |
-| 3100 | fermé | fermé/filtré |
-| 9418 | fermé | fermé/filtré |
-| 8080 | fermé | fermé/filtré |
+| 443 | open | open, valid Let's Encrypt TLS (`CN=code.chevallier.io`, `issuer=Let's Encrypt`) |
+| 80 | open (redirect, ACME) | open |
+| 3100 | closed | closed/filtered |
+| 9418 | closed | closed/filtered |
+| 8080 | closed | closed/filtered |
 
-Côté VM, `ss -ltn` : `127.0.0.1:3100` (le portail), `10.77.0.254:9418` (le canal
-Git, sur le pont et rien d'autre), `*:80` et `*:443` (Caddy). Aucune autre
-écoute.
+On the VM side, `ss -ltn`: `127.0.0.1:3100` (the portal), `10.77.0.254:9418`
+(the Git channel, on the bridge and nothing else), `*:80` and `*:443` (Caddy).
+No other listener.
 
-```
+```text
 $ curl -sS -D- -o /dev/null https://code.chevallier.io/healthz
 HTTP/2 200
 strict-transport-security: max-age=31536000; includeSubDomains
@@ -646,7 +642,7 @@ referrer-policy: strict-origin-when-cross-origin
 x-frame-options: SAMEORIGIN
 ```
 
-### Preuve fonctionnelle
+### Functional proof
 
 ```bash
 CODESPACE_LAUNCH_SECRET="$(ssh root@code.chevallier.io \
@@ -654,134 +650,140 @@ CODESPACE_LAUNCH_SECRET="$(ssh root@code.chevallier.io \
   pnpm --filter @hgc/codespace exec tsx deploy/smoke.ts
 ```
 
-`deploy/smoke.ts` joue le rôle de classroom : il signe lui-même son jeton de
-service et son jeton de lancement avec `signHs256`, comme `scripts/e2e.ts` § 9.
-Il pousse un devoir `smoke-<date>` en mode `online`, dont le `sourceRepo` **et**
-le dépôt du jeton sont `heig-tin-info/example-priority-queue` — un dépôt
-**public** de l'organisation du cours, 7 Ko, C, branche `main`. En mode travaux
-pratiques c'est le dépôt du jeton qui amorce le dépôt de transit, et il doit
-être clonable sans jeton : aucun secret ne transite par là (docs/v1.md D-V1-8).
-Aucun dépôt n'a été créé pour l'occasion.
+`deploy/smoke.ts` plays the role of classroom: it signs its own service token
+and launch token with `signHs256`, like `scripts/e2e.ts` § 9. It pushes an
+assignment `smoke-<date>` in `online` mode, whose `sourceRepo` **and** the
+repository of the token are both `heig-tin-info/example-priority-queue` — a
+**public** repository of the course organisation, 7 KB, C, branch `main`. In
+lab mode it is the token's repository that seeds the staging repository. A
+public repository is used here so that the smoke test does not depend on the
+App being installed anywhere, **not** because seeding could not use a token:
+since 2026-09-17 `ensureStagingRepo` passes the forge's `Authorization` header
+to the seeding `fetch` (`src/git/staging.ts`), which is precisely what makes a
+private student repository work. The older argument "it must be clonable
+without a token" (docs/v1.md D-V1-8) is superseded on that point; what still
+holds is that no secret ever reaches the container. No repository was created
+for the occasion.
 
-Onze assertions, toutes vertes :
+Eleven assertions, all green:
 
-```
+```text
 PASS  /healthz — {"ok":true}
-PASS  PUT refusé sans jeton de service — 401
-PASS  devoir synchronisé — 200 {"id":"smoke-2026-09-17","configKey":null,"sebLink":null}
-PASS  /launch ouvre la session — 303 /s/47acd86e-…/
-PASS  cookie cs_session posé par /launch (aucune seconde connexion)
-PASS  aucun cookie OIDC n'est requis ni posé
-PASS  c'est bien le workbench de code-server
-PASS  101 Switching Protocols + Sec-WebSocket-Accept recalculé et conforme
-PASS  websocket refusé sans cookie de session — statut 403
-PASS  le même jeton est refusé au rejeu — 403
-PASS  /auth/login répond 404, la page d'accueil répond 503
+PASS  PUT refused without a service token — 401
+PASS  assignment synchronised — 200 {"id":"smoke-2026-09-17","configKey":null,"sebLink":null}
+PASS  /launch opens the session — 303 /s/47acd86e-…/
+PASS  cs_session cookie set by /launch (no second sign-in)
+PASS  no OIDC cookie is required or set
+PASS  it really is the code-server workbench
+PASS  101 Switching Protocols + Sec-WebSocket-Accept recomputed and correct
+PASS  websocket refused without a session cookie — status 403
+PASS  the same token is refused on replay — 403
+PASS  /auth/login answers 404, the home page answers 503
 ```
 
-Contrôles faits sur la VM pendant la session :
+Checks made on the VM during the session:
 
-- l'espace de travail contient `main.c`, `priority-queue.c`, `Makefile` — le
-  dépôt de transit a bien été amorcé depuis le dépôt public ;
-- `origin` vaut `http://portal.internal:9418/git/<session>` ;
-- durcissement effectif du conteneur :
+- the workspace contains `main.c`, `priority-queue.c`, `Makefile` — the staging
+  repository was indeed seeded from the public repository;
+- `origin` is `http://portal.internal:9418/git/<session>`;
+- effective hardening of the container:
   `["no-new-privileges","seccomp=/srv/codespace/src/infra/seccomp/codespace.json"]`,
-  `readonly=true`, `pids=256`, `mem=1536m`, `cpus=1`, `CapDrop` complet,
-  `work/` appartenant à `2147484647` (la plage tirée par `--userns=auto`) ;
-- un `git push` depuis le conteneur réussit, le `PushEvent` est écrit et reste
-  `pending` avec l'erreur de § 5.
+  `readonly=true`, `pids=256`, `mem=1536m`, `cpus=1`, full `CapDrop`,
+  `work/` owned by `2147484647` (the range drawn by `--userns=auto`);
+- a `git push` from the container succeeds, the `PushEvent` is written and stays
+  `pending` with the error of § 5.
 
-### Mesures relevées sur cette VM (2 vCPU, 3,7 Go)
+### Measurements taken on this VM (2 vCPU, 3.7 GB)
 
-| Mesure | Valeur |
+| Measurement | Value |
 | --- | --- |
-| `podman build` de l'image étudiante, sans cache | **113 s** |
-| Taille de l'image | 1,5 Go |
-| Taille d'une release | 114 Mo |
-| **Jeton de lancement → page workbench, en HTTPS** | **3,92 s / 4,22 s / 4,31 s** (trois passes) |
-| Mise à niveau websocket seule, à travers Caddy | 233 / 251 / 257 ms |
-| Jeton de lancement → websocket établi | 4,15 s / 4,48 s / 4,56 s |
-| Fermeture par le ramasse-miettes (grâce de 5 s de test) | 4 à 6 s |
-| Redémarrage du service → `/healthz` | 5 s |
-| Reprise après `reboot` de la VM → `/healthz` en HTTPS | < 60 s |
-| RAM au repos (portail + ancrage + Caddy) | 605 Mo utilisés sur 3,7 Go |
+| `podman build` of the student image, without cache | **113 s** |
+| Image size | 1.5 GB |
+| Release size | 114 MB |
+| **Launch token → workbench page, over HTTPS** | **3.92 s / 4.22 s / 4.31 s** (three passes) |
+| Websocket upgrade alone, through Caddy | 233 / 251 / 257 ms |
+| Launch token → websocket established | 4.15 s / 4.48 s / 4.56 s |
+| Closing by the garbage collector (test grace of 5 s) | 4 to 6 s |
+| Service restart → `/healthz` | 5 s |
+| Recovery after a VM `reboot` → `/healthz` over HTTPS | < 60 s |
+| RAM at rest (portal + anchor + Caddy) | 605 MB used out of 3.7 GB |
 
-Les 4 s de bout en bout se décomposent en un `podman run` et l'attente du
-`/healthz` du conteneur (mesuré à 0,6–1,0 s sur le poste de développement,
-images/c-dev/README.md), plus le clone du dépôt public depuis GitHub, qui est la
-part variable. L'objectif de dix secondes d'`analyse.md § 3.4` est tenu, et
-**rien ici ne justifie un pool préchauffé**.
+The 4 s end to end break down into a `podman run` and waiting for the
+container's `/healthz` (measured at 0.6–1.0 s on the development workstation,
+images/c-dev/README.md), plus the clone of the public repository from GitHub,
+which is the variable part. The ten-second target of `analyse.md § 3.4` is met,
+and **nothing here justifies a pre-warmed pool**.
 
-### Nettoyage après une passe de fumée
+### Cleaning up after a smoke pass
 
-`smoke.ts` ne nettoie pas derrière lui, volontairement : il ne fait que ce qu'un
-client fait. Le ménage :
+`smoke.ts` does not clean up after itself, deliberately: it does only what a
+client does. The tidying:
 
 ```bash
-# 1. fermer la session : pas de route publique pour ça (le portail n'a que
-#    /teacher/sessions/<id>/close, derrière le rôle enseignant, donc derrière
-#    l'OIDC absent). On passe par le ramasse-miettes, avec la grâce de test du
-#    § 3, puis on remet la grâce de production.
-# 2. le volume
+# 1. close the session: there is no public route for that (the portal only has
+#    /teacher/sessions/<id>/close, behind the teacher role, hence behind the
+#    absent OIDC). We go through the garbage collector, with the test grace of
+#    § 3, then put the production grace back.
+# 2. the volume
 ssh root@code.chevallier.io 'rm -rf /srv/codespace/volumes/smoke'
 ```
 
-Restent en base, et **aucune route ne permet de les supprimer** : la ligne
-`assignments` du devoir de fumée, la ligne `users` de l'étudiant `smoke`, la
-ligne `sessions` à l'état `closed`, le `push_events` `pending` et les `jti`
-consommés. C'est sans conséquence — le devoir de fumée n'apparaît que pour un
-utilisateur connecté, et il n'y en a pas — mais c'est à savoir. Une suppression
-demanderait soit une route d'administration (hors périmètre), soit un `DELETE`
-direct dans SQLite, service arrêté.
+What stays in the database, and **no route allows deleting them**: the
+`assignments` row of the smoke assignment, the `users` row of the `smoke`
+student, the `sessions` row in the `closed` state, the `pending` `push_events`
+and the consumed `jti`s. It is inconsequential — the smoke assignment only
+appears for a logged-in user, and there is none — but it is worth knowing.
+Deleting them would require either an administration route (out of scope) or a
+direct `DELETE` in SQLite with the service stopped.
 
 ---
 
-## 11. Ce qui reste pour la production réelle
+## 11. What remains for real production
 
-Par ordre de dette.
+In order of debt.
 
-1. **Adresse du client en mode examen** (§ 6). Bloquant avant la première
-   épreuve, pas avant les travaux pratiques.
-2. **Switch edu-ID** (§ 4) : `OIDC_*`, plus les hôtes d'edu-ID dans
+1. **Client address in exam mode** (§ 6). Blocking before the first exam, not
+   before lab work.
+2. **Switch edu-ID** (§ 4): `OIDC_*`, plus the edu-ID hosts in
    `SEB_EXTRA_ALLOWED_HOSTS`.
-3. **Image depuis GHCR.** Aujourd'hui l'image est construite sur la VM, 113 s de
-   2 vCPU pendant lesquels le portail n'a plus grand-chose. En régime de
-   croisière elle doit venir d'un registre, comme celle de classroom : la CI la
-   construit et la pousse sur `ghcr.io/heig-tin-info/codespace-c-dev:4.137.0`,
-   `push.sh` fait un `pd pull` au lieu d'un `pd build`, et le `deploy.sh` de
-   classroom montre le modèle de jeton éphémère passé par SSH pour le `login`
-   d'un paquet privé — aucun identifiant de registre n'est stocké sur la VM.
-4. **Pare-feu de l'hôte, en complément de celui de Hetzner.** Le pare-feu du
-   fournisseur est aujourd'hui la seule barrière sur les ports d'écoute ; il est
-   correct, mais il est hors de la recette et une modification dans la console
-   web ne laisse pas de trace dans le dépôt. `table inet filter` existe sur la
-   VM avec trois chaînes vides en `policy accept`. À poser : `input` en
-   `policy drop`, avec `ct state established,related accept`, `iif lo accept`,
-   `tcp dport {22, 80, 443} accept`, et **surtout pas** de règle qui touche à
-   `cs0` — c'est le rôle de `table inet codespace`, qui doit rester le seul
-   endroit qui parle du pont. À écrire dans `infra/nft/` avec son test, pas dans
-   `deploy/`.
-5. **Sauvegarde automatique** (§ 9).
-6. **Correction de la régression ICC de `infra/net/test.sh`** (§ 10).
-7. **Rotation des journaux du portail** : ils vont au `journal`, dont la taille
-   est bornée par défaut. À vérifier (`journalctl --disk-usage`) avant une
-   séance chargée.
+3. **Image from GHCR.** Today the image is built on the VM, 113 s of 2 vCPU
+   during which the portal has very little left. In steady state it must come
+   from a registry, like classroom's: the CI builds it and pushes it to
+   `ghcr.io/heig-tin-info/codespace-c-dev:4.137.0`, `push.sh` does a `pd pull`
+   instead of a `pd build`, and classroom's `deploy.sh` shows the pattern of an
+   ephemeral token passed over SSH for the `login` of a private package — no
+   registry credential is stored on the VM.
+4. **Host firewall, on top of Hetzner's.** The provider's firewall is today the
+   only barrier on the listening ports; it is correct, but it is outside the
+   recipe and a change made in the web console leaves no trace in the
+   repository. `table inet filter` exists on the VM with three empty chains in
+   `policy accept`. To be set up: `input` with `policy drop`, with
+   `ct state established,related accept`, `iif lo accept`,
+   `tcp dport {22, 80, 443} accept`, and **definitely no** rule touching `cs0`
+   — that is the job of `table inet codespace`, which must remain the only
+   place that talks about the bridge. To be written in `infra/nft/` with its
+   test, not in `deploy/`.
+5. **Automatic backup** (§ 9).
+6. **Fixing the ICC regression of `infra/net/test.sh`** (§ 10).
+7. **Rotation of the portal's logs**: they go to the `journal`, whose size is
+   bounded by default. To be checked (`journalctl --disk-usage`) before a busy
+   session.
 
 ## 12. `TODO(verify)`
 
-- `TODO(verify)` **Caddy 2.6.2 (Ubuntu 26.04)** — `flush_interval -1` sur
-  `reverse_proxy` : la directive est acceptée et la mise à niveau websocket
-  passe (mesurée, 101 + `Sec-WebSocket-Accept` conforme), mais on n'a pas
-  observé l'effet du réglage lui-même sur un flux long. Il est là parce que le
-  `Caddyfile` de classroom en a besoin pour ses SSE ; s'il posait problème, il
-  se retire sans conséquence pour le websocket.
-- `TODO(verify)` **Podman 5.7.0 / Ubuntu 26.04** — `codespace-bridge.nft` se
-  charge sur ce noyau (7.0) alors qu'il est refusé sur le noyau WSL du poste.
-  La conséquence sur `infra/net/test.sh` est traitée au § 10 ; ce qui n'a pas
-  été vérifié, c'est le comportement de la table `bridge` après une mise à jour
-  de netavark qui changerait le nom d'interface.
+- `TODO(verify)` **Caddy 2.6.2 (Ubuntu 26.04)** — `flush_interval -1` on
+  `reverse_proxy`: the directive is accepted and the websocket upgrade goes
+  through (measured, 101 + conforming `Sec-WebSocket-Accept`), but the effect of
+  the setting itself on a long-lived stream has not been observed. It is there
+  because classroom's `Caddyfile` needs it for its SSE; should it cause trouble,
+  it can be removed with no consequence for the websocket.
+- `TODO(verify)` **Podman 5.7.0 / Ubuntu 26.04** — `codespace-bridge.nft` loads
+  on this kernel (7.0) whereas it is refused on the workstation's WSL kernel.
+  The consequence on `infra/net/test.sh` is handled in § 10; what has not been
+  verified is the behaviour of the `bridge` table after a netavark update that
+  would change the interface name.
 - `TODO(verify)` **systemd 257 / Ubuntu 26.04** — `SystemCallFilter=@system-service`
-  sur `codespace.service` : le portail démarre et tourne, y compris ses
-  `execFile` de `podman` et de `git`. Aucun chemin rare (montée en charge,
-  `podman build` déclenché depuis le portail — qui n'existe pas) n'a été
-  exercé sous ce filtre.
+  on `codespace.service`: the portal starts and runs, including its `execFile`
+  calls to `podman` and to `git`. No rare path (load increase, a `podman build`
+  triggered from the portal — which does not exist) has been exercised under
+  that filter.

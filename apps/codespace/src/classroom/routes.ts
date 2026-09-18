@@ -1,26 +1,26 @@
 /**
- * Frontière HTTP avec heig-classroom (`packages/contracts/src/codespace.ts`).
+ * HTTP boundary with heig-classroom (`packages/contracts/src/codespace.ts`).
  *
- * Trois routes, et rien d'autre ne les connaît :
+ * Three routes, and nothing else knows them:
  *
- *   PUT  /api/assignments/:id            classroom pousse un devoir (jeton de service)
- *   GET  /api/assignments/:id/sessions   tableau enseignant de classroom (jeton de service)
- *   GET  /launch?token=…                 l'étudiant arrive, jeton de lancement
+ *   PUT  /api/assignments/:id            classroom pushes an assignment (service token)
+ *   GET  /api/assignments/:id/sessions   classroom's teacher dashboard (service token)
+ *   GET  /launch?token=…                 the student arrives, launch token
  *
- * Le greffon **n'est pas enregistré** quand `CODESPACE_LAUNCH_SECRET` est
- * vide : les trois routes répondent alors 404 et le portail reste utilisable
- * en autonome avec sa propre connexion OIDC (invariant 4 inchangé).
+ * The plugin is **not registered** when `CODESPACE_LAUNCH_SECRET` is empty: the
+ * three routes then answer 404 and the portal stays usable standalone with its
+ * own OIDC login (invariant 4 unchanged).
  *
- * Deux invariants se jouent ici et nulle part ailleurs :
+ * Two invariants play out here and nowhere else:
  *
- *  - **Invariant 5.** En mode examen, `/launch` est une navigation de premier
- *    niveau venue de Safe Exam Browser : c'est ici, une seule fois, que le
- *    `SebVerifier` regarde les en-têtes SEB. Le proxy n'en verra jamais un.
- *  - **Usage unique.** Le `jti` du jeton est consommé par un `INSERT` dont la
- *    clé primaire est la garantie ; un rejeu ne peut pas courir à côté d'un
- *    premier appel, SQLite refuse la seconde ligne.
+ *  - **Invariant 5.** In exam mode, `/launch` is a top-level navigation coming
+ *    from Safe Exam Browser: it is here, once and only once, that the
+ *    `SebVerifier` looks at the SEB headers. The proxy will never see one.
+ *  - **Single use.** The token's `jti` is consumed by an `INSERT` whose primary
+ *    key is the guarantee; a replay cannot run alongside a first call, SQLite
+ *    refuses the second row.
  *
- * Rien de ce qui est journalisé ne porte le jeton, sa signature ni un BEK.
+ * Nothing that is logged carries the token, its signature or a BEK.
  */
 import { randomUUID } from "node:crypto";
 
@@ -72,45 +72,45 @@ import {
   type LaunchClaims,
 } from "./schemas.js";
 
-/** Audiences et émetteurs du contrat : jamais une constante de circonstance. */
+/** Audiences and issuers of the contract: never an ad hoc constant. */
 export const LAUNCH_AUDIENCE = "heig-codespace";
 export const SERVICE_AUDIENCE = "heig-codespace-api";
 export const CLASSROOM_ISSUER = "heig-classroom";
 
-/** Préfixe du sujet OIDC d'un compte venu de classroom (voir `upsertLaunchUser`). */
+/** Prefix of the OIDC subject of an account coming from classroom (see `upsertLaunchUser`). */
 export const CLASSROOM_SUB_PREFIX = "classroom:";
 
 export interface ClassroomRoutesOptions {
   config: AppConfig;
   db: Db;
   manager: SessionManager;
-  /** Le même vérificateur que la route `/exam/:id/start` : réel ou simulé. */
+  /** The same verifier as the `/exam/:id/start` route: real or simulated. */
   verifier: SebVerifier;
   /**
-   * URL de clonage d'un dépôt de la forge. Absente quand `FORGE_KIND=none` :
-   * un devoir en mode examen n'a alors pas de modèle à cloner et son premier
-   * démarrage échoue, ce qui est le comportement voulu (invariant 6).
+   * Clone URL of a repository on the forge. Absent when `FORGE_KIND=none`: an
+   * assignment in exam mode then has no template to clone and its first start
+   * fails, which is the intended behaviour (invariant 6).
    */
   repoUrl?: (repo: RepoRef) => string;
 }
 
-// --- utilitaires ------------------------------------------------------------
+// --- helpers ----------------------------------------------------------------
 
 function html(reply: FastifyReply, code: number, page: string): FastifyReply {
   return reply.code(code).type("text/html; charset=utf-8").send(page);
 }
 
-/** `startURL` du `.seb` : la page de classroom, pas celle du portail. */
+/** `startURL` of the `.seb`: classroom's page, not the portal's. */
 export function classroomStartUrl(classroomUrl: string, assignmentId: string): string {
   return new URL(`/app/codespace/start/${encodeURIComponent(assignmentId)}`, classroomUrl).href;
 }
 
 /**
- * Hôtes que le filtre d'URL de SEB doit laisser passer **en plus** de celui de
- * la `startURL` (classroom, ajouté par `buildSebConfig`) : le portail, qui
- * sert l'éditeur, et ceux de `SEB_EXTRA_ALLOWED_HOSTS` — le fournisseur
- * d'identité au premier chef, sans quoi la page de connexion est bloquée
- * (docs/pistes.md, « Correction au cadrage relevée par le test SEB »).
+ * Hosts that SEB's URL filter must let through **in addition to** the one of
+ * the `startURL` (classroom, added by `buildSebConfig`): the portal, which
+ * serves the editor, and those of `SEB_EXTRA_ALLOWED_HOSTS` — the identity
+ * provider first of all, without which the login page is blocked
+ * (docs/pistes.md, "Correction to the framing document raised by the SEB test").
  */
 export function sebAllowedHosts(config: AppConfig): string[] {
   const portalOrigin = config.SEB_PUBLIC_ORIGIN || config.PUBLIC_URL;
@@ -119,17 +119,17 @@ export function sebAllowedHosts(config: AppConfig): string[] {
 }
 
 /**
- * Utilisateur venu de classroom.
+ * User coming from classroom.
  *
- * `oidcSub` est le sujet du jeton **préfixé** : un sujet de classroom et un
- * sujet Keycloak vivent dans le même espace de noms, et rien ne garantit
- * qu'ils ne se croisent pas. `login`, lui, est le sujet nu — c'est
- * l'identifiant institutionnel au sens de la table, celui qui nomme le
- * répertoire de volume, d'où le `SAFE_ID` vérifié en amont par le schéma.
+ * `oidcSub` is the **prefixed** subject of the token: a classroom subject and a
+ * Keycloak subject live in the same namespace, and nothing guarantees that they
+ * do not collide. `login`, on the other hand, is the bare subject — it is the
+ * institutional login in the sense of the table, the one that names the volume
+ * directory, hence the `SAFE_ID` checked upstream by the schema.
  *
- * Coexistence avec les comptes OIDC autonomes : ce sont deux lignes
- * distinctes tant que le sujet de classroom ne vaut pas le
- * `preferred_username` du realm. Voir docs/integration-classroom.md.
+ * Coexistence with standalone OIDC accounts: these are two distinct rows as
+ * long as the classroom subject does not equal the realm's
+ * `preferred_username`. See docs/integration-classroom.md.
  */
 export function upsertLaunchUser(db: Db, claims: LaunchClaims): UserRow {
   const now = new Date();
@@ -146,11 +146,11 @@ export function upsertLaunchUser(db: Db, claims: LaunchClaims): UserRow {
     lastLoginAt: now,
   };
   if (existing) {
-    // Le rôle n'est **pas** touché : il vient du realm à la connexion OIDC
-    // (docs/v1.md D-V1-3) et un jeton de lancement ne doit pas pouvoir le
-    // changer. Un compte créé par ce chemin est étudiant.
+    // The role is **not** touched: it comes from the realm at OIDC login
+    // (docs/v1.md D-V1-3) and a launch token must not be able to change it. An
+    // account created through this path is a student.
     const [row] = db.update(users).set(fields).where(eq(users.id, existing.id)).returning().all();
-    if (!row) throw new Error("mise à jour de l'utilisateur sans ligne");
+    if (!row) throw new Error("user update returned no row");
     return row;
   }
   const [row] = db
@@ -158,15 +158,15 @@ export function upsertLaunchUser(db: Db, claims: LaunchClaims): UserRow {
     .values({ id: randomUUID(), role: "student", createdAt: now, ...fields })
     .returning()
     .all();
-  if (!row) throw new Error("création de l'utilisateur sans ligne");
+  if (!row) throw new Error("user creation returned no row");
   return row;
 }
 
 /**
- * Consomme un `jti`. Rend faux s'il avait déjà été consommé : la clé primaire
- * de `launch_tokens_used` est la garantie, pas une lecture suivie d'une
- * écriture. Les lignes expirées sont purgées au passage — au-delà de `exp`,
- * `verifyHs256` refuse déjà le jeton, la ligne n'empêche plus rien.
+ * Consumes a `jti`. Returns false if it had already been consumed: the primary
+ * key of `launch_tokens_used` is the guarantee, not a read followed by a write.
+ * Expired rows are purged along the way — beyond `exp`, `verifyHs256` already
+ * refuses the token, and the row no longer prevents anything.
  */
 export function consumeJti(db: Db, jti: string, expSeconds: number, now = new Date()): boolean {
   db.delete(launchTokensUsed).where(lt(launchTokensUsed.exp, now)).run();
@@ -180,7 +180,7 @@ export function consumeJti(db: Db, jti: string, expSeconds: number, now = new Da
   }
 }
 
-// --- le greffon -------------------------------------------------------------
+// --- the plugin -------------------------------------------------------------
 
 async function classroomRoutesImpl(
   app: FastifyInstance,
@@ -191,7 +191,7 @@ async function classroomRoutesImpl(
   const secure = config.NODE_ENV === "production";
   const portalOrigin = config.SEB_PUBLIC_ORIGIN || config.PUBLIC_URL;
 
-  /** Jeton de service : `Authorization: Bearer <jwt>`, aud `heig-codespace-api`. */
+  /** Service token: `Authorization: Bearer <jwt>`, aud `heig-codespace-api`. */
   async function serviceToken(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
     const header = request.headers.authorization ?? "";
     const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length).trim() : "";
@@ -204,7 +204,7 @@ async function classroomRoutesImpl(
       issuer: CLASSROOM_ISSUER,
     });
     if (!verdict.ok) {
-      request.log.warn({ reason: verdict.reason }, "jeton de service refusé");
+      request.log.warn({ reason: verdict.reason }, "service token refused");
       await reply.code(401).send({ error: "unauthenticated" });
       return false;
     }
@@ -234,8 +234,8 @@ async function classroomRoutesImpl(
 
       const mode = body.mode === "online_seb" ? ("exam" as const) : ("lab" as const);
       if (mode === "exam" && body.browserExamKeys.length === 0) {
-        // Même refus que la graine : un devoir d'examen sans BEK accepterait
-        // n'importe quel navigateur dès que le vérificateur passe en `real`.
+        // Same refusal as the seed: an exam assignment without a BEK would
+        // accept any browser as soon as the verifier switches to `real`.
         return reply.code(400).send({ error: "missing_browser_exam_keys" });
       }
 
@@ -246,9 +246,9 @@ async function classroomRoutesImpl(
       let configKey: string | null = null;
       let sebConfig: AssignmentSebConfig | null = null;
       if (mode === "exam") {
-        // Le sel n'est **jamais** régénéré : il entre dans le Browser Exam
-        // Key que SEB calcule, donc le changer invaliderait les `.seb` déjà
-        // distribués. C'est aussi ce qui rend ce PUT idempotent.
+        // The salt is **never** regenerated: it enters the Browser Exam Key
+        // that SEB computes, so changing it would invalidate the `.seb` files
+        // already distributed. It is also what makes this PUT idempotent.
         const examKeySalt = previous?.sebConfig?.examKeySalt ?? newExamKeySalt();
         const startUrl = classroomStartUrl(config.CLASSROOM_URL, body.id);
         const quitUrl = new URL("/", config.CLASSROOM_URL).href;
@@ -264,11 +264,12 @@ async function classroomRoutesImpl(
         mode,
         image: body.image ?? config.CODESPACE_DEFAULT_IMAGE,
         uploadPack: true,
-        // Invariant 6 : l'URL de clonage du modèle de l'enseignant, et rien
-        // d'autre, amorce un dépôt de transit d'examen.
+        // Invariant 6: the clone URL of the teacher's template, and nothing
+        // else, bootstraps an exam staging repository.
         templateRepo: opts.repoUrl ? opts.repoUrl(sourceRef) : null,
-        // Le dépôt cible n'est plus un attribut du devoir : il arrive par le
-        // jeton de lancement, étudiant par étudiant (`sessions.targetRepo`).
+        // The target repository is no longer an attribute of the assignment:
+        // it arrives through the launch token, student by student
+        // (`sessions.targetRepo`).
         targetRepo: null,
         targetRepoPattern: null,
         teacherId: body.teacher.id,
@@ -292,7 +293,7 @@ async function classroomRoutesImpl(
 
       request.log.info(
         { assignmentId: body.id, mode, classroomId: body.classroomId },
-        previous ? "devoir mis à jour depuis classroom" : "devoir synchronisé depuis classroom",
+        previous ? "assignment updated from classroom" : "assignment synchronized from classroom",
       );
       return reply.code(200).send({
         id: body.id,
@@ -314,8 +315,8 @@ async function classroomRoutesImpl(
         assignment.id,
       ).map(({ session, user, lastPushAt }) => ({
         sessionId: session.id,
-        // Identifiant **de classroom** quand le compte vient de là : c'est lui
-        // que l'appelant sait rapprocher de ses propres utilisateurs.
+        // **Classroom** id when the account comes from there: that is the one
+        // the caller knows how to match with its own users.
         userId: user.oidcSub.startsWith(CLASSROOM_SUB_PREFIX)
           ? user.oidcSub.slice(CLASSROOM_SUB_PREFIX.length)
           : user.id,
@@ -332,7 +333,7 @@ async function classroomRoutesImpl(
   // --- GET /launch?token=… -------------------------------------------------
   app.get<{ Querystring: { token?: string } }>("/launch", async (request, reply) => {
     const refuse = (detail: string, reason: string, code = 403): FastifyReply => {
-      request.log.warn({ launch: { reason, clientAddress: request.ip } }, "lancement refusé");
+      request.log.warn({ launch: { reason, clientAddress: request.ip } }, "launch refused");
       return html(reply, code, errorPage("Lancement refusé", detail));
     };
 
@@ -355,7 +356,7 @@ async function classroomRoutesImpl(
     if (!claimed.success) return refuse("Ce lien de lancement est incomplet.", "bad-claims");
     const claims: LaunchClaims = claimed.data;
 
-    // Usage unique, avant tout effet de bord : un rejeu s'arrête ici.
+    // Single use, before any side effect: a replay stops here.
     if (!consumeJti(db, claims.jti, claims.exp)) {
       return refuse(
         "Ce lien de lancement a déjà servi. Retournez sur classroom et cliquez de nouveau sur Démarrer.",
@@ -388,9 +389,9 @@ async function classroomRoutesImpl(
     }
     const user = upsertLaunchUser(db, claims);
 
-    // --- quota par enseignant ---------------------------------------------
-    // La reprise d'une session déjà vivante sur ce devoir ne consomme rien :
-    // elle n'ouvre pas de conteneur supplémentaire (analyse.md D5).
+    // --- per-teacher quota -------------------------------------------------
+    // Resuming a session already alive on this assignment consumes nothing: it
+    // does not open one more container (analyse.md D5).
     const resuming = findLiveSession(db, user.login, assignment.id) !== undefined;
     if (!resuming && assignment.teacherId && assignment.maxActiveSessions !== null) {
       const active = countLiveSessionsForTeacher(db, assignment.teacherId);
@@ -405,7 +406,7 @@ async function classroomRoutesImpl(
               assignmentId: assignment.id,
             },
           },
-          "lancement refusé : quota de sessions de l'enseignant atteint",
+          "launch refused: the teacher's session quota is reached",
         );
         return html(
           reply,
@@ -418,24 +419,24 @@ async function classroomRoutesImpl(
       }
     }
 
-    // --- mode examen : la vérification SEB, ici et une seule fois ----------
-    // TODO(verify) SEB 3.x / 2.2.3 : la `startURL` est sur classroom et SEB
-    // arrive ici après une redirection **vers un autre hôte**. Que les deux
-    // en-têtes (`X-SafeExamBrowser-ConfigKeyHash`, `-RequestHash`) soient bien
-    // ajoutés à cette requête-là, et hachés sur l'URL du portail avec sa
-    // chaîne de requête, n'a pas été observé sur un binaire SEB : le mode
-    // `simulated` ne le prouve pas. À confronter lors de la preuve B
-    // (docs/preuve-b-manuelle.md). Si SEB ne les ajoutait pas après
-    // redirection, la `startURL` devrait revenir sur le portail et c'est
-    // classroom qui poserait le jeton par un formulaire.
+    // --- exam mode: the SEB verification, here and only once ---------------
+    // TODO(verify) SEB 3.x / 2.2.3: the `startURL` is on classroom and SEB
+    // arrives here after a redirect **to another host**. That both headers
+    // (`X-SafeExamBrowser-ConfigKeyHash`, `-RequestHash`) are indeed added to
+    // that very request, and hashed over the portal's URL with its query
+    // string, has not been observed on a real SEB binary: the `simulated` mode
+    // does not prove it. To be confronted during proof B
+    // (docs/preuve-b-manuelle.md). If SEB did not add them after a redirect,
+    // the `startURL` would have to come back to the portal and it would be
+    // classroom that posts the token through a form.
     if (assignment.mode === "exam") {
       const seb = opts.verifier.verifyStart(
         { url: request.url, headers: request.headers },
         { configKey: assignment.configKey ?? "", beks: assignment.beks },
       );
       if (!seb.ok) {
-        // Ni BEK ni en-tête dans le journal : ce sont des hachés du secret
-        // partagé (seb/routes.ts).
+        // Neither BEK nor header in the log: these are hashes of the shared
+        // secret (seb/routes.ts).
         request.log.warn(
           {
             seb: {
@@ -445,7 +446,7 @@ async function classroomRoutesImpl(
               clientAddress: request.ip,
             },
           },
-          "lancement d'examen refusé",
+          "exam launch refused",
         );
         return html(
           reply,
@@ -464,10 +465,10 @@ async function classroomRoutesImpl(
         targetRepo: claims.repo,
       });
     } catch (err) {
-      // Le dépôt de l'étudiant n'a pas pu être récupéré : **aucun conteneur
-      // n'a été lancé** et la session ne s'ouvre pas. Ouvrir l'éditeur sur un
-      // répertoire vide, comme le 2026-09-17, laisse l'étudiant travailler à
-      // côté de son rendu sans le savoir.
+      // The student's repository could not be fetched: **no container was
+      // started** and the session does not open. Opening the editor on an empty
+      // directory, as on 2026-09-17, lets the student work beside their
+      // submission without knowing it.
       if (!(err instanceof WorkspaceBootstrapError)) throw err;
       request.log.warn(
         {
@@ -480,7 +481,7 @@ async function classroomRoutesImpl(
           },
           err: err.message,
         },
-        "lancement refusé : espace de travail impossible à préparer",
+        "launch refused: the workspace could not be prepared",
       );
       return html(reply, 503, workspaceErrorPage(err.shortCause));
     }
@@ -509,8 +510,8 @@ async function classroomRoutesImpl(
     request.log.info(
       {
         launch: {
-          // Le jeton n'apparaît jamais ; son `jti` suffit à relier les deux
-          // journaux, et il n'est pas un secret.
+          // The token never appears; its `jti` is enough to link the two logs,
+          // and it is not a secret.
           jti: claims.jti,
           assignmentId: assignment.id,
           sessionId: result.session.id,
@@ -520,7 +521,7 @@ async function classroomRoutesImpl(
           resumed: resuming,
         },
       },
-      "session ouverte depuis un jeton de lancement classroom",
+      "session opened from a classroom launch token",
     );
     return reply.redirect(`/s/${result.session.id}/`, 303);
   });

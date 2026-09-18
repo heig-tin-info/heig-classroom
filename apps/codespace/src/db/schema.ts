@@ -1,10 +1,10 @@
 /**
  * Drizzle schema (SQLite, better-sqlite3).
  *
- * Les quatre entités du cadrage, et rien d'autre : `users`, `assignments`,
- * `sessions`, `push_events`. La session de *connexion* au portail n'est pas
- * une cinquième table : c'est un jeton signé sans état (`auth/session.ts`),
- * justifié dans docs/v1.md § 3.
+ * The four entities of the framing document, and nothing else: `users`,
+ * `assignments`, `sessions`, `push_events`. The portal *login* session is not a
+ * fifth table: it is a stateless signed token (`auth/session.ts`), justified in
+ * docs/v1.md § 3.
  *
  * Timestamps are stored as epoch milliseconds (`timestamp_ms`), UTC, like
  * heig-classroom stores `timestamptz`. SQLite has no timestamp type and a
@@ -58,35 +58,34 @@ export type PushEventRow = typeof pushEvents.$inferSelect;
 export type NewPushEventRow = typeof pushEvents.$inferInsert;
 
 /**
- * Les trois autres entités du cadrage (jalon-0 V1) : l'utilisateur, le
- * devoir, la session. Avec `push_events` ci-dessus, cela fait les quatre
- * tables annoncées et rien d'autre : la session de connexion au portail est
- * un cookie signé sans état côté serveur (auth/session.ts), pas une
- * cinquième table.
+ * The three other entities of the framing document (jalon-0 V1): the user, the
+ * assignment, the session. Together with `push_events` above, that makes the
+ * four announced tables and nothing else: the portal login session is a signed
+ * cookie with no server-side state (auth/session.ts), not a fifth table.
  */
 
 /**
- * Utilisateur du portail, créé à la première connexion OIDC (invariant 4 :
- * aucune autre source d'identité). `login` est l'identifiant institutionnel
- * (`preferred_username`) : c'est lui qui nomme le répertoire de volume, donc
- * il doit satisfaire le `SAFE_ID` de `git/staging.ts`.
+ * Portal user, created at the first OIDC login (invariant 4: no other identity
+ * source). `login` is the institutional identifier (`preferred_username`): it
+ * is what names the volume directory, so it must satisfy the `SAFE_ID` of
+ * `git/staging.ts`.
  */
 export const users = sqliteTable(
   "users",
   {
     id: text("id").primaryKey(),
-    /** Sujet OIDC : la clé d'identité, stable même si l'adresse change. */
+    /** OIDC subject: the identity key, stable even if the address changes. */
     oidcSub: text("oidc_sub").notNull(),
     login: text("login").notNull(),
     email: text("email").notNull(),
     displayName: text("display_name").notNull().default(""),
     /**
-     * Login GitHub, quand il est connu. Il vient des revendications du jeton
-     * de lancement pour un compte venu de classroom (classroom est la source
-     * de vérité du lien GitHub) ; il reste null pour un compte OIDC autonome.
+     * GitHub login, when it is known. It comes from the launch token's claims
+     * for an account coming from classroom (classroom is the source of truth for
+     * the GitHub link); it stays null for a standalone OIDC account.
      */
     githubLogin: text("github_login"),
-    /** Déduit du rôle de realm Keycloak à chaque connexion, jamais stocké à la main. */
+    /** Derived from the Keycloak realm role at every login, never stored by hand. */
     role: text("role", { enum: ["student", "teacher"] })
       .notNull()
       .default("student"),
@@ -103,83 +102,83 @@ export type UserRow = typeof users.$inferSelect;
 export type NewUserRow = typeof users.$inferInsert;
 
 /**
- * Devoir. En v0 il vient de `seed/assignments.yaml` (analyse.md § 5 :
- * « un devoir est un fichier YAML jusqu'au pilote ») ; l'interface enseignant
- * de création est hors périmètre.
+ * Assignment. In v0 it comes from `seed/assignments.yaml` (analyse.md § 5: "an
+ * assignment is a YAML file until the pilot"); the teacher-facing creation UI
+ * is out of scope.
  *
- * `templateRepo` / `targetRepo` portent l'invariant 6 : en mode examen le
- * dépôt de transit est amorcé depuis le **modèle**, et le dépôt cible n'est
- * qu'une destination de relais.
+ * `templateRepo` / `targetRepo` carry invariant 6: in exam mode the staging
+ * repository is seeded from the **template**, and the target repository is only
+ * a relay destination.
  */
 export const assignments = sqliteTable("assignments", {
-  /** Identifiant court, nomme aussi le sous-répertoire du volume. */
+  /** Short identifier, also names the volume subdirectory. */
   id: text("id").primaryKey(),
   title: text("title").notNull(),
   mode: text("mode", { enum: ["lab", "exam"] })
     .notNull()
     .default("lab"),
-  /** Image étudiante à lancer, p. ex. `codespace/c-dev:4.137.0`. */
+  /** Student image to launch, e.g. `codespace/c-dev:4.137.0`. */
   image: text("image").notNull(),
-  /** `http.uploadpack` du dépôt de transit ; vrai par défaut (analyse.md 3.2). */
+  /** `http.uploadpack` of the staging repository; true by default (analyse.md 3.2). */
   uploadPack: integer("upload_pack", { mode: "boolean" }).notNull().default(true),
-  /** Dépôt modèle de l'enseignant : URL ou chemin d'un dépôt local. */
+  /** The teacher's template repository: URL or path of a local repository. */
   templateRepo: text("template_repo"),
-  /** Dépôt cible fixe `<owner>/<name>`. Exclusif de `targetRepoPattern`. */
+  /** Fixed target repository `<owner>/<name>`. Exclusive with `targetRepoPattern`. */
   targetRepo: text("target_repo"),
   /**
-   * Convention, p. ex. `codespace/{student}-tp-pointeurs`. `{student}` est
-   * substitué. **Repli** : un devoir synchronisé depuis classroom reçoit le
-   * dépôt de l'étudiant par le jeton de lancement, et c'est
-   * `sessions.targetRepo` qui fait foi. Ces deux colonnes restent pour la
-   * graine YAML autonome (`seed/assignments.yaml`).
+   * Convention, e.g. `codespace/{student}-tp-pointeurs`. `{student}` is
+   * substituted. **Fallback**: an assignment synchronised from classroom
+   * receives the student's repository through the launch token, and
+   * `sessions.targetRepo` is what is authoritative. These two columns remain for
+   * the standalone YAML seed (`seed/assignments.yaml`).
    */
   targetRepoPattern: text("target_repo_pattern"),
 
-  // --- Devoir synchronisé depuis heig-classroom ---------------------------
-  // Toutes nulles pour un devoir de la graine YAML autonome.
-  /** Enseignant propriétaire : porteur du quota (`sessions.teacherId`). */
+  // --- Assignment synchronised from heig-classroom ------------------------
+  // All null for an assignment coming from the standalone YAML seed.
+  /** Owning teacher: carrier of the quota (`sessions.teacherId`). */
   teacherId: text("teacher_id"),
   teacherEmail: text("teacher_email"),
-  /** Sessions vivantes simultanées autorisées à cet enseignant, tous devoirs confondus. */
+  /** Simultaneous live sessions allowed to this teacher, across all assignments. */
   maxActiveSessions: integer("max_active_sessions"),
   classroomId: text("classroom_id"),
   classroomName: text("classroom_name"),
   /**
-   * Dépôt modèle de l'enseignant, tel que classroom le nomme. Invariant 6 :
-   * c'est de là, et de nulle part ailleurs, qu'un dépôt de transit d'examen
-   * est amorcé. `templateRepo` en porte l'URL de clonage.
+   * The teacher's template repository, as classroom names it. Invariant 6: it is
+   * from there, and from nowhere else, that an exam staging repository is
+   * seeded. `templateRepo` carries its clone URL.
    */
   sourceRepo: text("source_repo", { mode: "json" }).$type<AssignmentRepoRef>(),
-  /** Fenêtre d'ouverture. Null = pas de borne de ce côté. */
+  /** Opening window. Null = no bound on that side. */
   opensAt: integer("opens_at", { mode: "timestamp_ms" }),
   closesAt: integer("closes_at", { mode: "timestamp_ms" }),
-  /** Config Key du `.seb` servi (seb/sebFile.ts). Null hors mode examen. */
+  /** Config Key of the `.seb` served (seb/sebFile.ts). Null outside exam mode. */
   configKey: text("config_key"),
-  /** Un BEK par couple (plateforme, version) : liste, pas scalaire (analyse.md 4.4). */
+  /** One BEK per (platform, version) pair: a list, not a scalar (analyse.md 4.4). */
   beks: text("beks", { mode: "json" })
     .$type<string[]>()
     .notNull()
     .default([]),
-  /** Réglages du `.seb` : `examKeySalt`, `quitUrl`, `extraAllowedHosts`. */
+  /** Settings of the `.seb`: `examKeySalt`, `quitUrl`, `extraAllowedHosts`. */
   sebConfig: text("seb_config", { mode: "json" }).$type<AssignmentSebConfig>(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
 export interface AssignmentSebConfig {
-  /** Sel du Browser Exam Key, stable pour un devoir (seb/sebFile.ts). */
+  /** Browser Exam Key salt, stable for an assignment (seb/sebFile.ts). */
   examKeySalt: string;
   /**
-   * `startURL` inscrite dans le `.seb`, donc dans le calcul de la Config Key.
-   * Absente pour un devoir autonome (le portail prend alors sa propre route
-   * `/exam/<id>/start`) ; présente pour un devoir synchronisé, où c'est
-   * classroom qui authentifie l'étudiant avant de rediriger vers `/launch`.
+   * `startURL` written into the `.seb`, hence into the Config Key computation.
+   * Absent for a standalone assignment (the portal then takes its own route
+   * `/exam/<id>/start`); present for a synchronised assignment, where it is
+   * classroom that authenticates the student before redirecting to `/launch`.
    */
   startUrl?: string;
   quitUrl?: string;
   extraAllowedHosts?: string[];
 }
 
-/** Dépôt sur la forge, tel que classroom le nomme (`CodespaceRepoRef`). */
+/** Repository on the forge, as classroom names it (`CodespaceRepoRef`). */
 export interface AssignmentRepoRef {
   fullName: string;
   defaultBranch: string;
@@ -189,13 +188,13 @@ export type AssignmentRow = typeof assignments.$inferSelect;
 export type NewAssignmentRow = typeof assignments.$inferInsert;
 
 /**
- * Session : un couple (étudiant, devoir) et le conteneur qui le sert.
- * Une seule vivante par couple (analyse.md D5) ; la contrainte est tenue par
- * `sessions/store.ts`, pas par un index partiel, parce que « vivante » est un
- * ensemble d'états et que SQLite n'indexe pas cela sans duplication.
+ * Session: a (student, assignment) pair and the container that serves it.
+ * Only one live per pair (analyse.md D5); the constraint is held by
+ * `sessions/store.ts`, not by a partial index, because "live" is a set of
+ * states and SQLite does not index that without duplication.
  *
- * `student` duplique `users.login` à dessein : le chemin du volume en dérive
- * et ne doit pas bouger si la fiche utilisateur change.
+ * `student` duplicates `users.login` on purpose: the volume path derives from
+ * it and must not move if the user record changes.
  */
 export const sessions = sqliteTable(
   "sessions",
@@ -208,43 +207,42 @@ export const sessions = sqliteTable(
     assignmentId: text("assignment_id")
       .notNull()
       .references(() => assignments.id),
-    /** Identifiant Podman ; null entre la création de la ligne et le `run`. */
+    /** Podman id; null between the creation of the row and the `run`. */
     containerId: text("container_id"),
     containerName: text("container_name"),
-    /** Adresse sur le pont `codespace` : c'est toute l'authentification du canal Git. */
+    /** Address on the `codespace` bridge: that is the whole authentication of the Git channel. */
     containerIp: text("container_ip"),
-    /** `<VOLUMES_ROOT>/<student>/<assignment>`, conservé après destruction du conteneur. */
+    /** `<VOLUMES_ROOT>/<student>/<assignment>`, kept after the container is destroyed. */
     volumeDir: text("volume_dir").notNull(),
     state: text("state", { enum: ["starting", "running", "stopped", "closed", "failed"] })
       .notNull()
       .default("starting"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-    /** Battement, mis à jour par le proxy à chaque requête. */
+    /** Heartbeat, updated by the proxy on every request. */
     lastSeen: integer("last_seen", { mode: "timestamp_ms" }).notNull(),
-    /** Jeton du cookie `cs_session`, porté par le navigateur de l'étudiant. */
+    /** Token of the `cs_session` cookie, carried by the student's browser. */
     cookieToken: text("cookie_token").notNull(),
-    /** Vrai si la session est née d'une vérification SEB (invariant 5). */
+    /** True if the session was born from an SEB verification (invariant 5). */
     sebVerified: integer("seb_verified", { mode: "boolean" }).notNull().default(false),
     /**
-     * Enseignant porteur du quota, recopié du devoir à la création. Recopié
-     * plutôt que joint : le quota se compte d'une requête, et un devoir
-     * réaffecté ne déplace pas les sessions déjà ouvertes.
+     * Teacher who carries the quota, copied from the assignment at creation
+     * time. Copied rather than joined: the quota is counted in a single query,
+     * and a reassigned assignment does not move the already open sessions.
      */
     teacherId: text("teacher_id"),
-    /** `jti` du jeton de lancement qui a ouvert ou repris cette session. */
+    /** `jti` of the launch token that opened or resumed this session. */
     launchJti: text("launch_jti"),
     /**
-     * Dépôt de l'étudiant, apporté par le jeton de lancement. C'est la cible
-     * du relais et, en mode travaux pratiques, la source du miroir. Null pour
-     * une session née de la graine YAML : le devoir porte alors la convention.
+     * The student's repository, brought by the launch token. It is the relay's
+     * target and, in lab mode, the mirror's source. Null for a session born from
+     * the YAML seed: the assignment then carries the convention.
      */
     targetRepo: text("target_repo", { mode: "json" }).$type<AssignmentRepoRef>(),
   },
   (t) => [
     index("sessions_pair_idx").on(t.student, t.assignmentId, t.state),
     index("sessions_state_idx").on(t.state, t.lastSeen),
-    // Le comptage du quota : sessions vivantes d'un enseignant, tous devoirs
-    // confondus.
+    // The quota count: a teacher's live sessions, across all assignments.
     index("sessions_teacher_idx").on(t.teacherId, t.state),
   ],
 );
@@ -253,18 +251,18 @@ export type SessionRow = typeof sessions.$inferSelect;
 export type NewSessionRow = typeof sessions.$inferInsert;
 
 /**
- * Usage unique des jetons de lancement. Une ligne par `jti` consommé ; la
- * clé primaire *est* la garantie — un second `INSERT` du même `jti` échoue,
- * et c'est ce refus que `classroom/routes.ts` transforme en 403.
+ * Single use of launch tokens. One row per consumed `jti`; the primary key *is*
+ * the guarantee — a second `INSERT` of the same `jti` fails, and it is that
+ * refusal that `classroom/routes.ts` turns into a 403.
  *
- * `exp` n'est gardé que pour la purge : au-delà, le jeton est de toute façon
- * refusé par `verifyHs256`, donc la ligne n'a plus rien à empêcher.
+ * `exp` is kept only for the purge: beyond it, the token is refused by
+ * `verifyHs256` anyway, so the row has nothing left to prevent.
  */
 export const launchTokensUsed = sqliteTable(
   "launch_tokens_used",
   {
     jti: text("jti").primaryKey(),
-    /** `exp` du jeton, en millisecondes. La ligne est purgée après. */
+    /** The token's `exp`, in milliseconds. The row is purged after that. */
     exp: integer("exp", { mode: "timestamp_ms" }).notNull(),
     usedAt: integer("used_at", { mode: "timestamp_ms" }).notNull(),
   },

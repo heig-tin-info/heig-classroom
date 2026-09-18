@@ -1,6 +1,6 @@
 /**
- * Enveloppe de `src/db/seed.ts`. La logique est dans le paquet
- * parce que la racine du dépôt n'a pas de `node_modules` (pnpm workspace).
+ * Wrapper around `src/db/seed.ts`. The logic lives in the package
+ * because the repository root has no `node_modules` (pnpm workspace).
  *
  *     pnpm seed
  */

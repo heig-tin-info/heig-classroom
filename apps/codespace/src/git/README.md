@@ -1,72 +1,72 @@
-# Canal Git (P3)
+# Git channel (P3)
 
-Le dépôt de transit et le relais vers la forge, tels que décrits dans
-[docs/analyse.md](../../../../docs/analyse.md) section 3.1 et dans
+The staging repository and the relay to the forge, as described in
+[docs/analyse.md](../../../../docs/analyse.md) section 3.1 and in
 [docs/jalon-0.md](../../../../docs/jalon-0.md) section P3.
 
 ```
-conteneur ──push──▶ portail 10.77.0.254:9418/git/<session>  (auth = IP source)
-                       │  git http-backend  →  <VOLUMES_ROOT>/<e>/<d>/staging.git
-                       │  PushEvent (ref, sha, horodatage, pending)
-                       └─ relais ──push (jeton en variable d'env)──▶ forge
+container ──push──▶ portal 10.77.0.254:9418/git/<session>  (auth = source IP)
+                       │  git http-backend  →  <VOLUMES_ROOT>/<s>/<a>/staging.git
+                       │  PushEvent (ref, sha, timestamp, pending)
+                       └─ relay ──push (token in an env variable)──▶ forge
 ```
 
 ## Modules
 
-| fichier           | rôle |
+| file              | role |
 | ----------------- | ---- |
-| `httpBackend.ts`  | plugin Fastify, contrôle d'IP, politique upload-pack, CGI vers `git http-backend` |
-| `cgi.ts`          | lecture des en-têtes CGI (`Status:` compris) sans bufferiser le corps |
-| `staging.ts`      | création et amorçage du dépôt nu de transit (modes TP, examen, vide) |
-| `pushEvents.ts`   | `diffRefs`, `recordPush` (invariant 7), magasin Drizzle |
-| `relay.ts`        | tâche de fond, reprise sur erreur, jeton hors argv et hors disque |
-| `forge.ts`        | interface `Forge`, implémentations `forgejo` et `github` |
-| `fixtures.ts`     | dépôts de test partagés (pas un `*.test.ts`, donc type-vérifié) |
+| `httpBackend.ts`  | Fastify plugin, IP check, upload-pack policy, CGI to `git http-backend` |
+| `cgi.ts`          | reading the CGI headers (`Status:` included) without buffering the body |
+| `staging.ts`      | creation and seeding of the bare staging repository (lab, exam, empty modes) |
+| `pushEvents.ts`   | `diffRefs`, `recordPush` (invariant 7), Drizzle store |
+| `relay.ts`        | background job, retry on error, token out of argv and off the disk |
+| `forge.ts`        | the `Forge` interface, `forgejo` and `github` implementations |
+| `fixtures.ts`     | shared test repositories (not a `*.test.ts`, therefore type-checked) |
 
-Table `push_events` : [`src/db/schema.ts`](../db/schema.ts).
+The `push_events` table: [`src/db/schema.ts`](../db/schema.ts).
 
-## Dépendances des tests d'intégration
+## Dependencies of the integration tests
 
-`channel.integration.test.ts` a besoin de Podman **rootful** et de Forgejo.
-Sans eux, ou sans `FORGE_TOKEN`, le fichier s'ignore avec un avertissement ;
-les autres tests (dont le canal Git complet sur la boucle locale) tournent
-sans rien.
+`channel.integration.test.ts` needs **rootful** Podman and Forgejo. Without
+them, or without `FORGE_TOKEN`, the file skips itself with a warning; the other
+tests (including the whole Git channel over the loopback) run with nothing at
+all.
 
-### Podman en mode distant
+### Podman in remote mode
 
-Toute commande passe par le socket rootful. En zsh, une fonction, jamais une
-variable :
+Every command goes through the rootful socket. In zsh, a function, never a
+variable:
 
 ```zsh
 p() { /usr/bin/podman --remote --url unix:///run/podman/podman.sock "$@" }
 p version
 ```
 
-### Réseau `codespace`
+### The `codespace` network
 
-Créé par `infra/net/setup.sh` (tâche P2). De façon idempotente, avec
-exactement les options de l'invariant 2 :
+Created by `infra/net/setup.sh` (task P2). Idempotently, with exactly the
+options of invariant 2:
 
 ```zsh
 p network exists codespace || \
   p network create --internal --disable-dns --subnet 10.77.0.0/24 --gateway 10.77.0.254 codespace
 ```
 
-Ne jamais le supprimer : d'autres sessions y sont peut-être attachées. P2 y
-maintient un conteneur permanent `codespace-anchor`
-(`label heig-codespace.role=anchor`) pour que le pont `cs0` et l'adresse
-10.77.0.254 existent en permanence — ne pas le supprimer non plus.
+Never delete it: other sessions may be attached to it. P2 keeps a permanent
+`codespace-anchor` container on it (`label heig-codespace.role=anchor`) so that
+the `cs0` bridge and the 10.77.0.254 address exist at all times — do not delete
+that one either.
 
-`startGitServer` se lie donc à `CODESPACE_GATEWAY` (10.77.0.254 par défaut)
-et ne retombe sur `0.0.0.0` que si cette adresse n'est pas présente
-(`EADDRNOTAVAIL`, pont sans conteneur attaché). Le contrôle d'IP source est
-appliqué dans les deux cas : une adresse d'écoute se défait par une variable
-d'environnement (analyse.md 4.1).
+`startGitServer` therefore binds to `CODESPACE_GATEWAY` (10.77.0.254 by
+default) and only falls back to `0.0.0.0` when that address is not present
+(`EADDRNOTAVAIL`, a bridge with no container attached). The source-IP check
+applies in both cases: a listening address can be undone by an environment
+variable (analyse.md 4.1).
 
 ### Forgejo
 
-`podman-compose` appelle `podman` sans `--remote` ; on lui donne donc un
-`podman` qui l'ajoute :
+`podman-compose` calls `podman` without `--remote`; so it is given a `podman`
+that adds it:
 
 ```zsh
 mkdir -p /tmp/podman-remote
@@ -78,8 +78,8 @@ chmod +x /tmp/podman-remote/podman
 PATH=/tmp/podman-remote:$PATH podman-compose -f infra/compose.dev.yml up -d forgejo
 ```
 
-Le conteneur s'appelle `infra_forgejo_1` (nom de projet = répertoire
-`infra`). Équivalent sans `podman-compose` :
+The container is called `infra_forgejo_1` (project name = the `infra`
+directory). The equivalent without `podman-compose`:
 
 ```zsh
 p volume create forgejo-data
@@ -92,105 +92,104 @@ p run -d --name infra_forgejo_1 -p 127.0.0.1:3300:3000 \
   -v forgejo-data:/data codeberg.org/forgejo/forgejo:11
 ```
 
-### Utilisateur et jeton de développement
+### Development user and token
 
-`forgejo` refuse de tourner en root : le `exec` se fait en `-u 1000`.
+`forgejo` refuses to run as root: the `exec` is done as `-u 1000`.
 
 ```zsh
 p exec -u 1000 infra_forgejo_1 forgejo admin user create \
-  --username codespace --password '<mot de passe de dev>' \
+  --username codespace --password '<dev password>' \
   --email codespace@dev.local --admin --must-change-password=false
 
-curl -s -X POST -u 'codespace:<mot de passe de dev>' -H 'Content-Type: application/json' \
+curl -s -X POST -u 'codespace:<dev password>' -H 'Content-Type: application/json' \
   -d '{"name":"p3-dev","scopes":["write:repository","write:user"]}' \
   http://127.0.0.1:3300/api/v1/users/codespace/tokens
 ```
 
-Le `sha1` renvoyé va dans le `.env` **local** (ignoré par git), jamais dans
-un fichier suivi, jamais dans un rapport :
+The `sha1` that comes back goes into the **local** `.env` (git-ignored), never
+into a tracked file, never into a report:
 
 ```
 FORGE_URL=http://localhost:3300
-FORGE_TOKEN=<sha1 renvoyé>
+FORGE_TOKEN=<returned sha1>
 FORGE_USER=codespace
 FORGE_CONTAINER=infra_forgejo_1
 ```
 
-Le test lit ce `.env` lui-même (vitest ne le charge pas).
+The test reads that `.env` itself (vitest does not load it).
 
-### Image du conteneur de test
+### Image of the test container
 
-`codespace/c-dev:4.137.0`, l'image étudiante de P1, depuis V1 : elle porte git
-et c'est celle que les sessions lancent réellement. (`CODESPACE_IMAGE` permet
-d'en désigner une autre.) Une image sans git ne conviendrait pas : le réseau
-`codespace` est `--internal`, donc un `apk add git` à la volée y est
-impossible.
+`codespace/c-dev:4.137.0`, the P1 student image, since V1: it carries git and
+it is the one sessions actually launch. (`CODESPACE_IMAGE` allows pointing at
+another one.) An image without git would not do: the `codespace` network is
+`--internal`, so an `apk add git` on the fly is impossible there.
 
-## Lancer les tests
+## Running the tests
 
 ```bash
 pnpm --filter @hgc/codespace test
 pnpm typecheck
 ```
 
-`tsconfig.json` exclut les `*.test.ts` du typecheck ; pour les vérifier :
+`tsconfig.json` excludes the `*.test.ts` files from the typecheck; to check
+them:
 
 ```bash
-cd apps/portal && ./node_modules/.bin/tsc --noEmit \
+cd apps/codespace && ./node_modules/.bin/tsc --noEmit \
   --target ES2022 --module NodeNext --moduleResolution NodeNext --strict \
   --noUncheckedIndexedAccess --exactOptionalPropertyTypes --esModuleInterop \
   --skipLibCheck --types node,vitest/globals src/git/*.test.ts
 ```
 
-## Branchement fait en V1
+## Wiring done in V1
 
-- `db.ts` a disparu : la base est celle du portail
-  ([`db/client.ts`](../db/client.ts)), avec les migrations drizzle-kit de
-  `drizzle/`. `openGitDb` y survit sous le même nom, pour les
-  tests de ce module.
-- `SessionLookup` est branché sur la table `sessions`
-  ([`sessions/manager.ts`](../sessions/manager.ts), champ `lookup`) : l'adresse
-  du conteneur vient de la ligne de session.
-- `stagingTargets` reçoit le dépôt cible **de la session**, via
-  `manager.repoOfEvent` : le dépôt que le jeton de lancement de classroom a
-  apporté (`sessions.targetRepo`) et, à défaut, la convention du devoir
-  (`targetRepo` ou `targetRepoPattern`) pour la graine YAML autonome. La
-  session est retrouvée par l'identifiant porté par l'événement, pas par le
-  couple, parce qu'elle survit à la destruction du conteneur — le relais doit
-  rester juste pendant une panne longue de la forge.
-- `startGitServer` est lié à `CODESPACE_GATEWAY:9418` par `server.ts` ; les
-  autres surfaces du portail écoutent sur `HOST:PORT`.
-- L'espace de travail de la session reçoit un remote `origin` pointé sur
+- `db.ts` is gone: the database is the portal's own
+  ([`db/client.ts`](../db/client.ts)), with the drizzle-kit migrations of
+  `drizzle/`. `openGitDb` survives there under the same name, for the tests of
+  this module.
+- `SessionLookup` is wired to the `sessions` table
+  ([`sessions/manager.ts`](../sessions/manager.ts), field `lookup`): the
+  container address comes from the session row.
+- `stagingTargets` receives the target repository **of the session**, through
+  `manager.repoOfEvent`: the repository the classroom launch token brought
+  along (`sessions.targetRepo`) and, failing that, the convention of the
+  assignment (`targetRepo` or `targetRepoPattern`) for the standalone YAML
+  seed. The session is found by the identifier the event carries, not by the
+  pair, because it outlives the destruction of the container — the relay has to
+  stay correct during a long forge outage.
+- `startGitServer` is bound to `CODESPACE_GATEWAY:9418` by `server.ts`; the
+  other surfaces of the portal listen on `HOST:PORT`.
+- The workspace of the session receives an `origin` remote pointed at
   `http://portal.internal:9418/git/<session>`
   ([`sessions/workspace.ts`](../sessions/workspace.ts)).
 
-## L'autorisation de la forge, des deux côtés
+## The forge authorization, on both sides
 
-`gitRunner.gitAuthEnv` est le **seul** véhicule d'un jeton jusqu'à `git` :
-`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0`, donc
-`http.extraHeader` sans fichier de configuration. Jamais dans argv, jamais sur
-disque, et `redactSecrets` le retire des messages d'erreur.
+`gitRunner.gitAuthEnv` is the **only** vehicle carrying a token to `git`:
+`GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0`, hence
+`http.extraHeader` without a configuration file. Never in argv, never on disk,
+and `redactSecrets` strips it from error messages.
 
-Il sert aux deux sens du canal :
+It serves both directions of the channel:
 
-| sens | appelant | jeton |
+| direction | caller | token |
 | --- | --- | --- |
-| `push` vers la forge | `relay.ts` (`buildPushEnv`) | `Forge.authorization(repo)` |
-| `fetch` d'amorçage | `staging.ts` (`ensureStagingRepo({ authorization })`) | le même |
+| `push` to the forge | `relay.ts` (`buildPushEnv`) | `Forge.authorization(repo)` |
+| seeding `fetch` | `staging.ts` (`ensureStagingRepo({ authorization })`) | the same |
 
-Le second manquait jusqu'au 2026-09-17 : le dépôt d'un étudiant provisionné
-par classroom est **privé**, le `fetch` anonyme était refusé, l'échec avalé, et
-la session s'ouvrait sur un espace de travail vide. `sessions/manager.ts`
-refuse désormais de démarrer une session dont le dépôt n'a pas pu être
-récupéré.
+The second one was missing until 2026-09-17: a student repository provisioned
+by classroom is **private**, the anonymous `fetch` was refused, the failure
+swallowed, and the session opened on an empty workspace. `sessions/manager.ts`
+now refuses to start a session whose repository could not be retrieved.
 
-Côté GitHub, `createGithubForge` résout l'installation **par organisation** du
-`owner` du dépôt (`GET /orgs/{org}/installation`) et met le jeton d'une heure
-en cache par installation, renouvelé une minute avant expiration. Pas
-d'identifiant d'installation en configuration : un portail sert plusieurs
-classes.
+On the GitHub side, `createGithubForge` resolves the installation **per
+organisation** of the repository `owner` (`GET /orgs/{org}/installation`) and
+caches the one-hour token per installation, renewed one minute before it
+expires. No installation identifier in the configuration: one portal serves
+several classes.
 
-## Ce qui reste à faire après V1
+## What is left to do after V1
 
-- Rien de spécifique à ce module. `createGithubForge` a été éprouvé contre la
-  vraie App le 2026-09-17 (docs/deploy.md § 5).
+- Nothing specific to this module. `createGithubForge` was exercised against
+  the real App on 2026-09-17 (docs/deploy.md § 5).

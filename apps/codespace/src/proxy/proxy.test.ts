@@ -1,11 +1,11 @@
 /**
- * Refus du proxy, montés sur un vrai portail (Fastify, base, greffons) avec un
- * moteur simulé.
+ * Proxy refusals, mounted on a real portal (Fastify, database, plugins) with a
+ * fake engine.
  *
- * Seuls les chemins de **refus** sont testés ici : ils n'atteignent jamais
- * l'amont, donc le test n'a pas besoin d'un code-server. Le chemin nominal —
- * poste de travail servi, websocket établi — est vérifié pour de vrai par
- * `scripts/e2e.ts`, avec un conteneur.
+ * Only the **refusal** paths are tested here: they never reach the upstream, so
+ * the test does not need a code-server. The nominal path — workspace served,
+ * websocket established — is checked for real by `scripts/e2e.ts`, with a
+ * container.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -19,9 +19,9 @@ import { buildPortal, type Portal } from "../server.js";
 
 import { SESSION_COOKIE, cookieValue, isEntryRequest, parseCookieValue } from "./index.js";
 
-const COOKIE_SECRET = "secret-de-test-assez-long-1";
-const EXAM_SECRET = "secret-de-test-assez-long-2";
-const TOKEN = "jeton-de-session-de-test";
+const COOKIE_SECRET = "a-test-secret-long-enough-1";
+const EXAM_SECRET = "a-test-secret-long-enough-2";
+const TOKEN = "test-session-token";
 
 const fakeEngine: Engine = {
   runArgs: () => [],
@@ -85,7 +85,7 @@ beforeEach(async () => {
         image: "codespace/c-dev:4.137.0",
         uploadPack: true,
         beks: ["0".repeat(64)],
-        sebConfig: { examKeySalt: "sel" },
+        sebConfig: { examKeySalt: "salt" },
         configKey: "0".repeat(64),
         createdAt: now,
       })
@@ -134,22 +134,22 @@ function authCookie(): string {
   );
 }
 
-describe("valeur du cookie de session de codespace", () => {
-  it("se relit", () => {
+describe("codespace session cookie value", () => {
+  it("is read back", () => {
     expect(parseCookieValue(cookieValue("s1", TOKEN))).toEqual({
       sessionId: "s1",
       token: TOKEN,
     });
   });
-  it("rejette une valeur sans séparateur", () => {
+  it("rejects a value without a separator", () => {
     expect(parseCookieValue("s1")).toBeNull();
     expect(parseCookieValue(undefined)).toBeNull();
-    expect(parseCookieValue(".jeton")).toBeNull();
+    expect(parseCookieValue(".token")).toBeNull();
   });
 });
 
-describe("requête d'entrée", () => {
-  it("reconnaît le rechargement de page et lui seul", () => {
+describe("entry request", () => {
+  it("recognizes the page reload and only it", () => {
     expect(isEntryRequest("/s/s1/", "s1")).toBe(true);
     expect(isEntryRequest("/s/s1", "s1")).toBe(true);
     expect(isEntryRequest("/s/s1/?folder=/work", "s1")).toBe(true);
@@ -157,14 +157,14 @@ describe("requête d'entrée", () => {
   });
 });
 
-describe("refus du proxy", () => {
-  it("403 sans cookie de session", async () => {
+describe("proxy refusals", () => {
+  it("403 without a session cookie", async () => {
     const res = await portal.app.inject({ method: "GET", url: "/s/s1/" });
     expect(res.statusCode).toBe(403);
     expect(res.body).toContain("Session non autorisée");
   });
 
-  it("403 avec un cookie d'une autre session", async () => {
+  it("403 with a cookie from another session", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s1/",
@@ -173,33 +173,33 @@ describe("refus du proxy", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("403 avec un jeton faux pour la bonne session", async () => {
+  it("403 with a wrong token for the right session", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s1/",
-      cookies: { [SESSION_COOKIE]: cookieValue("s1", "mauvais-jeton") },
+      cookies: { [SESSION_COOKIE]: cookieValue("s1", "wrong-token") },
     });
     expect(res.statusCode).toBe(403);
   });
 
-  it("404 pour une session inconnue", async () => {
+  it("404 for an unknown session", async () => {
     const res = await portal.app.inject({
       method: "GET",
-      url: "/s/inconnue/",
-      cookies: { [SESSION_COOKIE]: cookieValue("inconnue", TOKEN) },
+      url: "/s/unknown/",
+      cookies: { [SESSION_COOKIE]: cookieValue("unknown", TOKEN) },
     });
     expect(res.statusCode).toBe(404);
   });
 });
 
-describe("mode examen — invariant 5 : le proxy ne lit aucun en-tête SEB", () => {
+describe("exam mode — invariant 5: the proxy reads no SEB header", () => {
   const examCookie = (address: string, sessionId = "s2"): string =>
     issueExamCookie(
       { assignmentId: "ex", sessionId, clientAddress: address, issuedAt: Date.now() },
       { secret: EXAM_SECRET },
     );
 
-  it("refuse même avec les en-têtes SEB, s'il n'y a pas de cookie d'examen", async () => {
+  it("refuses even with the SEB headers, if there is no exam cookie", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s2/",
@@ -214,7 +214,7 @@ describe("mode examen — invariant 5 : le proxy ne lit aucun en-tête SEB", () 
     expect(res.body).toContain("Safe Exam Browser");
   });
 
-  it("refuse un cookie d'examen émis pour une autre adresse (analyse.md D5)", async () => {
+  it("refuses an exam cookie issued for another address (analyse.md D5)", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s2/",
@@ -228,7 +228,7 @@ describe("mode examen — invariant 5 : le proxy ne lit aucun en-tête SEB", () 
     expect(res.body).toContain("autre poste");
   });
 
-  it("refuse un cookie d'examen émis pour une autre session", async () => {
+  it("refuses an exam cookie issued for another session", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s2/",
@@ -242,8 +242,8 @@ describe("mode examen — invariant 5 : le proxy ne lit aucun en-tête SEB", () 
   });
 });
 
-describe("gardes d'autorisation des pages", () => {
-  it("/ redirige vers la connexion sans session de portail", async () => {
+describe("page authorization guards", () => {
+  it("/ redirects to the login without a portal session", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/",
@@ -253,7 +253,7 @@ describe("gardes d'autorisation des pages", () => {
     expect(res.headers["location"]).toBe("/auth/login");
   });
 
-  it("/teacher/sessions est refusé à un étudiant connecté", async () => {
+  it("/teacher/sessions is refused to a logged-in student", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/teacher/sessions",
@@ -264,7 +264,7 @@ describe("gardes d'autorisation des pages", () => {
     expect(res.body).toContain("réservée aux enseignants");
   });
 
-  it("un devoir d'examen ne se démarre pas par le bouton Démarrer", async () => {
+  it("an exam assignment does not start through the Start button", async () => {
     const res = await portal.app.inject({
       method: "POST",
       url: "/assignments/ex/start",
@@ -275,7 +275,7 @@ describe("gardes d'autorisation des pages", () => {
     expect(res.body).toContain("Safe Exam Browser");
   });
 
-  it("/exam/<id>/start sans session de portail renvoie à la connexion", async () => {
+  it("/exam/<id>/start without a portal session sends back to the login", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/exam/ex/start",
@@ -285,7 +285,7 @@ describe("gardes d'autorisation des pages", () => {
     expect(res.headers["location"]).toBe("/auth/login");
   });
 
-  it("/exam/<id>/start sans en-tête SEB est refusé même connecté", async () => {
+  it("/exam/<id>/start without an SEB header is refused even when logged in", async () => {
     const res = await portal.app.inject({
       method: "GET",
       url: "/exam/ex/start",
@@ -296,7 +296,7 @@ describe("gardes d'autorisation des pages", () => {
     expect(res.body).toContain("Safe Exam Browser");
   });
 
-  it("le `.seb` d'un devoir de travaux pratiques n'existe pas", async () => {
+  it("the `.seb` of a lab assignment does not exist", async () => {
     const res = await portal.app.inject({ method: "GET", url: "/exam/tp.seb" });
     expect(res.statusCode).toBe(404);
   });

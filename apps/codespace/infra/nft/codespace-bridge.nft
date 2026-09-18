@@ -1,24 +1,24 @@
 #!/usr/sbin/nft -f
 #
-# Défense en profondeur, OPTIONNELLE : la règle ICC exprimée dans la famille
-# `bridge`, telle que la prescrit analyse.md D1.
+# Defence in depth, OPTIONAL: the ICC rule expressed in the `bridge` family,
+# as analyse.md D1 prescribes it.
 #
-# Ce fichier n'est chargé par infra/net/setup.sh que si le noyau supporte la
-# famille bridge (CONFIG_NF_TABLES_BRIDGE). Sur le poste de développement
-# (WSL2, 6.18.33.2-microsoft-standard) il ne l'est PAS : nf_tables_bridge est
-# absent des modules et des builtins. Sur une VM Ubuntu 24.04/26.04 standard il
-# l'est, et cette table filtre alors le trafic ponté au niveau 2, avant même
-# que br_netfilter ne le remonte aux hooks IP — donc y compris les protocoles
-# non-IP que la table inet ne voit pas.
+# This file is loaded by infra/net/setup.sh only if the kernel supports the
+# bridge family (CONFIG_NF_TABLES_BRIDGE). On the development workstation
+# (WSL2, 6.18.33.2-microsoft-standard) it does NOT: nf_tables_bridge is absent
+# from both the modules and the builtins. On a standard Ubuntu 24.04/26.04 VM
+# it is, and that table then filters bridged traffic at layer 2, before
+# br_netfilter even lifts it to the IP hooks — hence including the non-IP
+# protocols the inet table does not see.
 #
-# `meta ibrname` / `meta obrname` = le pont maître du port d'entrée / de sortie.
-# On les préfère à iifname/oifname ici : dans la famille bridge, iifname est le
-# veth (nom instable, recréé par conteneur), ibrname est le pont (nom fixé à la
-# création du réseau par `--interface-name cs0`).
+# `meta ibrname` / `meta obrname` = the master bridge of the ingress / egress
+# port. We prefer them to iifname/oifname here: in the bridge family, iifname
+# is the veth (unstable name, recreated per container), ibrname is the bridge
+# (name fixed at network creation by `--interface-name cs0`).
 #
-# TODO(verify) nftables 1.1.6 : `meta obrname` est documenté depuis nftables
-# 0.9.x ; syntaxe validée ici par `nft -c -f` (analyse lexicale/grammaticale
-# seulement, le chargement noyau n'a pas pu être fait faute de root).
+# TODO(verify) nftables 1.1.6: `meta obrname` has been documented since
+# nftables 0.9.x; syntax validated here by `nft -c -f` (lexical and grammatical
+# analysis only, the kernel load could not be done for lack of root).
 
 table bridge codespace
 delete table bridge codespace
@@ -26,6 +26,6 @@ delete table bridge codespace
 table bridge codespace {
 	chain forward {
 		type filter hook forward priority filter - 10; policy accept;
-		meta ibrname "cs0" meta obrname "cs0" drop comment "ICC L2: pas de conteneur<->conteneur"
+		meta ibrname "cs0" meta obrname "cs0" drop comment "ICC L2: no container<->container"
 	}
 }

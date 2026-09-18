@@ -19,15 +19,15 @@ import {
 } from "./verify.js";
 
 const ORIGIN = "https://codespace.heig-vd.ch";
-const COOKIE_SECRET = "secret-de-test-assez-long";
+const COOKIE_SECRET = "long-enough-test-secret";
 const BEK_WIN = "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
 const BEK_MAC = "bbbb111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
-const BEK_AUTRE_VERSION = "cccc111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
+const BEK_OTHER_VERSION = "cccc111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
 
 const A1 = {
   id: "a1",
   startUrl: `${ORIGIN}/exam/a1/start`,
-  quitUrl: `${ORIGIN}/exam/a1/fini`,
+  quitUrl: `${ORIGIN}/exam/a1/done`,
   examKeySalt: "QJAqvg89YMP6JagAshUm6QqpqpsrVS9ZWUYjdZhfEao=",
 } as const;
 
@@ -46,7 +46,7 @@ function build(mode: "real" | "simulated"): FastifyInstance {
     cookieSecure: true,
     onStart: () => ({ sessionId: "s-42", redirectTo: "/s/s-42/" }),
   });
-  // Route de substitution du proxy : elle ne lit QUE le cookie (invariant 5).
+  // Stand-in route for the proxy: it reads ONLY the cookie (invariant 5).
   app.get("/s/:sessionId/", async (request, reply) => {
     const verdict = checkExamRequest(request, { secret: COOKIE_SECRET, assignmentId: "a1" });
     if (!verdict.ok) return replyOutsideSeb(reply, verdict);
@@ -69,7 +69,7 @@ describe("GET /exam/:assignmentId.seb", () => {
     app = build("real");
   });
 
-  it("sert le fichier avec le type application/seb", async () => {
+  it("serves the file with the application/seb type", async () => {
     const res = await app.inject({ method: "GET", url: "/exam/a1.seb" });
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toBe(SEB_CONTENT_TYPE);
@@ -77,28 +77,28 @@ describe("GET /exam/:assignmentId.seb", () => {
     expect(res.body.startsWith("<?xml")).toBe(true);
   });
 
-  it("le fichier servi a bien la Config Key enregistrée pour le devoir", async () => {
+  it("the file served does carry the Config Key recorded for the assignment", async () => {
     const res = await app.inject({ method: "GET", url: "/exam/a1.seb" });
     expect(configKeyOfSebFile(res.body)).toBe(ASSIGNMENT.configKey);
   });
 
-  it("le fichier ne contient aucun BEK", async () => {
+  it("the file contains no BEK", async () => {
     const res = await app.inject({ method: "GET", url: "/exam/a1.seb" });
     for (const bek of [BEK_WIN, BEK_MAC]) expect(res.body).not.toContain(bek);
   });
 
-  it("devoir inconnu : 404", async () => {
-    expect((await app.inject({ method: "GET", url: "/exam/inconnu.seb" })).statusCode).toBe(404);
+  it("unknown assignment: 404", async () => {
+    expect((await app.inject({ method: "GET", url: "/exam/unknown.seb" })).statusCode).toBe(404);
   });
 });
 
-describe("GET /exam/:assignmentId/start, vérificateur réel", () => {
+describe("GET /exam/:assignmentId/start, real verifier", () => {
   let app: FastifyInstance;
   beforeEach(() => {
     app = build("real");
   });
 
-  it("requête SEB valide : cookie posé et redirection", async () => {
+  it("valid SEB request: cookie set and redirection", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/exam/a1/start",
@@ -113,33 +113,33 @@ describe("GET /exam/:assignmentId/start, vérificateur réel", () => {
     expect(setCookie).toContain("SameSite=Lax");
   });
 
-  const refus: Array<[string, { url: string; headers: Record<string, string> }]> = [
-    ["sans en-tête", { url: "/exam/a1/start", headers: {} }],
+  const refusals: Array<[string, { url: string; headers: Record<string, string> }]> = [
+    ["no header", { url: "/exam/a1/start", headers: {} }],
     [
-      "en-tête forgé",
+      "forged header",
       {
         url: "/exam/a1/start",
         headers: { ...sebHeaders("/exam/a1/start"), [CONFIG_KEY_HEADER]: "00".repeat(32) },
       },
     ],
     [
-      "hachage calculé sur une URL avec fragment",
+      "hash computed over a URL with a fragment",
       { url: "/exam/a1/start", headers: sebHeaders("/exam/a1/start#x") },
     ],
     [
-      "query réordonnée",
+      "reordered query",
       { url: "/exam/a1/start?b=2&a=1", headers: sebHeaders("/exam/a1/start?a=1&b=2") },
     ],
     [
-      "BEK d'une autre version",
-      { url: "/exam/a1/start", headers: sebHeaders("/exam/a1/start", BEK_AUTRE_VERSION) },
+      "BEK of another version",
+      { url: "/exam/a1/start", headers: sebHeaders("/exam/a1/start", BEK_OTHER_VERSION) },
     ],
-    ["en-tête de développement seul", { url: "/exam/a1/start", headers: { [DEV_HEADER]: "ok" } }],
+    ["development header alone", { url: "/exam/a1/start", headers: { [DEV_HEADER]: "ok" } }],
   ];
 
-  for (const [nom, requete] of refus) {
-    it(`refuse (403, page explicite) : ${nom}`, async () => {
-      const res = await app.inject({ method: "GET", ...requete });
+  for (const [name, request] of refusals) {
+    it(`refuses (403, explicit page): ${name}`, async () => {
+      const res = await app.inject({ method: "GET", ...request });
       expect(res.statusCode).toBe(403);
       expect(res.headers["content-type"]).toContain("text/html");
       expect(res.body).toContain("Session hors Safe Exam Browser");
@@ -147,12 +147,12 @@ describe("GET /exam/:assignmentId/start, vérificateur réel", () => {
     });
   }
 
-  it("un refus ne journalise jamais un BEK", async () => {
-    const lignes: string[] = [];
+  it("a refusal never logs a BEK", async () => {
+    const lines: string[] = [];
     const app2 = Fastify({
       logger: {
         level: "trace",
-        stream: { write: (chunk: string) => void lignes.push(chunk) },
+        stream: { write: (chunk: string) => void lines.push(chunk) },
       },
     });
     app2.register(sebRoutes, {
@@ -168,32 +168,32 @@ describe("GET /exam/:assignmentId/start, vérificateur réel", () => {
     await app2.inject({
       method: "GET",
       url: "/exam/a1/start",
-      headers: sebHeaders("/exam/a1/start", BEK_AUTRE_VERSION),
+      headers: sebHeaders("/exam/a1/start", BEK_OTHER_VERSION),
     });
-    const journal = lignes.join("");
-    expect(journal).toContain("démarrage d'examen refusé");
-    expect(journal).toContain("browser-exam-key-mismatch");
-    for (const bek of [BEK_WIN, BEK_MAC, BEK_AUTRE_VERSION]) {
-      expect(journal).not.toContain(bek);
+    const log = lines.join("");
+    expect(log).toContain("exam start refused");
+    expect(log).toContain("browser-exam-key-mismatch");
+    for (const bek of [BEK_WIN, BEK_MAC, BEK_OTHER_VERSION]) {
+      expect(log).not.toContain(bek);
     }
-    // Ni le haché reçu, qui est une fonction du secret partagé.
-    expect(journal).not.toContain(expectedHash(`${ORIGIN}/exam/a1/start`, BEK_AUTRE_VERSION));
+    // Nor the hash that was received, which is a function of the shared secret.
+    expect(log).not.toContain(expectedHash(`${ORIGIN}/exam/a1/start`, BEK_OTHER_VERSION));
     await app2.close();
   });
 
-  it("devoir inconnu : 404", async () => {
-    const res = await app.inject({ method: "GET", url: "/exam/inconnu/start" });
+  it("unknown assignment: 404", async () => {
+    const res = await app.inject({ method: "GET", url: "/exam/unknown/start" });
     expect(res.statusCode).toBe(404);
   });
 });
 
-describe("GET /exam/:assignmentId/start, vérificateur simulé", () => {
+describe("GET /exam/:assignmentId/start, simulated verifier", () => {
   let app: FastifyInstance;
   beforeEach(() => {
     app = build("simulated");
   });
 
-  it("X-Dev-SEB: ok suffit", async () => {
+  it("X-Dev-SEB: ok is enough", async () => {
     const res = await app.inject({
       method: "GET",
       url: "/exam/a1/start",
@@ -202,24 +202,24 @@ describe("GET /exam/:assignmentId/start, vérificateur simulé", () => {
     expect(res.statusCode).toBe(303);
   });
 
-  it("refuse le même jeu de cas que le vérificateur réel", async () => {
-    for (const [nom, requete] of [
-      ["sans en-tête", { url: "/exam/a1/start", headers: {} }],
+  it("refuses the same set of cases as the real verifier", async () => {
+    for (const [name, request] of [
+      ["no header", { url: "/exam/a1/start", headers: {} }],
       [
-        "en-têtes SEB seuls",
+        "SEB headers alone",
         { url: "/exam/a1/start", headers: sebHeaders("/exam/a1/start") },
       ],
-      ["valeur inattendue", { url: "/exam/a1/start", headers: { [DEV_HEADER]: "yes" } }],
+      ["unexpected value", { url: "/exam/a1/start", headers: { [DEV_HEADER]: "yes" } }],
     ] as Array<[string, { url: string; headers: Record<string, string> }]>) {
-      const res = await app.inject({ method: "GET", ...requete });
-      expect(res.statusCode, nom).toBe(403);
+      const res = await app.inject({ method: "GET", ...request });
+      expect(res.statusCode, name).toBe(403);
       expect(res.body).toContain("Session hors Safe Exam Browser");
     }
   });
 });
 
-describe("le proxy ne lit que le cookie (invariant 5)", () => {
-  it("cookie posé par /start : le proxy accepte", async () => {
+describe("the proxy reads only the cookie (invariant 5)", () => {
+  it("cookie set by /start: the proxy accepts", async () => {
     const app = build("real");
     const start = await app.inject({
       method: "GET",
@@ -232,7 +232,7 @@ describe("le proxy ne lit que le cookie (invariant 5)", () => {
     expect(proxy.json()).toEqual({ ok: true, sessionId: "s-42" });
   });
 
-  it("cookie valide depuis une autre adresse client : refusé", async () => {
+  it("valid cookie from another client address: refused", async () => {
     const app = build("real");
     const start = await app.inject({
       method: "GET",
@@ -242,25 +242,25 @@ describe("le proxy ne lit que le cookie (invariant 5)", () => {
     });
     const cookie = String(res0(start)).split(";")[0] as string;
 
-    const memeAdresse = await app.inject({
+    const sameAddress = await app.inject({
       method: "GET",
       url: "/s/s-42/",
       headers: { cookie },
       remoteAddress: "10.0.0.7",
     });
-    expect(memeAdresse.statusCode).toBe(200);
+    expect(sameAddress.statusCode).toBe(200);
 
-    const autreAdresse = await app.inject({
+    const otherAddress = await app.inject({
       method: "GET",
       url: "/s/s-42/",
       headers: { cookie },
       remoteAddress: "10.0.0.8",
     });
-    expect(autreAdresse.statusCode).toBe(403);
-    expect(autreAdresse.body).toContain("depuis un autre poste");
+    expect(otherAddress.statusCode).toBe(403);
+    expect(otherAddress.body).toContain("depuis un autre poste");
   });
 
-  it("sans cookie, les en-têtes SEB ne servent à rien sur le proxy", async () => {
+  it("without a cookie, the SEB headers are useless on the proxy", async () => {
     const app = build("real");
     const res = await app.inject({
       method: "GET",
@@ -271,7 +271,7 @@ describe("le proxy ne lit que le cookie (invariant 5)", () => {
     expect(res.body).toContain("Session hors Safe Exam Browser");
   });
 
-  it("le cookie émis porte bien devoir, session et adresse", async () => {
+  it("the issued cookie does carry assignment, session and address", async () => {
     const app = build("real");
     const start = await app.inject({
       method: "GET",
@@ -279,10 +279,10 @@ describe("le proxy ne lit que le cookie (invariant 5)", () => {
       headers: sebHeaders("/exam/a1/start"),
       remoteAddress: "10.0.0.7",
     });
-    const valeur = (String(res0(start)).split(";")[0] as string).slice(
+    const value = (String(res0(start)).split(";")[0] as string).slice(
       `${EXAM_COOKIE}=`.length,
     );
-    const verdict = verifyExamCookie(valeur, {
+    const verdict = verifyExamCookie(value, {
       secret: COOKIE_SECRET,
       clientAddress: "10.0.0.7",
     });
@@ -295,7 +295,7 @@ describe("le proxy ne lit que le cookie (invariant 5)", () => {
   });
 });
 
-/** Premier `Set-Cookie` d'une réponse injectée. */
+/** First `Set-Cookie` of an injected response. */
 function res0(res: { headers: Record<string, unknown> }): string {
   const raw = res.headers["set-cookie"];
   return Array.isArray(raw) ? String(raw[0]) : String(raw);

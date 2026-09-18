@@ -1,9 +1,9 @@
-# Environnement de développement : forge Git locale (Forgejo).
-# L'IdP OIDC de dev est le Keycloak de classroom (docker-compose.dev.yml à la
-# racine, realm hgc-dev, client codespace-portal) : un seul Keycloak pour les deux
-# applications ; en production, Switch edu-ID pour les deux.
-# Lancement : podman compose -f infra/compose.dev.yml up -d
-# Les conteneurs étudiants ne sont PAS ici : le portail les crée dynamiquement.
+# Development environment: local Git forge (Forgejo).
+# The dev OIDC IdP is classroom's Keycloak (docker-compose.dev.yml at the repo
+# root, realm hgc-dev, client codespace-portal): a single Keycloak for both
+# applications; in production, Switch edu-ID for both.
+# Start with: podman compose -f infra/compose.dev.yml up -d
+# Student containers are NOT here: the portal creates them dynamically.
 services:
   forgejo:
     image: codeberg.org/forgejo/forgejo:11

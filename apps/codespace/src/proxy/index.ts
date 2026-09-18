@@ -1,20 +1,20 @@
 /**
- * `/s/<session>/*` → code-server du conteneur.
+ * `/s/<session>/*` → the container's code-server.
  *
- * **Invariant 5 de CLAUDE.md** : ce proxy ne lit jamais d'en-tête SEB. Il
- * connaît le cookie de session du portail, et, en mode examen, le cookie
- * `exam_session` que `seb/routes.ts` a posé une fois, à la vérification. La
- * raison est dans analyse.md § 4.5 : rien ne garantit que SEB ajoute ses
- * en-têtes aux mises à niveau websocket ni aux requêtes de service worker.
+ * **Invariant 5 of CLAUDE.md**: this proxy never reads an SEB header. It knows
+ * the portal's session cookie and, in exam mode, the `exam_session` cookie that
+ * `seb/routes.ts` set once, at verification time. The reason is in analyse.md
+ * § 4.5: nothing guarantees that SEB adds its headers to websocket upgrades or
+ * to service worker requests.
  *
- * Les mises à niveau websocket passent par le routeur Fastify
- * (`@fastify/http-proxy` les redirige vers `fastify.routing`), donc le
- * `preHandler` ci-dessous s'applique aussi à elles : une session sans cookie
- * ne peut pas ouvrir de socket.
+ * Websocket upgrades go through the Fastify router (`@fastify/http-proxy`
+ * redirects them to `fastify.routing`), so the `preHandler` below applies to
+ * them too: a session without a cookie cannot open a socket.
  *
- * L'amont est dynamique (une adresse par conteneur) : `replyOptions.getUpstream`
- * est synchrone, donc le `preHandler` — qui, lui, peut attendre la base et
- * Podman — dépose l'adresse dans un cache que `getUpstream` relit.
+ * The upstream is dynamic (one address per container): `replyOptions.getUpstream`
+ * is synchronous, so the `preHandler` — which, for its part, may await the
+ * database and Podman — deposits the address in a cache that `getUpstream`
+ * reads back.
  */
 import httpProxy from "@fastify/http-proxy";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -26,7 +26,7 @@ import { checkExamRequest, replyOutsideSeb } from "../seb/index.js";
 import type { SessionManager } from "../sessions/manager.js";
 import { findAssignment, findSession } from "../sessions/store.js";
 
-/** Nom du cookie de session de codespace ; porté avec `Path=/s/<id>`. */
+/** Name of the codespace session cookie; carried with `Path=/s/<id>`. */
 export const SESSION_COOKIE = "cs_session";
 
 export interface ProxyOptions {
@@ -42,7 +42,7 @@ declare module "fastify" {
   }
 }
 
-/** Valeur du cookie : `<sessionId>.<jeton>`, pour qu'il ne serve qu'à sa session. */
+/** Cookie value: `<sessionId>.<token>`, so that it only serves its own session. */
 export function cookieValue(sessionId: string, token: string): string {
   return `${sessionId}.${token}`;
 }
@@ -66,7 +66,7 @@ function deny(reply: FastifyReply, code: number, title: string, detail: string):
     );
 }
 
-/** Une requête sur `/s/<id>/` exactement : le rechargement de page de l'étudiant. */
+/** A request on exactly `/s/<id>/`: the student's page reload. */
 export function isEntryRequest(url: string, sessionId: string): boolean {
   const path = url.split("?", 1)[0] ?? "";
   return path === `/s/${sessionId}` || path === `/s/${sessionId}/`;
@@ -74,7 +74,7 @@ export function isEntryRequest(url: string, sessionId: string): boolean {
 
 async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promise<void> {
   const { db, manager } = opts;
-  /** sid → `http://<ip>:8080`. Rempli par le `preHandler`, lu par `getUpstream`. */
+  /** sid → `http://<ip>:8080`. Filled by the `preHandler`, read by `getUpstream`. */
   const upstreams = new Map<string, string>();
 
   app.decorateRequest("codespaceUpstream", null);
@@ -90,7 +90,7 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
     if (!parsed || parsed.sessionId !== sessionId || !manager.checkCookie(session, parsed.token)) {
       request.log.warn(
         { sessionId, clientAddress: request.ip },
-        "accès au proxy refusé : cookie de session absent ou invalide",
+        "proxy access refused: session cookie missing or invalid",
       );
       return deny(
         reply,
@@ -105,8 +105,8 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
       return deny(reply, 404, "Devoir inconnu", "Le devoir de cette session a disparu.");
     }
 
-    // Mode examen : le cookie SEB, et lui seul (invariant 5). Une adresse
-    // client différente de celle de la vérification initiale est refusée
+    // Exam mode: the SEB cookie, and it alone (invariant 5). A client address
+    // different from the one of the initial verification is refused
     // (analyse.md D5).
     if (assignment.mode === "exam") {
       const verdict = checkExamRequest(request, {
@@ -117,12 +117,12 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
       if (!verdict.ok) {
         request.log.warn(
           { sessionId, reason: verdict.reason, clientAddress: request.ip },
-          "accès au proxy refusé en mode examen",
+          "proxy access refused in exam mode",
         );
         return replyOutsideSeb(reply, verdict);
       }
       if (verdict.claims.sessionId !== sessionId) {
-        request.log.warn({ sessionId }, "cookie d'examen d'une autre session");
+        request.log.warn({ sessionId }, "exam cookie from another session");
         return replyOutsideSeb(reply, { ok: false, reason: "address-mismatch" });
       }
     }
@@ -136,16 +136,16 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
       );
     }
 
-    // Le rechargement de page est le moment où l'on vérifie que le conteneur
-    // est encore là — et où on le relance sur le même volume s'il est mort
-    // (`podman kill`, redémarrage de l'hôte). Les requêtes de ressources et
-    // les trames websocket ne paient pas ce coût : elles se contentent du
-    // cache, et une session morte se manifeste par un rechargement.
+    // The page reload is the moment when we check that the container is still
+    // there — and where we restart it on the same volume if it is dead
+    // (`podman kill`, host reboot). Resource requests and websocket frames do
+    // not pay that cost: they make do with the cache, and a dead session shows
+    // up on a reload.
     if (isEntryRequest(request.url, sessionId) || !upstreams.has(sessionId)) {
       try {
         session = await manager.ensureRunning(sessionId);
       } catch (err) {
-        request.log.error({ sessionId, err }, "relance de session impossible");
+        request.log.error({ sessionId, err }, "session restart impossible");
         return deny(
           reply,
           502,
@@ -158,8 +158,9 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
       return deny(reply, 502, "Session indisponible", "Le conteneur n'a pas d'adresse.");
     }
     upstreams.set(sessionId, `http://${session.containerIp}:8080`);
-    // Battement : c'est le proxy qui tient `lastSeen`, donc l'onglet ouvert
-    // suffit à garder la session en vie et sa fermeture démarre la grâce.
+    // Heartbeat: it is the proxy that keeps `lastSeen`, so an open tab is
+    // enough to keep the session alive, and closing it starts the grace
+    // period.
     manager.touch(sessionId);
     return undefined;
   }
@@ -170,14 +171,14 @@ async function proxyPluginImpl(app: FastifyInstance, opts: ProxyOptions): Promis
     upstream: "",
     websocket: true,
     preHandler: guard,
-    // La réécriture interne d'en-tête `Location` de @fastify/http-proxy est
-    // fausse pour un préfixe paramétré : elle remplace le préfixe réécrit
-    // (ici la chaîne vide) par le préfixe *littéral* de la route, et
-    // `"./?folder=/work".replace("", "/s/:sid")` produit
-    // `"/s/:sid./?folder=/work"` — un `:sid` non substitué. On la coupe et on
-    // réécrit soi-même, en ne touchant qu'aux chemins absolus : code-server
-    // sert tout en relatif (`serverBasePath: "."`), donc le cas normal n'a
-    // même pas besoin d'être réécrit.
+    // The internal `Location` header rewriting of @fastify/http-proxy is wrong
+    // for a parameterized prefix: it replaces the rewritten prefix (here the
+    // empty string) by the *literal* prefix of the route, and
+    // `"./?folder=/work".replace("", "/s/:sid")` produces
+    // `"/s/:sid./?folder=/work"` — an unsubstituted `:sid`. We turn it off and
+    // rewrite it ourselves, touching only absolute paths: code-server serves
+    // everything relative (`serverBasePath: "."`), so the normal case does not
+    // even need to be rewritten.
     internalRewriteLocationHeader: false,
     replyOptions: {
       getUpstream(request) {

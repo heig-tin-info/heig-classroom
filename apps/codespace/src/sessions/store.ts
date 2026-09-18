@@ -1,6 +1,6 @@
 /**
- * Accès en base aux devoirs et aux sessions. Pas d'ORM caché : des fonctions
- * qui prennent le handle Drizzle, comme partout ailleurs dans le portail.
+ * Database access to assignments and sessions. No hidden ORM: functions that
+ * take the Drizzle handle, as everywhere else in the portal.
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
 
@@ -17,10 +17,10 @@ import {
 import type { RepoRef } from "../git/index.js";
 
 /**
- * États dans lesquels une session compte encore comme « la » session du
- * couple (étudiant, devoir) (analyse.md D5). `stopped` en fait partie : le
- * conteneur est mort mais le volume et l'identifiant de session survivent, et
- * un rechargement de page doit y revenir plutôt que d'en ouvrir une seconde.
+ * States in which a session still counts as "the" session of the (student,
+ * assignment) pair (analyse.md D5). `stopped` is one of them: the container is
+ * dead but the volume and the session id survive, and a page reload must come
+ * back to it rather than open a second one.
  */
 export const LIVE_STATES = ["starting", "running", "stopped"] as const;
 export type LiveState = (typeof LIVE_STATES)[number];
@@ -33,7 +33,7 @@ export function listAssignments(db: Db): AssignmentRow[] {
   return db.select().from(assignments).all();
 }
 
-/** Devoirs ouverts à l'instant donné : la fenêtre d'ouverture, si elle existe. */
+/** Assignments open at the given instant: the opening window, if it exists. */
 export function listOpenAssignments(db: Db, now: Date = new Date()): AssignmentRow[] {
   return listAssignments(db).filter((a) => isOpen(a, now));
 }
@@ -49,16 +49,15 @@ export function findSession(db: Db, id: string): SessionRow | undefined {
 }
 
 /**
- * L'utilisateur d'une session, par sa clé primaire. Le gestionnaire de
- * sessions en a besoin au `podman run` : l'identité git posée sur le
- * conteneur (`display_name`, `email`) vient de cette ligne, et `launch()` ne
- * reçoit que la session.
+ * The user of a session, by primary key. The session manager needs it at
+ * `podman run` time: the git identity set on the container (`display_name`,
+ * `email`) comes from this row, and `launch()` only receives the session.
  */
 export function findUser(db: Db, id: string): UserRow | undefined {
   return db.select().from(users).where(eq(users.id, id)).get();
 }
 
-/** La session vivante du couple, s'il y en a une. */
+/** The live session of the pair, if there is one. */
 export function findLiveSession(
   db: Db,
   student: string,
@@ -79,10 +78,10 @@ export function findLiveSession(
 }
 
 /**
- * La ligne du couple (étudiant, devoir), quel que soit son état. Il n'y en a
- * qu'une : `manager.ts` réanime celle-ci plutôt que d'en créer une seconde,
- * pour que l'identifiant de session — et donc le remote `origin` écrit dans
- * l'espace de travail — reste stable pour la vie du volume.
+ * The row of the (student, assignment) pair, whatever its state. There is only
+ * one: `manager.ts` revives this one rather than creating a second one, so that
+ * the session id — and hence the `origin` remote written into the workspace —
+ * stays stable for the lifetime of the volume.
  */
 export function findAnySession(
   db: Db,
@@ -107,18 +106,18 @@ export function listLiveSessions(db: Db): SessionRow[] {
 
 export function updateSession(db: Db, id: string, patch: Partial<SessionRow>): SessionRow {
   const [row] = db.update(sessions).set(patch).where(eq(sessions.id, id)).returning().all();
-  if (!row) throw new Error(`session ${id} introuvable`);
+  if (!row) throw new Error(`session ${id} not found`);
   return row;
 }
 
-/** `<owner>/<name>` → `RepoRef`. Undefined si la forme n'y est pas. */
+/** `<owner>/<name>` → `RepoRef`. Undefined if the shape is not there. */
 export function splitRepoRef(full: string): RepoRef | undefined {
   const slash = full.indexOf("/");
   if (slash <= 0 || slash === full.length - 1) return undefined;
   return { owner: full.slice(0, slash), name: full.slice(slash + 1) };
 }
 
-/** Dépôt cible du relais : valeur fixe, ou convention `{student}`. */
+/** Target repository of the relay: fixed value, or `{student}` convention. */
 export function targetRepoFor(
   assignment: Pick<AssignmentRow, "targetRepo" | "targetRepoPattern">,
   student: string,
@@ -129,9 +128,9 @@ export function targetRepoFor(
 }
 
 /**
- * Dépôt cible **de la session**. Le jeton de lancement de classroom apporte
- * le dépôt de l'étudiant, qui fait foi ; la convention du devoir n'est plus
- * qu'un repli pour la graine YAML autonome, dont les sessions n'ont pas de
+ * Target repository **of the session**. Classroom's launch token brings the
+ * student's repository, which is authoritative; the assignment's convention is
+ * no more than a fallback for the standalone YAML seed, whose sessions have no
  * `targetRepo`.
  */
 export function targetRepoOfSession(
@@ -143,10 +142,10 @@ export function targetRepoOfSession(
 }
 
 /**
- * Sessions vivantes d'un enseignant, **tous devoirs confondus** : c'est
- * l'unité du quota posé par l'administrateur (docs/pistes.md, « quota de
- * sessions actives par enseignant »). `sessions.teacherId` est recopié du
- * devoir à la création, donc le comptage tient en une requête.
+ * A teacher's live sessions, **across all assignments**: that is the unit of
+ * the quota set by the administrator (docs/pistes.md, "quota of active
+ * sessions per teacher"). `sessions.teacherId` is copied from the assignment
+ * at creation time, so the count fits in a single query.
  */
 export function countLiveSessionsForTeacher(db: Db, teacherId: string): number {
   const rows = db
@@ -157,7 +156,7 @@ export function countLiveSessionsForTeacher(db: Db, teacherId: string): number {
   return rows.length;
 }
 
-/** Sessions d'un devoir, avec leur utilisateur : tableau enseignant de classroom. */
+/** Sessions of an assignment, with their user: classroom's teacher table. */
 export function assignmentSessionRows(
   db: Db,
   assignmentId: string,
@@ -191,7 +190,7 @@ export interface TeacherSessionRow {
   lastPushAt: Date | null;
 }
 
-/** Le tableau de `/teacher/sessions` : une requête, pas N+1. */
+/** The table of `/teacher/sessions`: one query, not N+1. */
 export function teacherSessionRows(db: Db): TeacherSessionRow[] {
   const rows = db
     .select({ session: sessions, assignment: assignments, user: users })

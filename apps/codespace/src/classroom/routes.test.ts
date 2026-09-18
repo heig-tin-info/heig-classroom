@@ -1,12 +1,12 @@
 /**
- * Frontière classroom → portail : le PUT de devoir et la route `/launch`.
+ * Classroom → portal boundary: the assignment PUT and the `/launch` route.
  *
- * Tout est en mémoire — base SQLite `:memory:`, gestionnaire de sessions
- * simulé, vérificateur SEB en mode `simulated`. Ce qui est vérifié ici est la
- * logique de la frontière : l'authentification des deux jetons, l'idempotence
- * de l'upsert, la configuration SEB régénérée sur l'URL de classroom, et les
- * sept motifs de refus de `/launch`. Podman, Keycloak et Forgejo sont
- * exercés par `scripts/e2e.ts`.
+ * Everything is in memory — `:memory:` SQLite database, fake session manager,
+ * SEB verifier in `simulated` mode. What is checked here is the logic of the
+ * boundary: the authentication of the two tokens, the idempotence of the
+ * upsert, the SEB configuration regenerated on classroom's URL, and the seven
+ * refusal reasons of `/launch`. Podman, Keycloak and Forgejo are exercised by
+ * `scripts/e2e.ts`.
  */
 import cookie from "@fastify/cookie";
 import { signHs256 } from "@hgc/domain";
@@ -22,7 +22,7 @@ import { findAssignment } from "../sessions/store.js";
 
 import { classroomRoutes, consumeJti } from "./routes.js";
 
-const SECRET = "secret-de-lancement-de-test-0123456789";
+const SECRET = "test-launch-secret-0123456789012345";
 const CLASSROOM = "http://classroom.test";
 const PORTAL = "http://portal.test";
 
@@ -40,7 +40,7 @@ function testConfig(over: Record<string, string> = {}): AppConfig {
   } as NodeJS.ProcessEnv);
 }
 
-// --- jetons -----------------------------------------------------------------
+// --- tokens -----------------------------------------------------------------
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -79,7 +79,7 @@ function launchToken(over: Record<string, unknown> = {}, secret = SECRET): Promi
   );
 }
 
-// --- corps du PUT -----------------------------------------------------------
+// --- PUT body ---------------------------------------------------------------
 
 function syncBody(over: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -100,7 +100,7 @@ function syncBody(over: Record<string, unknown> = {}): Record<string, unknown> {
   };
 }
 
-// --- gestionnaire de sessions simulé ----------------------------------------
+// --- fake session manager ---------------------------------------------------
 
 interface Harness {
   app: FastifyInstance;
@@ -125,7 +125,7 @@ function fakeManager(db: Db, starts: Harness["starts"]): SessionManager {
         state: "running" as const,
         createdAt: at,
         lastSeen: at,
-        cookieToken: "jeton-de-cookie",
+        cookieToken: "cookie-token",
         sebVerified: opts.sebVerified ?? false,
         teacherId: opts.teacherId ?? null,
         launchJti: opts.launchJti ?? null,
@@ -141,7 +141,7 @@ function fakeManager(db: Db, starts: Harness["starts"]): SessionManager {
         session: session as SessionRow,
         launched: true,
         healthyInMs: 1,
-        cookieToken: "jeton-de-cookie",
+        cookieToken: "cookie-token",
       };
     },
   } as unknown as SessionManager;
@@ -189,61 +189,61 @@ async function put(
 // --- PUT /api/assignments/:id -----------------------------------------------
 
 describe("PUT /api/assignments/:id", () => {
-  it("401 sans jeton de service", async () => {
+  it("401 without a service token", async () => {
     expect((await put(syncBody(), null)).statusCode).toBe(401);
   });
 
-  it("401 avec une signature faite d'un autre secret", async () => {
+  it("401 with a signature made with another secret", async () => {
     const forged = await signHs256(
       { iss: "heig-classroom", aud: "heig-codespace-api", iat: now(), exp: now() + 300 },
-      "un-autre-secret-de-trente-deux-caracteres",
+      "another-secret-of-thirty-two-chars",
     );
     expect((await put(syncBody(), forged)).statusCode).toBe(401);
   });
 
-  it("401 avec la bonne signature mais la mauvaise audience", async () => {
-    // Un jeton de *lancement* ne doit pas ouvrir l'API de service.
+  it("401 with the right signature but the wrong audience", async () => {
+    // A *launch* token must not open the service API.
     const token = await serviceToken({ aud: "heig-codespace" });
     expect((await put(syncBody(), token)).statusCode).toBe(401);
   });
 
-  it("401 avec un émetteur inattendu", async () => {
+  it("401 with an unexpected issuer", async () => {
     const token = await serviceToken({ iss: "heig-codespace" });
     expect((await put(syncBody(), token)).statusCode).toBe(401);
   });
 
-  it("401 avec un jeton expiré", async () => {
+  it("401 with an expired token", async () => {
     const token = await serviceToken({ iat: now() - 7200, exp: now() - 3600 });
     expect((await put(syncBody(), token)).statusCode).toBe(401);
   });
 
-  it("400 sur un corps qui n'est pas celui du contrat", async () => {
+  it("400 on a body that is not the contract's", async () => {
     const token = await serviceToken();
     const reply = await put(syncBody({ mode: "free" }), token);
     expect(reply.statusCode).toBe(400);
     expect((reply.json() as { error: string }).error).toBe("invalid_body");
   });
 
-  it("400 si l'identifiant du corps et celui de l'URL diffèrent", async () => {
+  it("400 if the body id and the URL id differ", async () => {
     const token = await serviceToken();
-    const reply = await put(syncBody({ id: "a-autre" }), token, "a-lab");
+    const reply = await put(syncBody({ id: "a-other" }), token, "a-lab");
     expect(reply.statusCode).toBe(400);
   });
 
-  it("400 si l'identifiant ne peut pas nommer un répertoire de volume", async () => {
+  it("400 if the id cannot name a volume directory", async () => {
     const token = await serviceToken();
     const reply = await put(syncBody({ id: "a$b" }), token, "a$b");
     expect(reply.statusCode).toBe(400);
   });
 
-  it("400 pour un devoir en mode examen sans Browser Exam Key", async () => {
+  it("400 for an exam-mode assignment without a Browser Exam Key", async () => {
     const token = await serviceToken();
     const reply = await put(syncBody({ mode: "online_seb", browserExamKeys: [] }), token);
     expect(reply.statusCode).toBe(400);
     expect((reply.json() as { error: string }).error).toBe("missing_browser_exam_keys");
   });
 
-  it("crée le devoir, traduit le mode et pose les champs de classroom", async () => {
+  it("creates the assignment, translates the mode and sets classroom's fields", async () => {
     const token = await serviceToken();
     const reply = await put(syncBody(), token);
     expect(reply.statusCode).toBe(200);
@@ -258,21 +258,22 @@ describe("PUT /api/assignments/:id", () => {
     expect(row?.classroomId).toBe("c-info2");
     expect(row?.classroomName).toBe("Info 2 TIN-B");
     expect(row?.sourceRepo).toEqual({ fullName: "codespace/tp-modele", defaultBranch: "main" });
-    // Invariant 6 : le modèle de l'enseignant, sous sa forme clonable.
+    // Invariant 6: the teacher's template, in its clonable form.
     expect(row?.templateRepo).toBe("http://forge.test/codespace/tp-modele.git");
-    // Le dépôt cible n'est plus un attribut du devoir : il vient du jeton.
+    // The target repository is no longer an attribute of the assignment: it
+    // comes from the token.
     expect(row?.targetRepo).toBeNull();
     expect(row?.targetRepoPattern).toBeNull();
     expect(row?.image).toBe(h.config.CODESPACE_DEFAULT_IMAGE);
   });
 
-  it("`image` du corps l'emporte sur l'image par défaut", async () => {
+  it("`image` from the body wins over the default image", async () => {
     const token = await serviceToken();
     await put(syncBody({ image: "codespace/python:1" }), token);
     expect(findAssignment(h.db, "a-lab")?.image).toBe("codespace/python:1");
   });
 
-  it("est idempotent : deux PUT identiques, une ligne et la même Config Key", async () => {
+  it("is idempotent: two identical PUTs, one row and the same Config Key", async () => {
     const token = await serviceToken();
     const body = syncBody({ mode: "online_seb", browserExamKeys: ["bek-windows"] });
     const first = await put(body, token);
@@ -283,8 +284,8 @@ describe("PUT /api/assignments/:id", () => {
 
     const rows = h.db.all<{ n: number }>("SELECT count(*) AS n FROM assignments");
     expect(rows[0]?.n).toBe(1);
-    // Le sel du BEK ne bouge pas : le changer invaliderait les `.seb` déjà
-    // distribués, et l'idempotence du PUT en dépend.
+    // The BEK salt does not move: changing it would invalidate the `.seb`
+    // files already distributed, and the idempotence of the PUT depends on it.
     const created = findAssignment(h.db, "a-lab")?.createdAt;
     await put(syncBody({ mode: "online_seb", browserExamKeys: ["bek-windows", "bek-mac"] }), token);
     const after = findAssignment(h.db, "a-lab");
@@ -292,7 +293,7 @@ describe("PUT /api/assignments/:id", () => {
     expect(after?.createdAt).toEqual(created);
   });
 
-  it("mode examen : configuration SEB régénérée sur la startURL de classroom", async () => {
+  it("exam mode: SEB configuration regenerated on classroom's startURL", async () => {
     const token = await serviceToken();
     const reply = await put(
       syncBody({ mode: "online_seb", browserExamKeys: ["bek-windows"] }),
@@ -302,14 +303,14 @@ describe("PUT /api/assignments/:id", () => {
     const row = findAssignment(h.db, "a-lab");
 
     expect(row?.mode).toBe("exam");
-    // C'est classroom qui authentifie l'étudiant, puis redirige vers /launch.
+    // It is classroom that authenticates the student, then redirects to /launch.
     expect(row?.sebConfig?.startUrl).toBe("http://classroom.test/app/codespace/start/a-lab");
-    // Le filtre d'URL doit laisser passer le portail et le fournisseur
-    // d'identité en plus de classroom (docs/pistes.md).
+    // The URL filter must let the portal and the identity provider through in
+    // addition to classroom (docs/pistes.md).
     expect(row?.sebConfig?.extraAllowedHosts).toEqual(["portal.test", "idp.test"]);
     expect(row?.configKey).toBe(body.configKey);
 
-    // La Config Key annoncée est bien celle de cette configuration-là.
+    // The announced Config Key is indeed the one of that very configuration.
     const rendered = renderSebFile({
       startUrl: "http://classroom.test/app/codespace/start/a-lab",
       quitUrl: "http://classroom.test/",
@@ -320,11 +321,11 @@ describe("PUT /api/assignments/:id", () => {
     expect(rendered.xml).toContain("classroom.test");
     expect(rendered.xml).toContain("portal.test");
     expect(rendered.xml).toContain("idp.test");
-    // Le fichier `.seb`, lui, reste servi par le portail.
+    // The `.seb` file itself is still served by the portal.
     expect(body.sebLink).toBe("seb://portal.test/exam/a-lab.seb");
   });
 
-  it("repasser un devoir d'examen en mode en ligne efface sa configuration SEB", async () => {
+  it("switching an exam assignment back to online mode clears its SEB configuration", async () => {
     const token = await serviceToken();
     await put(syncBody({ mode: "online_seb", browserExamKeys: ["bek"] }), token);
     const reply = await put(syncBody(), token);
@@ -339,18 +340,18 @@ describe("PUT /api/assignments/:id", () => {
 // --- GET /api/assignments/:id/sessions --------------------------------------
 
 describe("GET /api/assignments/:id/sessions", () => {
-  it("401 sans jeton de service, 404 sur un devoir inconnu", async () => {
+  it("401 without a service token, 404 on an unknown assignment", async () => {
     const anonymous = await h.app.inject({ url: "/api/assignments/a-lab/sessions" });
     expect(anonymous.statusCode).toBe(401);
     const token = await serviceToken();
     const missing = await h.app.inject({
-      url: "/api/assignments/a-inconnu/sessions",
+      url: "/api/assignments/a-unknown/sessions",
       headers: { authorization: `Bearer ${token}` },
     });
     expect(missing.statusCode).toBe(404);
   });
 
-  it("rend le résumé des sessions avec l'identifiant de classroom", async () => {
+  it("returns the session summary with classroom's id", async () => {
     const token = await serviceToken();
     await put(syncBody(), token);
     const launch = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
@@ -380,21 +381,21 @@ describe("GET /launch", () => {
     expect(reply.statusCode).toBe(200);
   }
 
-  it("403 sans jeton", async () => {
+  it("403 without a token", async () => {
     const reply = await h.app.inject({ url: "/launch" });
     expect(reply.statusCode).toBe(403);
     expect(reply.body).toContain("Lancement refusé");
   });
 
-  it("403 sur une signature faite d'un autre secret", async () => {
+  it("403 on a signature made with another secret", async () => {
     await syncedAssignment();
-    const token = await launchToken({}, "un-autre-secret-de-trente-deux-caracteres");
+    const token = await launchToken({}, "another-secret-of-thirty-two-chars");
     const reply = await h.app.inject({ url: `/launch?token=${token}` });
     expect(reply.statusCode).toBe(403);
     expect(h.starts).toHaveLength(0);
   });
 
-  it("403 sur un jeton expiré", async () => {
+  it("403 on an expired token", async () => {
     await syncedAssignment();
     const token = await launchToken({ iat: now() - 7200, exp: now() - 3600 });
     const reply = await h.app.inject({ url: `/launch?token=${token}` });
@@ -402,13 +403,13 @@ describe("GET /launch", () => {
     expect(reply.body).toContain("expiré");
   });
 
-  it("403 sur une audience de jeton de service", async () => {
+  it("403 on a service token audience", async () => {
     await syncedAssignment();
     const token = await launchToken({ aud: "heig-codespace-api" });
     expect((await h.app.inject({ url: `/launch?token=${token}` })).statusCode).toBe(403);
   });
 
-  it("usage unique : le même jeton ne sert pas deux fois", async () => {
+  it("single use: the same token does not serve twice", async () => {
     await syncedAssignment();
     const token = await launchToken();
     const first = await h.app.inject({ url: `/launch?token=${token}` });
@@ -419,21 +420,21 @@ describe("GET /launch", () => {
     expect(h.starts).toHaveLength(1);
   });
 
-  it("403 « devoir non synchronisé depuis classroom »", async () => {
-    const token = await launchToken({ assignmentId: "a-jamais-vu" });
+  it("403 on an assignment not synchronized from classroom", async () => {
+    const token = await launchToken({ assignmentId: "a-never-seen" });
     const reply = await h.app.inject({ url: `/launch?token=${token}` });
     expect(reply.statusCode).toBe(403);
     expect(reply.body).toContain("non synchronisé depuis classroom");
   });
 
-  it("403 hors de la fenêtre du devoir", async () => {
+  it("403 outside the assignment window", async () => {
     await syncedAssignment({ deadlineAt: "2020-06-01T00:00:00.000Z" });
     const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
     expect(reply.statusCode).toBe(403);
     expect(reply.body).toContain("fenêtre d'ouverture");
   });
 
-  it("403 quand le jeton ne porte pas de dépôt", async () => {
+  it("403 when the token carries no repository", async () => {
     await syncedAssignment();
     const reply = await h.app.inject({ url: `/launch?token=${await launchToken({ repo: null })}` });
     expect(reply.statusCode).toBe(403);
@@ -441,7 +442,7 @@ describe("GET /launch", () => {
     expect(h.starts).toHaveLength(0);
   });
 
-  it("ouvre la session, pose le cookie du portail et redirige", async () => {
+  it("opens the session, sets the portal cookie and redirects", async () => {
     await syncedAssignment();
     const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
 
@@ -449,14 +450,15 @@ describe("GET /launch", () => {
     expect(reply.headers["location"]).toBe("/s/sess-u-sacha-a-lab/");
     const cookies = reply.cookies as Array<{ name: string; value: string; path?: string }>;
     const portal = cookies.find((c) => c.name === "cs_session");
-    expect(portal?.value).toBe("sess-u-sacha-a-lab.jeton-de-cookie");
-    // `Path=/s/<id>` : deux sessions dans le même navigateur ne se marchent
-    // pas dessus.
+    expect(portal?.value).toBe("sess-u-sacha-a-lab.cookie-token");
+    // `Path=/s/<id>`: two sessions in the same browser do not step on each
+    // other.
     expect(portal?.path).toBe("/s/sess-u-sacha-a-lab");
-    // Aucun cookie d'examen sur un devoir de travaux pratiques.
+    // No exam cookie on a lab assignment.
     expect(cookies.find((c) => c.name === "exam_session")).toBeUndefined();
 
-    // Le dépôt du jeton, l'enseignant du devoir et le `jti` sont transmis.
+    // The token's repository, the assignment's teacher and the `jti` are
+    // passed on.
     expect(h.starts[0]?.opts).toMatchObject({
       sebVerified: false,
       teacherId: "t-tania",
@@ -465,7 +467,7 @@ describe("GET /launch", () => {
     expect(h.starts[0]?.opts.launchJti).toMatch(/^jti-/);
   });
 
-  it("inscrit l'utilisateur depuis les revendications, sans le reconnecter", async () => {
+  it("registers the user from the claims, without logging them in again", async () => {
     await syncedAssignment();
     await h.app.inject({ url: `/launch?token=${await launchToken()}` });
     const rows = h.db.all<{ login: string; email: string; github_login: string; oidc_sub: string; role: string }>(
@@ -477,7 +479,7 @@ describe("GET /launch", () => {
       email: "sacha@heig-vd.ch",
       github_login: "sacha-gh",
       oidc_sub: "classroom:u-sacha",
-      // Un jeton de lancement n'attribue jamais le rôle enseignant.
+      // A launch token never grants the teacher role.
       role: "student",
     });
 
@@ -493,8 +495,8 @@ describe("GET /launch", () => {
     ).toEqual({ email: "sacha2@heig-vd.ch", github_login: null });
   });
 
-  describe("quota par enseignant", () => {
-    /** Session vivante d'un autre étudiant, sur un autre devoir du même enseignant. */
+  describe("per-teacher quota", () => {
+    /** Live session of another student, on another assignment of the same teacher. */
     function occupy(student: string, assignmentId: string): void {
       const at = new Date();
       h.db
@@ -526,43 +528,43 @@ describe("GET /launch", () => {
         .run();
     }
 
-    it("429 quand les sessions vivantes de l'enseignant atteignent le quota", async () => {
+    it("429 when the teacher's live sessions reach the quota", async () => {
       await syncedAssignment({ quota: { maxActiveSessions: 1 } });
-      occupy("u-autre", "a-lab");
+      occupy("u-other", "a-lab");
       const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
       expect(reply.statusCode).toBe(429);
       expect(reply.body).toContain("Quota atteint");
       expect(h.starts).toHaveLength(0);
     });
 
-    it("le quota compte tous les devoirs de l'enseignant, pas seulement celui-ci", async () => {
+    it("the quota counts all the teacher's assignments, not only this one", async () => {
       await syncedAssignment({ quota: { maxActiveSessions: 1 } });
-      await syncedAssignment({ id: "a-autre", quota: { maxActiveSessions: 1 } });
-      occupy("u-autre", "a-autre");
+      await syncedAssignment({ id: "a-other", quota: { maxActiveSessions: 1 } });
+      occupy("u-other", "a-other");
       const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
       expect(reply.statusCode).toBe(429);
     });
 
-    it("la reprise de sa propre session vivante ne consomme pas de quota", async () => {
+    it("resuming one's own live session does not consume quota", async () => {
       await syncedAssignment({ quota: { maxActiveSessions: 1 } });
-      // L'étudiant a déjà sa session sur ce devoir : la reprise n'ouvre pas de
-      // conteneur de plus (analyse.md D5).
+      // The student already has their session on this assignment: resuming
+      // does not open one more container (analyse.md D5).
       occupy("u-sacha", "a-lab");
       const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
       expect(reply.statusCode).toBe(303);
       expect(h.starts).toHaveLength(1);
     });
 
-    it("une session fermée ne compte plus", async () => {
+    it("a closed session no longer counts", async () => {
       await syncedAssignment({ quota: { maxActiveSessions: 1 } });
-      occupy("u-autre", "a-lab");
+      occupy("u-other", "a-lab");
       h.db.run("UPDATE sessions SET state = 'closed'" as never);
       const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
       expect(reply.statusCode).toBe(303);
     });
   });
 
-  describe("mode examen", () => {
+  describe("exam mode", () => {
     async function syncedExam(): Promise<void> {
       const token = await serviceToken();
       const reply = await put(
@@ -572,7 +574,7 @@ describe("GET /launch", () => {
       expect(reply.statusCode).toBe(200);
     }
 
-    it("refuse sans en-tête de vérification SEB", async () => {
+    it("refuses without an SEB verification header", async () => {
       await syncedExam();
       const reply = await h.app.inject({ url: `/launch?token=${await launchToken()}` });
       expect(reply.statusCode).toBe(403);
@@ -580,7 +582,7 @@ describe("GET /launch", () => {
       expect(h.starts).toHaveLength(0);
     });
 
-    it("accepte avec l'en-tête et pose les deux cookies", async () => {
+    it("accepts with the header and sets both cookies", async () => {
       await syncedExam();
       const reply = await h.app.inject({
         url: `/launch?token=${await launchToken()}`,
@@ -591,23 +593,23 @@ describe("GET /launch", () => {
       const cookies = reply.cookies as Array<{ name: string; path?: string }>;
       expect(cookies.find((c) => c.name === "exam_session")?.path).toBe("/");
       expect(cookies.find((c) => c.name === "cs_session")).toBeDefined();
-      // La session est marquée vérifiée : c'est ce que le proxy exigera.
+      // The session is marked verified: that is what the proxy will require.
       expect(h.starts[0]?.opts.sebVerified).toBe(true);
     });
   });
 });
 
-// --- registre des jetons consommés ------------------------------------------
+// --- registry of consumed tokens --------------------------------------------
 
 describe("consumeJti", () => {
-  it("accepte un `jti` neuf, refuse le second, purge les expirés", () => {
+  it("accepts a fresh `jti`, refuses the second one, purges the expired ones", () => {
     const handle = openDb(":memory:");
     const t = Math.floor(Date.now() / 1000);
     expect(consumeJti(handle.db, "a", t + 300)).toBe(true);
     expect(consumeJti(handle.db, "a", t + 300)).toBe(false);
-    // Un jeton déjà expiré : la ligne est posée puis balayée au passage
-    // suivant, parce que `verifyHs256` le refuse de toute façon.
-    consumeJti(handle.db, "vieux", t - 3600);
+    // An already expired token: the row is inserted then swept on the next
+    // pass, because `verifyHs256` refuses it anyway.
+    consumeJti(handle.db, "old", t - 3600);
     consumeJti(handle.db, "b", t + 300);
     const rows = handle.db.all<{ jti: string }>("SELECT jti FROM launch_tokens_used ORDER BY jti");
     expect(rows.map((r) => r.jti)).toEqual(["a", "b"]);

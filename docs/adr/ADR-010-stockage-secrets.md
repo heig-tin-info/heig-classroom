@@ -1,46 +1,45 @@
-# ADR-010 — Secrets hors dépôt et hors base, coffre institutionnel chiffré
+# ADR-010 — Secrets outside the repository and outside the database, in an encrypted institutional vault
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Secrets serveur : clé privée PEM de la GitHub App, client secrets OIDC et GitHub OAuth,
-secret webhook, secret cookie, PAT d'enregistrement des runners (ADR-007). AU-43 exige
-qu'ils proviennent de l'environnement ou d'un gestionnaire de secrets, « jamais du dépôt ni
-de la base ». Le runbook de restauration (RTO 4 h, NFR-16) doit pouvoir les réinjecter de
-façon reproductible.
+Server secrets: the PEM private key of the GitHub App, the OIDC and GitHub OAuth client
+secrets, the webhook secret, the cookie secret, the runner registration PAT (ADR-007). AU-43
+requires that they come from the environment or from a secret manager, "never from the
+repository nor from the database". The restore runbook (RTO 4 h, NFR-16) must be able to
+reinject them reproducibly.
 
-## Décision
+## Decision
 
-1. **À l'exécution** : fichiers d'environnement sur la VM (propriétaire root, permissions
-   600), clé PEM montée en lecture seule dans le conteneur ; jamais dans une image, un
-   dépôt git ou la base.
-2. **Pour la reprise** : copie de secours **chiffrée age** de chaque secret dans le coffre
-   institutionnel (Vaultwarden HEIG ou équivalent), référencée par le runbook ; la
-   restauration est un script qui déchiffre et repose les fichiers.
-3. **Rotation documentée au runbook** : la GitHub App accepte **deux clés privées actives**
-   pendant la bascule (génération, déploiement, révocation de l'ancienne) ; même procédure
-   de bascule sans interruption pour les clés API teacher (AU-40) et le PAT runners
-   (expiration 12 mois).
-4. **Aucun secret dans les logs** : serializers pino dédiés masquant clés au-delà du prefix,
-   `code` OAuth, cookies et en-têtes `Authorization` (AU-41).
+1. **At runtime**: environment files on the VM (owned by root, permissions 600), the PEM key
+   mounted read-only in the container; never in an image, a git repository or the database.
+2. **For recovery**: an **age-encrypted** backup copy of each secret in the institutional
+   vault (HEIG Vaultwarden or equivalent), referenced by the runbook; restoring is a script
+   that decrypts and puts the files back.
+3. **Rotation documented in the runbook**: the GitHub App accepts **two active private keys**
+   during the switchover (generate, deploy, revoke the old one); the same interruption-free
+   switchover procedure applies to the teacher API keys (AU-40) and to the runners PAT
+   (12-month expiry).
+4. **No secret in the logs**: dedicated pino serializers mask keys beyond their prefix, the
+   OAuth `code`, cookies and `Authorization` headers (AU-41).
 
-## Conséquences
+## Consequences
 
-- Lecture stricte d'AU-43 satisfaite : rien dans le dépôt, même chiffré.
-- La restauration ne dépend d'aucune manipulation de mémoire humaine : le coffre et le
-  script rendent le RTO reproductible (faiblesse « KeePass manuel » corrigée).
-- La compromission d'un secret a une réponse écrite : révocation immédiate côté GitHub ou
-  IdP, rotation par la procédure à deux clés.
+- A strict reading of AU-43 is satisfied: nothing in the repository, not even encrypted.
+- Restoring depends on no human memory: the vault and the script make the RTO reproducible
+  (the "manual KeePass" weakness is fixed).
+- The compromise of a secret has a written response: immediate revocation on the GitHub or
+  IdP side, rotation through the two-key procedure.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Secrets sops/age commités dans le dépôt d'infra** (propositions productivité et
-   robustesse) : pratique et versionné, mais en tension littérale avec AU-43 (« jamais du
-   dépôt ») ; la copie chiffrée vit donc dans un coffre séparé, pas dans git.
-2. **Vault dédié (HashiCorp ou équivalent)** : un service stateful de plus à exploiter et à
-   sauvegarder, disproportionné pour une dizaine de secrets.
-3. **Secrets en base** : interdit par AU-43 et inutile — la base est sauvegardée hors site,
-   ce qui élargirait la surface d'exposition.
+1. **sops/age secrets committed to the infrastructure repository** (productivity and
+   robustness proposals): practical and versioned, but in literal tension with AU-43 ("never
+   from the repository"); the encrypted copy therefore lives in a separate vault, not in git.
+2. **A dedicated Vault (HashiCorp or equivalent)**: one more stateful service to operate and
+   back up, out of proportion for about a dozen secrets.
+3. **Secrets in the database**: forbidden by AU-43 and pointless — the database is backed up
+   off site, which would widen the exposure surface.

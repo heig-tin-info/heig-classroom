@@ -1,6 +1,6 @@
 #!/bin/sh
-# Point d'entree de l'image etudiante c-dev.
-# La racine est en lecture seule ; le user-data-dir vit sur le tmpfs /run.
+# Entrypoint of the c-dev student image.
+# The root is read-only; the user-data-dir lives on the /run tmpfs.
 set -eu
 
 UDD=/run/code-server
@@ -10,19 +10,19 @@ mkdir -p "$UDD/User" "$UDD/Machine" "$UDD/logs"
 cp "$SETTINGS" "$UDD/User/settings.json"
 cp "$SETTINGS" "$UDD/Machine/settings.json"
 
-# code-server ecrit un config.yaml par defaut dans $XDG_CONFIG_HOME ;
-# /home/student est en lecture seule, on le renvoie sur le tmpfs /run.
-# Volontairement local a ce script : le shell de l'etudiant garde les
-# valeurs par defaut, donc son --install-extension vise bien un repertoire
-# d'extensions en lecture seule.
+# code-server writes a default config.yaml into $XDG_CONFIG_HOME;
+# /home/student is read-only, so we send it to the /run tmpfs.
+# Deliberately local to this script: the student's shell keeps the default
+# values, so their --install-extension does aim at a read-only extensions
+# directory.
 XDG_CONFIG_HOME="$UDD/xdg-config"
 export XDG_CONFIG_HOME
 mkdir -p "$XDG_CONFIG_HOME/clangd"
-# clangd herite de ce XDG_CONFIG_HOME : sans cette copie il ne lirait aucune
-# configuration et retomberait sur ses valeurs par defaut.
+# clangd inherits this XDG_CONFIG_HOME: without this copy it would read no
+# configuration and fall back on its defaults.
 cp /etc/clangd/config.yaml "$XDG_CONFIG_HOME/clangd/config.yaml"
 
-# Galerie d'extensions neutralisee : aucune installation en ligne possible.
+# Extension gallery neutralised: no online installation is possible.
 EXTENSIONS_GALLERY='{"serviceUrl":"","itemUrl":"","resourceUrlTemplate":""}'
 export EXTENSIONS_GALLERY
 

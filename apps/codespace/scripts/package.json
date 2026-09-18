@@ -1,6 +1,0 @@
-{
-  "//": "La racine du dépôt n'est pas `\"type\": \"module\"` : sans ce fichier, tsx transforme scripts/*.ts en CJS et refuse le `await` de premier niveau. Rien d'autre ne vit ici.",
-  "name": "@codespace/scripts",
-  "private": true,
-  "type": "module"
-}

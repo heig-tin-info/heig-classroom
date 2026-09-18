@@ -54,7 +54,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   // A 5xx must never carry the failure detail to the browser: Drizzle wraps
   // every pg failure in a `Failed query: <SQL>\nparams: <values>` message and
   // Fastify's default handler puts that message in the body. Same `{error}`
-  // shape as the routes (docs/03 « Contrat API »), no `message`: there is
+  // shape as the routes (docs/03 "API contract"), no `message`: there is
   // nothing actionable to say to the caller.
   // `err` alone is not enough in the logs either: pino's serializer folds the
   // cause chain into the message and the stack as text but drops the cause's
@@ -141,7 +141,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     });
   }
 
-  // --- Observability (NFR-08, docs/03 « Observabilité orientée exigences ») ---
+  // --- Observability (NFR-08, docs/03, requirements-driven observability section) ---
   const registry = new Registry();
   collectDefaultMetrics({ register: registry });
   const dbUp = new Gauge({

@@ -1,44 +1,45 @@
-# ADR-006 — Deadline par ticker-sweeper unique, pas de job one-shot planifié
+# ADR-006 — Deadlines through a single ticker-sweeper, no scheduled one-shot job
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Le job de deadline doit démarrer au plus 60 s après l'échéance et s'appliquer sur 100 dépôts
-en moins de 5 min (US-22, NFR-13), survivre à une panne de n'importe quelle durée sans double
-application (NFR-09), et suivre les replanifications de deadline (US-08, GH-43). Les
-deadlines sont saisies en Europe/Zurich et stockées en UTC (C-02).
+The deadline job must start at most 60 s after the due time and apply to 100 repositories in
+under 5 min (US-22, NFR-13), survive an outage of any length without double application
+(NFR-09), and follow deadline rescheduling (US-08, GH-43). Deadlines are entered in
+Europe/Zurich and stored in UTC (C-02).
 
-## Décision
+## Decision
 
-1. Un **ticker unique** s'exécute toutes les 20 s, protégé par un advisory lock Postgres
-   (sûr même après scission `WORKER_MODE`) : il sélectionne les assignments publiés dont
-   `deadline_at <= now()` et `deadline_applied_at IS NULL`, et enfile un job
-   `deadline.apply` (singleton par assignment).
-2. `deadline.apply` fan-out en jobs par dépôt (concurrence 10), chacun idempotent (relit
-   `locked_at` et `bot_commits` avant d'agir) ; les échecs individuels restent en retry sans
-   bloquer les autres dépôts.
-3. Le **gel** suit la même mécanique : un scan sur `frozen_at IS NULL` déclenche le gel
-   définitif à `deadline + grace_minutes` (détail dans l'ADR-012).
-4. Les index partiels `assignments(deadline_at) WHERE state='published' AND
-   deadline_applied_at IS NULL` (et l'équivalent pour le gel) rendent le scan gratuit.
+1. A **single ticker** runs every 20 s, protected by a Postgres advisory lock (safe even
+   after a `WORKER_MODE` split): it selects the published assignments whose
+   `deadline_at <= now()` and `deadline_applied_at IS NULL`, and enqueues a `deadline.apply`
+   job (singleton per assignment).
+2. `deadline.apply` fans out into per-repository jobs (concurrency 10), each idempotent (it
+   re-reads `locked_at` and `bot_commits` before acting); individual failures stay in retry
+   without blocking the other repositories.
+3. **Freezing** follows the same mechanism: a scan on `frozen_at IS NULL` triggers the
+   definitive freeze at `deadline + grace_minutes` (details in ADR-012).
+4. The partial indexes `assignments(deadline_at) WHERE state='published' AND
+   deadline_applied_at IS NULL` (and its equivalent for freezing) make the scan free.
 
-## Conséquences
+## Consequences
 
-- Démarrage garanti en moins de 60 s (période 20 s, marge facteur 3).
-- **Replanification gratuite** : le ticker relit la table, aucune annulation de job à gérer.
-- **Rattrapage après panne gratuit** : la condition SQL reste vraie tant que la deadline
-  n'est pas appliquée ; aucune double application grâce à `deadline_applied_at` et aux
-  contraintes d'idempotence.
-- Un seul chemin de code à tester et à déboguer.
+- Start guaranteed in under 60 s (20 s period, a factor-3 margin).
+- **Rescheduling is free**: the ticker re-reads the table, there is no job cancellation to
+  handle.
+- **Catch-up after an outage is free**: the SQL condition stays true as long as the deadline
+  has not been applied; no double application, thanks to `deadline_applied_at` and to the
+  idempotency constraints.
+- A single code path to test and debug.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Job one-shot planifié à `deadline_at`** (`startAfter`, propositions productivité et
-   robustesse en optimisation de latence, doublé d'un sweeper de garantie) : la « ceinture
-   et bretelles » maintient deux chemins de code qui peuvent diverger, pour un gain de
-   latence nul face à un ticker à 20 s. La revue a retenu le mécanisme unique.
-2. **Cron externe (systemd timer)** : sort la logique du processus applicatif et complique
-   le déploiement sans bénéfice ; pg-boss et le ticker in-process couvrent le besoin.
+1. **A one-shot job scheduled at `deadline_at`** (`startAfter`, productivity and robustness
+   proposals as a latency optimization, backed by a guarantee sweeper): the "belt and
+   braces" approach maintains two code paths that can diverge, for zero latency gain against
+   a 20 s ticker. The review kept the single mechanism.
+2. **External cron (systemd timer)**: it moves the logic out of the application process and
+   complicates deployment with no benefit; pg-boss and the in-process ticker cover the need.

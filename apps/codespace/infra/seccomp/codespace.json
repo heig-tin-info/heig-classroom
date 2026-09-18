@@ -575,7 +575,7 @@
           "op": "SCMP_CMP_EQ"
         }
       ],
-      "comment": "ADDR_NO_RANDOMIZE (0x40000) : requis par gdb set disable-randomization on (heig-codespace P1)",
+      "comment": "ADDR_NO_RANDOMIZE (0x40000): required by gdb set disable-randomization on (heig-codespace P1)",
       "includes": {},
       "excludes": {}
     },

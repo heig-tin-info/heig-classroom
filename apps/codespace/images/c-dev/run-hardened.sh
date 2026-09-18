@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
-# Lance l'image etudiante avec le durcissement obligatoire (CLAUDE.md invariant 3,
-# docs/jalon-0.md P1). Aucune option n'est negociable : un test qui a besoin d'en
-# relacher une doit le dire dans docs/, pas ici.
+# Runs the student image with the mandatory hardening (CLAUDE.md invariant 3,
+# docs/jalon-0.md P1). No option is negotiable: a test that needs one relaxed
+# must say so in docs/, not here.
 #
-# P1 seulement : --network none par defaut. Le reseau clos `codespace` est la
-# tache P2 ; ce script ne le cree pas et ne le suppose pas.
+# P1 only: --network none by default. The closed `codespace` network is the P2
+# task; this script neither creates it nor assumes it.
 #
-# mode=1777 sur /run et /home/student/.cache : Podman 5.7 monte /run en
-# mode=755 root:root et les tmpfs nommes sans mode heritent de root:root ;
-# le conteneur tourne en uid 1000 et ne pourrait ecrire ni son user-data-dir
-# ni son cache. Les autres drapeaux (rw,nosuid,nodev) sont ceux de Podman.
+# mode=1777 on /run and /home/student/.cache: Podman 5.7 mounts /run as
+# mode=755 root:root and named tmpfs without a mode inherit root:root;
+# the container runs as uid 1000 and could write neither its user-data-dir
+# nor its cache. The other flags (rw,nosuid,nodev) are Podman's own.
 #
-# --dns=none : Podman 5.7 refuse `--dns` avec `--network none`
-# (« conflicting options: dns and the network mode: none »). Le drapeau est donc
-# pose seulement quand un reseau est demande ; avec `--network none` il n'y a de
-# toute facon aucun resolveur (resolv.conf vide). P2 lancera ce script avec
-# NETWORK=codespace et le drapeau sera present.
+# --dns=none: Podman 5.7 refuses `--dns` together with `--network none`
+# ("conflicting options: dns and the network mode: none"). The flag is
+# therefore set only when a network is requested; with `--network none` there
+# is no resolver anyway (empty resolv.conf). P2 will run this script with
+# NETWORK=codespace and the flag will be there.
 #
-# Variables :
-#   CTR_NAME   nom du conteneur            (defaut cdev-p1)
-#   NETWORK    reseau podman               (defaut none, P1)
-#   VOL_DIR    repertoire de travail hote  (defaut /tmp/codespace-vol/<CTR_NAME>)
-#   IMAGE      image a lancer              (defaut codespace/c-dev:4.137.0)
-#   EXTRA_ARGS options podman en plus (chaine, decoupee par le shell)
+# Variables:
+#   CTR_NAME   container name              (default cdev-p1)
+#   NETWORK    podman network              (default none, P1)
+#   VOL_DIR    host work directory         (default /tmp/codespace-vol/<CTR_NAME>)
+#   IMAGE      image to run                (default codespace/c-dev:4.137.0)
+#   EXTRA_ARGS extra podman options (string, split by the shell)
 #
-# Ecrit l'identifiant du conteneur sur la sortie standard.
+# Writes the container id on standard output.
 set -euo pipefail
 
 CTR_NAME="${CTR_NAME:-cdev-p1}"
@@ -38,7 +38,7 @@ SECCOMP="${SECCOMP:-${REPO_ROOT}/infra/seccomp/codespace.json}"
 PODMAN_URL="${PODMAN_URL:-unix:///run/podman/podman.sock}"
 podman_remote() { podman --remote --url "$PODMAN_URL" "$@"; }
 
-[ -f "$SECCOMP" ] || { echo "profil seccomp introuvable : $SECCOMP" >&2; exit 1; }
+[ -f "$SECCOMP" ] || { echo "seccomp profile not found: $SECCOMP" >&2; exit 1; }
 mkdir -p "${VOL_DIR}/work"
 
 podman_remote rm -f "$CTR_NAME" >/dev/null 2>&1 || true

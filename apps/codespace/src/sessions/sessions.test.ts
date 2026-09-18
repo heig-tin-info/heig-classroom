@@ -1,8 +1,8 @@
 /**
- * Cycle de vie des sessions avec un moteur simulé : ce qui est vérifié ici,
- * c'est la logique du portail (reprise, réconciliation, ramasse-miettes,
- * instantanés), pas Podman. Podman est vérifié pour de vrai par
- * `scripts/e2e.ts` et par `git/channel.integration.test.ts`.
+ * Session life cycle with a fake engine: what is checked here is the portal's
+ * logic (resumption, reconciliation, garbage collection, snapshots), not
+ * Podman. Podman is checked for real by `scripts/e2e.ts` and by
+ * `git/channel.integration.test.ts`.
  */
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,7 +25,7 @@ import { snapshot } from "./shadow.js";
 import { findAnySession, isOpen, targetRepoFor } from "./store.js";
 import { remoteUrl } from "./workspace.js";
 
-// --- moteur simulé ----------------------------------------------------------
+// --- fake engine ------------------------------------------------------------
 class FakeEngine implements Engine {
   readonly containers = new Map<string, ContainerInfo>();
   runs = 0;
@@ -67,7 +67,7 @@ class FakeEngine implements Engine {
     this.execs.push({ name, argv });
     return "";
   }
-  /** Simule un `podman kill` : le conteneur disparaît sous le portail. */
+  /** Simulates a `podman kill`: the container vanishes from under the portal. */
   kill(name: string): void {
     this.containers.delete(name);
   }
@@ -145,55 +145,55 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("invariant 6 — la source du dépôt de transit", () => {
-  it("en mode examen, le modèle de l'enseignant et rien d'autre", () => {
+describe("invariant 6 — the source of the staging repository", () => {
+  it("in exam mode, the teacher's template and nothing else", () => {
     const exam = {
       mode: "exam",
-      templateRepo: "http://forge/modele.git",
+      templateRepo: "http://forge/template.git",
     } as AssignmentRow;
-    // Même en présence du dépôt de l'étudiant, c'est le modèle qui l'emporte.
-    expect(stagingSourceFor(exam, "http://forge/etudiant.git")).toEqual({
+    // Even when the student's repository is there, the template wins.
+    expect(stagingSourceFor(exam, "http://forge/student.git")).toEqual({
       mode: "exam",
-      templateFrom: "http://forge/modele.git",
+      templateFrom: "http://forge/template.git",
     });
   });
 
-  it("en mode examen sans modèle, refus explicite plutôt que repli", () => {
+  it("in exam mode without a template, explicit refusal rather than fallback", () => {
     const exam = { id: "e", mode: "exam", templateRepo: null } as AssignmentRow;
-    expect(() => stagingSourceFor(exam, "http://forge/etudiant.git")).toThrow(/modèle/);
+    expect(() => stagingSourceFor(exam, "http://forge/student.git")).toThrow(/template/);
   });
 
-  it("en mode travaux pratiques, le miroir du dépôt de l'étudiant", () => {
-    const lab = { mode: "lab", templateRepo: "http://forge/modele.git" } as AssignmentRow;
-    expect(stagingSourceFor(lab, "http://forge/etudiant.git")).toEqual({
+  it("in lab mode, the mirror of the student's repository", () => {
+    const lab = { mode: "lab", templateRepo: "http://forge/template.git" } as AssignmentRow;
+    expect(stagingSourceFor(lab, "http://forge/student.git")).toEqual({
       mode: "lab",
-      mirrorFrom: "http://forge/etudiant.git",
+      mirrorFrom: "http://forge/student.git",
     });
   });
 });
 
-describe("dépôt cible", () => {
-  it("substitue la convention", () => {
+describe("target repository", () => {
+  it("substitutes the convention", () => {
     expect(targetRepoFor({ targetRepo: null, targetRepoPattern: "org/tp-{student}" }, "sacha")).toEqual(
       { owner: "org", name: "tp-sacha" },
     );
   });
-  it("préfère la valeur fixe", () => {
+  it("prefers the fixed value", () => {
     expect(
       targetRepoFor({ targetRepo: "org/fixe", targetRepoPattern: "org/tp-{student}" }, "sacha"),
     ).toEqual({ owner: "org", name: "fixe" });
   });
-  it("rend undefined sans destination : le dépôt de transit est le terminus", () => {
+  it("returns undefined without a destination: the staging repository is the terminus", () => {
     expect(targetRepoFor({ targetRepo: null, targetRepoPattern: null }, "sacha")).toBeUndefined();
   });
 });
 
-describe("fenêtre d'ouverture", () => {
+describe("opening window", () => {
   const now = new Date("2026-06-01T10:00:00Z");
-  it("ouvert sans bornes", () => {
+  it("open without bounds", () => {
     expect(isOpen({ opensAt: null, closesAt: null } as AssignmentRow, now)).toBe(true);
   });
-  it("fermé avant l'ouverture et après la clôture", () => {
+  it("closed before the opening and after the closing", () => {
     expect(
       isOpen({ opensAt: new Date("2026-06-02T00:00:00Z"), closesAt: null } as AssignmentRow, now),
     ).toBe(false);
@@ -203,8 +203,8 @@ describe("fenêtre d'ouverture", () => {
   });
 });
 
-describe("création et reprise (analyse.md D5)", () => {
-  it("une seule session vivante par couple, et un seul conteneur", async () => {
+describe("creation and resumption (analyse.md D5)", () => {
+  it("a single live session per pair, and a single container", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const first = await manager.start(user, assignment);
@@ -214,7 +214,7 @@ describe("création et reprise (analyse.md D5)", () => {
     expect(engine.runs).toBe(1);
   });
 
-  it("écrit un remote origin qui porte l'identifiant de session", async () => {
+  it("writes an origin remote that carries the session id", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
@@ -225,11 +225,11 @@ describe("création et reprise (analyse.md D5)", () => {
     expect(config.trim()).toBe(remoteUrl("portal.internal", 9418, session.id));
   });
 
-  it("relance sur le même volume quand le conteneur a disparu", async () => {
+  it("relaunches on the same volume when the container has vanished", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
-    await writeFile(join(session.volumeDir, "work", "note.txt"), "travail", "utf8");
+    await writeFile(join(session.volumeDir, "work", "note.txt"), "work", "utf8");
     engine.kill(containerNameFor(session.id));
 
     const again = await manager.ensureRunning(session.id);
@@ -238,7 +238,7 @@ describe("création et reprise (analyse.md D5)", () => {
     expect(again.state).toBe("running");
   });
 
-  it("garde le même identifiant de session après une fermeture : le remote reste valable", async () => {
+  it("keeps the same session id after a close: the remote stays valid", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const first = await manager.start(user, assignment);
@@ -249,8 +249,8 @@ describe("création et reprise (analyse.md D5)", () => {
   });
 });
 
-describe("ramasse-miettes", () => {
-  it("détruit le conteneur après la grâce et conserve le volume", async () => {
+describe("garbage collection", () => {
+  it("destroys the container after the grace period and keeps the volume", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager(1000);
     const { session } = await manager.start(user, assignment);
@@ -259,11 +259,11 @@ describe("ramasse-miettes", () => {
     const result = await manager.collect();
     expect(result.closed).toBe(1);
     expect(await engine.inspect(containerNameFor(session.id))).toBeNull();
-    // Le volume reste : c'est tout l'objet de la décision.
+    // The volume stays: that is the whole point of the decision.
     expect(findAnySession(db, "student", "tp")?.volumeDir).toBe(session.volumeDir);
   });
 
-  it("épargne une session dont le battement est frais", async () => {
+  it("spares a session whose heartbeat is fresh", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager(60_000);
     const { session } = await manager.start(user, assignment);
@@ -273,19 +273,19 @@ describe("ramasse-miettes", () => {
   });
 });
 
-describe("réconciliation au démarrage du portail", () => {
-  it("garde une session dont le conteneur tourne encore", async () => {
+describe("reconciliation at portal start-up", () => {
+  it("keeps a session whose container is still running", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
     const result = await manager.reconcile();
     expect(result).toMatchObject({ resumed: 1, stopped: 0, orphans: 0 });
     expect(findAnySession(db, "student", "tp")?.state).toBe("running");
-    // Aucun conteneur recréé : c'est le point de l'assertion V1.
+    // No container recreated: that is the point of the V1 assertion.
     expect(engine.runs).toBe(1);
   });
 
-  it("marque stopped une session dont le conteneur a disparu", async () => {
+  it("marks stopped a session whose container has vanished", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
@@ -295,25 +295,25 @@ describe("réconciliation au démarrage du portail", () => {
     expect(findAnySession(db, "student", "tp")?.state).toBe("stopped");
   });
 
-  it("supprime un conteneur de session orphelin", async () => {
-    await engine.run({ sessionId: "fantome", name: "cs-fantome", workDir: "/tmp/x" });
+  it("removes an orphan session container", async () => {
+    await engine.run({ sessionId: "ghost", name: "cs-ghost", workDir: "/tmp/x" });
     const manager = makeManager();
     const result = await manager.reconcile();
     expect(result.orphans).toBe(1);
-    expect(await engine.inspect("cs-fantome")).toBeNull();
+    expect(await engine.inspect("cs-ghost")).toBeNull();
   });
 
-  it("ne voit jamais l'ancrage : le moteur ne rend que les conteneurs étiquetés session", async () => {
-    // `listSessions()` filtre sur `label=heig-codespace.session` ; l'ancrage
-    // porte `heig-codespace.role=anchor` et n'apparaît donc pas ici.
+  it("never sees the anchor: the engine only returns session-labelled containers", async () => {
+    // `listSessions()` filters on `label=heig-codespace.session`; the anchor
+    // carries `heig-codespace.role=anchor` and therefore does not show up here.
     const manager = makeManager();
     expect(await manager.reconcile()).toMatchObject({ orphans: 0 });
     expect((await engine.listSessions()).every((c) => c.sessionId !== null)).toBe(true);
   });
 });
 
-describe("dépôt fantôme (analyse.md 3.3)", () => {
-  it("capture l'arbre de travail et exclut le dépôt de l'étudiant", async () => {
+describe("shadow repository (analyse.md 3.3)", () => {
+  it("captures the working tree and excludes the student's repository", async () => {
     const volume = join(root, "student", "tp");
     await mkdir(join(volume, "work", ".git"), { recursive: true });
     await writeFile(join(volume, "work", "hello.c"), "int main(void){return 0;}\n", "utf8");
@@ -331,7 +331,7 @@ describe("dépôt fantôme (analyse.md 3.3)", () => {
     expect(files).not.toContain(".git/");
   });
 
-  it("ne commite rien quand rien n'a changé", async () => {
+  it("commits nothing when nothing has changed", async () => {
     const volume = join(root, "student", "tp2");
     await mkdir(join(volume, "work"), { recursive: true });
     await writeFile(join(volume, "work", "a.txt"), "a\n", "utf8");
@@ -339,7 +339,7 @@ describe("dépôt fantôme (analyse.md 3.3)", () => {
     expect((await snapshot(volume)).sha).toBeNull();
   });
 
-  it("capture une modification ultérieure", async () => {
+  it("captures a later modification", async () => {
     const volume = join(root, "student", "tp3");
     await mkdir(join(volume, "work"), { recursive: true });
     await writeFile(join(volume, "work", "a.txt"), "a\n", "utf8");
@@ -351,8 +351,8 @@ describe("dépôt fantôme (analyse.md 3.3)", () => {
   });
 });
 
-describe("SessionLookup pour le canal Git", () => {
-  it("rend l'adresse du conteneur, qui est toute l'authentification", async () => {
+describe("SessionLookup for the Git channel", () => {
+  it("returns the container address, which is the whole authentication", async () => {
     const assignment = await insertAssignment({ targetRepoPattern: "org/tp-{student}" });
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
@@ -366,7 +366,7 @@ describe("SessionLookup pour le canal Git", () => {
     });
   });
 
-  it("rend undefined pour une session fermée : plus aucun push n'est accepté", async () => {
+  it("returns undefined for a closed session: no push is accepted any more", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);

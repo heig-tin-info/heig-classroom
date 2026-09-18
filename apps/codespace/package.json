@@ -18,7 +18,6 @@
     "@fastify/cookie": "^11.0.2",
     "@fastify/formbody": "^8.0.2",
     "@fastify/http-proxy": "^11.3.0",
-    "@fastify/static": "^9.1.3",
     "@hgc/contracts": "workspace:*",
     "@hgc/domain": "workspace:*",
     "better-sqlite3": "^12.4.1",
@@ -27,7 +26,6 @@
     "fastify-plugin": "^6.0.0",
     "octokit": "^5.0.5",
     "openid-client": "^6.8.4",
-    "pino": "^10.1.0",
     "yaml": "^2.8.1",
     "zod": "^4.4.3"
   },
@@ -39,5 +37,5 @@
     "typescript": "^5.9.3",
     "vitest": "^4.1.9"
   },
-  "description": "Portail d'environnements de développement supervisés (code-server, Podman, SEB)"
+  "description": "Portal for supervised development environments (code-server, Podman, SEB)"
 }

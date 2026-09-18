@@ -153,9 +153,9 @@ export function createPushEventStore(db: PushEventDb): PushEventStore {
 }
 
 /**
- * Type structurel du handle Drizzle. V1 branche ici la base du portail
- * (`db/client.ts`), dont le schéma porte les quatre tables : le paramètre
- * reste donc ouvert plutôt que fixé à `Record<string, never>`.
+ * Structural type of the Drizzle handle. V1 plugs the portal's database in
+ * here (`db/client.ts`), whose schema carries the four tables: the parameter
+ * therefore stays open rather than pinned to `Record<string, never>`.
  */
 export type PushEventDb = import("drizzle-orm/better-sqlite3").BetterSQLite3Database<
   Record<string, unknown>

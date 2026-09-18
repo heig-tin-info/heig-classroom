@@ -1,16 +1,16 @@
 /**
- * Racine de composition du portail (V1 de docs/jalon-0.md).
+ * Composition root of the portal (V1 of docs/jalon-0.md).
  *
- * Deux surfaces d'écoute, et c'est intentionnel (analyse.md § 4.1) :
+ * Two listening surfaces, and that is deliberate (analyse.md § 4.1):
  *
- *  - le **portail** sur `HOST:PORT` (127.0.0.1 en développement) : pages,
- *    OIDC, proxy vers code-server, routes SEB ;
- *  - le **canal Git** sur `CODESPACE_GATEWAY:9418`, l'adresse du pont `cs0`
- *    et rien d'autre, parce que c'est la seule surface qu'un conteneur doit
- *    pouvoir joindre. La règle nftables `input` en est la seconde moitié.
+ *  - the **portal** on `HOST:PORT` (127.0.0.1 in development): pages, OIDC,
+ *    proxy to code-server, SEB routes;
+ *  - the **Git channel** on `CODESPACE_GATEWAY:9418`, the address of the `cs0`
+ *    bridge and nothing else, because that is the only surface a container must
+ *    be able to reach. The nftables `input` rule is the second half of it.
  *
- * Aucune injection de dépendances, aucun décorateur : les modules reçoivent
- * ce dont ils ont besoin en paramètre, ici.
+ * No dependency injection, no decorator: the modules receive what they need as
+ * parameters, here.
  */
 import { readFileSync } from "node:fs";
 
@@ -58,14 +58,14 @@ export interface Portal {
 }
 
 /**
- * Forge de destination du relais **et** source de l'autorisation qui amorce le
- * dépôt de transit. `none` = tout reste dans le dépôt de transit.
+ * Destination forge of the relay **and** source of the authorization that seeds
+ * the staging repository. `none` = everything stays in the staging repository.
  *
- * Côté GitHub, la clé privée est lue **une fois**, au démarrage : un fichier
- * PEM illisible doit se voir dans le journal de démarrage, pas à la première
- * session. L'installation, elle, est résolue par organisation à la demande
- * (`createGithubForge`), parce qu'un portail sert plusieurs classes et donc
- * plusieurs organisations GitHub.
+ * On the GitHub side, the private key is read **once**, at start-up: an
+ * unreadable PEM file must show up in the start-up log, not at the first
+ * session. The installation, for its part, is resolved per organisation on
+ * demand (`createGithubForge`), because one portal serves several classes and
+ * therefore several GitHub organisations.
  */
 export function createForge(
   config: AppConfig,
@@ -75,11 +75,11 @@ export function createForge(
   if (config.FORGE_KIND === "github") {
     const appId = config.GITHUB_APP_ID;
     const keyPath = config.githubAppPrivateKeyPath;
-    // Sans App, la forge sert encore à ce qui ne demande pas de jeton : l'URL
-    // de clonage d'un dépôt **public**. Le relais et l'amorçage d'un dépôt
-    // privé, eux, refusent explicitement et nommément
-    // (`createUnconfiguredGithubForge`). `baseUrl` n'est pas passé, comme pour
-    // `createGithubForge` : github.com.
+    // Without an App, the forge is still useful for what needs no token: the
+    // clone URL of a **public** repository. The relay and the seeding of a
+    // private repository, for their part, refuse explicitly and by name
+    // (`createUnconfiguredGithubForge`). `baseUrl` is not passed, as for
+    // `createGithubForge`: github.com.
     if (!appId || !keyPath) return createUnconfiguredGithubForge();
     let privateKey = "";
     try {
@@ -87,7 +87,7 @@ export function createForge(
     } catch (err) {
       log?.warn(
         { path: keyPath, err: String((err as Error).message ?? err) },
-        "clé privée de la GitHub App illisible : forge GitHub non configurée",
+        "GitHub App private key unreadable: GitHub forge not configured",
       );
       return createUnconfiguredGithubForge();
     }
@@ -99,13 +99,13 @@ export function createForge(
 
 export interface BuildOptions {
   config?: AppConfig;
-  /** Base déjà ouverte (tests) ; sinon `DATABASE_PATH`. */
+  /** Database already open (tests); otherwise `DATABASE_PATH`. */
   dbHandle?: DbHandle;
-  /** Moteur déjà construit (tests) ; sinon un vrai client Podman. */
+  /** Engine already built (tests); otherwise a real Podman client. */
   engine?: Engine;
-  /** Lier le serveur Git à la passerelle. Vrai par défaut. */
+  /** Bind the Git server to the gateway. True by default. */
   withGitServer?: boolean;
-  /** Réconcilier et démarrer les temporisateurs. Vrai par défaut. */
+  /** Reconcile and start the timers. True by default. */
   withTimers?: boolean;
 }
 
@@ -116,9 +116,9 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
 
   const app = Fastify({
     logger: { level: config.LOG_LEVEL },
-    // Développement seulement : rend `request.ip` contrôlable par
-    // `X-Forwarded-For`, ce dont `scripts/e2e.ts` a besoin pour simuler un
-    // second poste. `loadConfig` l'interdit en production.
+    // Development only: makes `request.ip` controllable through
+    // `X-Forwarded-For`, which `scripts/e2e.ts` needs in order to simulate a
+    // second machine. `loadConfig` forbids it in production.
     trustProxy: config.TRUST_PROXY,
   });
 
@@ -145,21 +145,22 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
     gcIntervalMs: config.SESSION_GC_INTERVAL_MS,
     shadowIntervalMs: config.SHADOW_INTERVAL_MS,
     healthTimeoutMs: config.SESSION_HEALTH_TIMEOUT_MS,
-    // `portal.internal` est le nom que `--add-host` donne à la passerelle
-    // dans le conteneur ; le remote écrit dans l'espace de travail l'utilise.
+    // `portal.internal` is the name `--add-host` gives to the gateway inside
+    // the container; the remote written into the workspace uses it.
     gitRemoteHost: "portal.internal",
     gitRemotePort: config.CODESPACE_GIT_PORT,
-    // Origines de retour du bouton « Fermer » de l'extension de barre d'état
-    // (images/c-dev/extension) : classroom pour une session venue d'un jeton
-    // de lancement, le portail sinon.
+    // Return origins of the status-bar extension's "Close" button
+    // (images/c-dev/extension): classroom for a session that came from a launch
+    // token, the portal otherwise.
     classroomUrl: config.CLASSROOM_URL,
     publicUrl: config.PUBLIC_URL,
     log: app.log,
     ...(forge
       ? {
           forgeUrlOf: (repo) => forge.pushUrl(repo),
-          // Le dépôt d'un étudiant est privé : l'amorçage du dépôt de transit
-          // porte la même autorisation que le relais, par l'environnement.
+          // A student's repository is private: the seeding of the staging
+          // repository carries the same authorization as the relay, through the
+          // environment.
           forgeAuthorization: (repo) => forge.authorization(repo),
         }
       : {}),
@@ -179,7 +180,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
   await app.register(formbody);
   await app.register(authPlugin, { config, db });
 
-  // --- volet examen --------------------------------------------------------
+  // --- exam side -----------------------------------------------------------
   const verifier = createSebVerifier({
     mode: config.SEB_VERIFIER,
     nodeEnv: config.NODE_ENV,
@@ -192,17 +193,17 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
   const lookup: AssignmentLookup = {
     find(assignmentId) {
       const row = findAssignment(db, assignmentId);
-      // Seul un devoir en mode examen a un `.seb` et une route de démarrage.
+      // Only an assignment in exam mode has a `.seb` and a start route.
       if (!row || row.mode !== "exam" || !row.sebConfig) return undefined;
       const seb = row.sebConfig;
       return {
         id: row.id,
         configKey: row.configKey ?? "",
         beks: row.beks,
-        // Un devoir synchronisé depuis classroom porte sa `startURL` : c'est
-        // classroom qui authentifie l'étudiant puis redirige vers `/launch`.
-        // La Config Key a été calculée sur cette URL-là, donc le `.seb` servi
-        // ici doit la reprendre telle quelle.
+        // An assignment synchronised from classroom carries its own
+        // `startURL`: it is classroom that authenticates the student and then
+        // redirects to `/launch`. The Config Key was computed on that URL, so
+        // the `.seb` served here must reuse it as it is.
         startUrl: seb.startUrl ?? new URL(sebStartPath(row.id), publicOrigin).href,
         quitUrl: seb.quitUrl ?? new URL("/", publicOrigin).href,
         examKeySalt: seb.examKeySalt,
@@ -212,17 +213,17 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
   };
 
   /**
-   * `seb/routes.ts` pose le cookie `exam_session` lui-même ; le cookie de
-   * session de codespace, lui, appartient à cette racine de composition.
-   * `onStart` le dépose ici et le crochet `onSend` ci-dessous l'écrit — la
-   * signature `StartOutcome` ne porte que l'identifiant et la redirection, et
-   * ce n'est pas au volet examen de connaître le format du cookie du proxy.
+   * `seb/routes.ts` sets the `exam_session` cookie itself; the codespace session
+   * cookie, for its part, belongs to this composition root. `onStart` drops it
+   * here and the `onSend` hook below writes it — the `StartOutcome` signature
+   * carries only the id and the redirection, and it is not the exam side's
+   * business to know the format of the proxy's cookie.
    */
   const pendingSessionCookie = new WeakMap<FastifyRequest, { id: string; value: string }>();
 
-  // Garde explicite de la route `/exam/:id/start`, qui appartient à `seb/` :
-  // la vérification SEB prouve le poste, pas la personne. Le crochet est
-  // enregistré après `authPlugin`, donc `request.user` est déjà résolu.
+  // Explicit guard on the `/exam/:id/start` route, which belongs to `seb/`:
+  // the SEB verification proves the machine, not the person. The hook is
+  // registered after `authPlugin`, so `request.user` is already resolved.
   app.addHook("preHandler", async (request, reply) => {
     if (!request.url.startsWith("/exam/") || !request.url.includes("/start")) return;
     if (request.user) return;
@@ -247,14 +248,14 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
     cookieSecret: config.EXAM_COOKIE_SECRET,
     cookieSecure: config.NODE_ENV === "production",
     cookieMaxAgeMs: config.EXAM_COOKIE_MAX_AGE_MS,
-    // Le bouton Démarrer et la route d'examen créent la session de la même
-    // façon ; seule la provenance diffère, et elle a déjà été vérifiée.
+    // The Start button and the exam route create the session in the same way;
+    // only the provenance differs, and it has already been verified.
     async onStart(ctx) {
       const assignment = findAssignment(db, ctx.assignment.id);
-      if (!assignment) throw new Error(`devoir ${ctx.assignment.id} introuvable`);
-      if (!isOpen(assignment)) throw new Error(`devoir ${assignment.id} hors fenêtre`);
+      if (!assignment) throw new Error(`assignment ${ctx.assignment.id} not found`);
+      if (!isOpen(assignment)) throw new Error(`assignment ${assignment.id} outside its window`);
       const user = ctx.request.user;
-      if (!user) throw new Error("démarrage d'examen sans session de portail");
+      if (!user) throw new Error("exam start without a portal session");
       const result = await manager.start(user, assignment, { sebVerified: true });
       pendingSessionCookie.set(ctx.request, {
         id: result.session.id,
@@ -262,15 +263,15 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
       });
       ctx.request.log.info(
         { sessionId: result.session.id, healthyInMs: result.healthyInMs },
-        "session d'examen démarrée",
+        "exam session started",
       );
       return { sessionId: result.session.id, redirectTo: `/s/${result.session.id}/` };
     },
   });
 
-  // --- frontière avec heig-classroom --------------------------------------
-  // Sans secret partagé, le greffon n'est pas enregistré : `/launch` et
-  // `/api/assignments/*` répondent 404 et le portail reste autonome.
+  // --- boundary with heig-classroom ---------------------------------------
+  // Without a shared secret, the plugin is not registered: `/launch` and
+  // `/api/assignments/*` answer 404 and the portal stays standalone.
   if (config.CODESPACE_LAUNCH_SECRET !== "") {
     await app.register(classroomRoutes, {
       config,
@@ -282,7 +283,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
   } else {
     app.log.info(
       {},
-      "CODESPACE_LAUNCH_SECRET absent : intégration classroom désactivée (portail autonome)",
+      "CODESPACE_LAUNCH_SECRET missing: classroom integration disabled (standalone portal)",
     );
   }
 
@@ -296,7 +297,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
 
   app.get("/healthz", async () => ({ ok: true }));
 
-  // --- canal Git -----------------------------------------------------------
+  // --- Git channel ---------------------------------------------------------
   let gitApp: FastifyInstance | null = null;
   if (options.withGitServer !== false) {
     const started = await startGitServer({
@@ -310,7 +311,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
     gitApp = started.app;
     app.log.info(
       { host: started.host, port: started.port },
-      "canal Git lié (analyse.md 4.1 : seule surface joignable depuis un conteneur)",
+      "Git channel bound (analyse.md 4.1: the only surface reachable from a container)",
     );
   }
 
@@ -339,7 +340,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
   };
 }
 
-/** Le portail nu, sans base ni moteur : test de fumée et sonde de démarrage. */
+/** The bare portal, without database or engine: smoke test and start-up probe. */
 export function buildServer(): FastifyInstance {
   const app = Fastify({ logger: true });
   app.get("/healthz", async () => ({ ok: true }));

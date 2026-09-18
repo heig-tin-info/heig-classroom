@@ -1,43 +1,43 @@
-# ADR-008 — Frontend SPA React + Vite, composants headless accessibles, sans SSR
+# ADR-008 — React + Vite SPA front end, accessible headless components, no SSR
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Le portail est une application authentifiée (teacher, student) sans aucun besoin de SEO.
-Les vues tableau doivent s'afficher en moins de 2 s à 100 lignes (NFR-11). L'interface est
-livrée en français avec l'anglais ajoutable sans refonte (NFR-14), les dates en
-Europe/Zurich (C-02), et neuf critères WCAG 2.1 AA sont exigés sur les parcours principaux
-(NFR-15).
+The portal is an authenticated application (teacher, student) with no SEO need whatsoever.
+Table views must render in under 2 s at 100 rows (NFR-11). The interface ships in French with
+English addable without a rewrite (NFR-14), dates in Europe/Zurich (C-02), and nine WCAG 2.1
+AA criteria are required on the main journeys (NFR-15).
 
-## Décision
+## Decision
 
-1. **SPA React 19 + Vite 7**, servie en fichiers statiques par le monolithe : aucun serveur
-   front à exploiter, redéploiement trivial.
-2. **TanStack Router + Query + Table** : cache et invalidation pilotés par les événements
-   SSE (ADR-005), tableaux de 100 lignes sans agrégation à la volée.
-3. **Radix UI (headless)** comme socle de composants : clavier, focus et ARIA couverts par
-   construction — la conformité NFR-15 ne repose pas sur un effort continu.
-4. **i18next** avec chaînes externalisées (NFR-14) ; **Luxon** pour l'affichage
-   Europe/Zurich (C-02).
-5. Types partagés avec le backend et le CLI via les schémas Zod de `packages/contracts`.
+1. A **React 19 + Vite 7 SPA**, served as static files by the monolith: no front-end server
+   to operate, trivial redeployment.
+2. **TanStack Router + Query + Table**: cache and invalidation driven by the SSE events
+   (ADR-005), 100-row tables without on-the-fly aggregation.
+3. **Radix UI (headless)** as the component foundation: keyboard, focus and ARIA covered by
+   construction — NFR-15 compliance does not rest on a continuous effort.
+4. **i18next** with externalized strings (NFR-14); **Luxon** for Europe/Zurich display
+   (C-02).
+5. Types shared with the backend and the CLI through the Zod schemas of
+   `packages/contracts`.
 
-## Conséquences
+## Consequences
 
-- Le front est un dossier de fichiers statiques versionné avec le backend : l'API portail
-  n'a pas besoin d'être versionnée (déployés ensemble).
-- L'audit d'accessibilité de recette (axe-core, NFR-15) vérifie un socle déjà accessible au
-  lieu de rattraper des composants maison.
-- La reconnexion SSE se résout par refetch TanStack Query : aucun état temps réel dupliqué.
+- The front end is a folder of static files versioned with the backend: the portal API does
+  not need to be versioned (they are deployed together).
+- The acceptance accessibility audit (axe-core, NFR-15) checks a foundation that is already
+  accessible instead of catching up on home-made components.
+- SSE reconnection is resolved by a TanStack Query refetch: no duplicated real-time state.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Next.js ou SSR** : aucun rendu serveur nécessaire (portail derrière login, SEO sans
-   objet) ; ajouterait un serveur front à exploiter et un couplage de déploiement.
-2. **Composants UI maison** : coût d'accessibilité récurrent, risque permanent sur NFR-15 ;
-   les trois propositions convergeaient vers un socle headless.
-3. **Monorepo outillé Turborepo + pnpm multi-pipelines** (proposition productivité) : six
-   paquets et des pipelines de build pour un projet à un mainteneur ; les workspaces pnpm
-   simples suffisent aux trois paquets partagés.
+1. **Next.js or SSR**: no server rendering is needed (the portal sits behind a login, SEO is
+   irrelevant); it would add a front-end server to operate and a deployment coupling.
+2. **Home-made UI components**: a recurring accessibility cost and a permanent risk on
+   NFR-15; all three proposals converged on a headless foundation.
+3. **A Turborepo + pnpm multi-pipeline monorepo setup** (productivity proposal): six packages
+   and build pipelines for a one-maintainer project; plain pnpm workspaces are enough for the
+   three shared packages.

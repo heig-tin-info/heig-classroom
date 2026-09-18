@@ -1,45 +1,46 @@
-# ADR-011 — La réconciliation réutilise les handlers idempotents des webhooks
+# ADR-011 — Reconciliation reuses the idempotent webhook handlers
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-GitHub peut perdre ou retarder des livraisons de webhooks ; certains événements n'existent
-pas (expiration d'invitation, GH-24). Les specs imposent un rattrapage : réconciliation des
-GradeRuns toutes les 15 min (GR-07), réconciliation quotidienne des branches, invitations et
-livraisons manquées (GH-62). Après une restauration de base (NFR-16), l'état doit se
-resynchroniser seul. Le risque classique est d'écrire deux codes de mise à jour d'état (un
-pour les webhooks, un pour le polling) qui divergent avec le temps.
+GitHub can lose or delay webhook deliveries; some events do not exist at all (invitation
+expiry, GH-24). The specs require a catch-up: reconciliation of GradeRuns every 15 min
+(GR-07), daily reconciliation of branches, invitations and missed deliveries (GH-62). After a
+database restore (NFR-16), the state must resynchronize on its own. The classic risk is
+writing two state-update code paths (one for webhooks, one for polling) that drift apart over
+time.
 
-## Décision
+## Decision
 
-1. Règle structurante (empruntée à la proposition robustesse) : **tout état a deux chemins
-   d'arrivée — webhook (nominal) et réconciliation (secours) — mais un seul code de mise à
-   jour**. Les crons de réconciliation construisent des événements normalisés et invoquent
-   **les mêmes handlers idempotents** que le pipeline webhook.
-2. L'idempotence des handlers repose sur les contraintes UNIQUE du schéma (ADR-003) :
-   rejouer un événement, quelle qu'en soit la source, ne produit jamais de doublon.
-3. Crons retenus : `reconcile.grades` (15 min, GR-07), `reconcile.repos` (24 h, branches et
-   invitations, GH-24), `reconcile.deliveries` (24 h, `GET /app/hook/deliveries` avec
-   redelivery, GH-62), plus les tâches d'entretien (purge, e-mails).
-4. Exception délibérée : l'**heure de réception** d'un push réconciliée après coup est
-   inconnue — la règle conservatrice GR-14.3 s'applique (`after_deadline = true` si la
-   deadline est passée), arbitrable par le teacher.
+1. A structuring rule (borrowed from the robustness proposal): **every piece of state has two
+   arrival paths — webhook (nominal) and reconciliation (fallback) — but a single update
+   code path**. The reconciliation cron jobs build normalized events and invoke **the same
+   idempotent handlers** as the webhook pipeline.
+2. Handler idempotency rests on the UNIQUE constraints of the schema (ADR-003): replaying an
+   event, whatever its source, never produces a duplicate.
+3. The cron jobs retained: `reconcile.grades` (15 min, GR-07), `reconcile.repos` (24 h,
+   branches and invitations, GH-24), `reconcile.deliveries` (24 h,
+   `GET /app/hook/deliveries` with redelivery, GH-62), plus the maintenance tasks (purge,
+   e-mails).
+4. A deliberate exception: the **receipt time** of a push reconciled after the fact is
+   unknown — the conservative GR-14.3 rule applies (`after_deadline = true` if the deadline
+   has passed), open to a teacher's arbitration.
 
-## Conséquences
+## Consequences
 
-- Un seul code d'état à tester et à maintenir ; le polling de secours ne peut pas diverger
-  du chemin nominal.
-- **La conception idempotente est aussi le plan de reprise** : après une panne ou une
-  restauration, les crons résorbent d'eux-mêmes la fenêtre perdue, sans procédure spéciale.
-- Le polling reste limité au rattrapage (NFR-10) : en régime nominal, tout arrive par
-  webhook.
+- A single state code path to test and maintain; the fallback polling cannot diverge from the
+  nominal path.
+- **The idempotent design is also the recovery plan**: after an outage or a restore, the cron
+  jobs absorb the lost window on their own, with no special procedure.
+- Polling stays limited to catching up (NFR-10): in nominal operation, everything arrives
+  through webhooks.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Code de réconciliation séparé** : double implémentation des règles d'état, divergence
-   garantie à terme ; c'est le défaut que cette règle prévient.
-2. **Polling périodique généralisé** au lieu des webhooks : violerait NFR-10 (rate limits,
-   polling limité au rattrapage) et dégraderait la latence NFR-12.
+1. **A separate reconciliation code path**: a double implementation of the state rules, with
+   guaranteed drift in the long run; that is exactly the defect this rule prevents.
+2. **Generalized periodic polling** instead of webhooks: it would violate NFR-10 (rate
+   limits, polling limited to catching up) and degrade the NFR-12 latency.

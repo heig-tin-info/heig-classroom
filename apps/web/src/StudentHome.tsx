@@ -143,8 +143,8 @@ function RepoMetrics({
  *
  * ADR-013 and the 2026-09-18 feedback on the real student view:
  *
- *  - `free` — unchanged: the name links to the repository and the « open your
- *    repository » button sits with the actions;
+ *  - `free` — unchanged: the name links to the repository and the "open your
+ *    repository" button sits with the actions;
  *  - `online` — the student only reads that repository, so the button goes;
  *    the name keeps its discreet link, and `Start` is the one action;
  *  - `online_seb` — no access to the repository at all, so no link either.
@@ -157,9 +157,9 @@ export type WorkModeOf = StudentAssignment["workMode"];
 export interface RowAffordances {
   /** The assignment name is a link to the GitHub repository. */
   nameIsLink: boolean;
-  /** The « open your repository » button, in the actions column. */
+  /** The "open your repository" button, in the actions column. */
   repoButton: boolean;
-  /** The « Start » button, the main action of an online assignment. */
+  /** The "Start" button, the main action of an online assignment. */
   startButton: boolean;
   /** Translation key of the note under the name; null in free mode. */
   modeNote: "student.workspace" | "student.workspaceSeb" | null;

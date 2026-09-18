@@ -1,245 +1,246 @@
-# `seb/` — volet examen : Config Key, Browser Exam Key, fichier `.seb`
+# `seb/` — exam side: Config Key, Browser Exam Key, `.seb` file
 
-Tâche P4 de [docs/jalon-0.md](../../../../docs/jalon-0.md). Ce module ne dépend
-de rien d'autre dans `src/` : les devoirs, le vérificateur et la
-création de session lui sont injectés.
+Task P4 of [docs/jalon-0.md](../../../../docs/jalon-0.md). This module depends
+on nothing else in `src/`: the assignments, the verifier and the session
+creation are injected into it.
 
-| Fichier | Rôle |
+| File | Role |
 | --- | --- |
-| `plist.ts` | lecture et écriture du sous-ensemble plist qu'utilise un `.seb`, en gardant le **type déclaré** de chaque feuille |
-| `configKey.ts` | normalisation « SEB-JSON » puis SHA-256 : la Config Key |
-| `verify.ts` | `SebVerifier`, implémentations `real` et `simulated`, `createSebVerifier` |
-| `examSession.ts` | cookie `exam_session` signé (HMAC) et sa vérification |
-| `sebFile.ts` | génération du `.seb` d'un devoir, sa Config Key, le lien `sebs://` |
-| `routes.ts` | greffon Fastify `sebRoutes` : `GET /exam/:a.seb` et `GET /exam/:a/start` |
-| `fixtures/` | vecteurs de test copiés du greffon Moodle, cf. `fixtures/PROVENANCE.md` |
+| `plist.ts` | reading and writing the plist subset a `.seb` uses, keeping the **declared type** of every leaf |
+| `configKey.ts` | "SEB-JSON" normalisation then SHA-256: the Config Key |
+| `verify.ts` | `SebVerifier`, the `real` and `simulated` implementations, `createSebVerifier` |
+| `examSession.ts` | the signed (HMAC) `exam_session` cookie and its verification |
+| `sebFile.ts` | generation of the `.seb` of an assignment, its Config Key, the `sebs://` link |
+| `routes.ts` | the `sebRoutes` Fastify plugin: `GET /exam/:a.seb` and `GET /exam/:a/start` |
+| `fixtures/` | test vectors copied from the Moodle plugin, see `fixtures/PROVENANCE.md` |
 
 ## Sources
 
-- Spécification du calcul de la Config Key :
+- Specification of the Config Key computation:
   <https://safeexambrowser.org/developer/seb-config-key.html>
-- Intégration et Browser Exam Key (un BEK par version et par plateforme) :
+- Integration and Browser Exam Key (one BEK per version and per platform):
   <https://safeexambrowser.org/developer/seb-integration.html>
-- Implémentation de référence, greffon Moodle `quizaccess_seb`, branche
-  `MOODLE_405_STABLE` :
-  - `classes/config_key.php` — retrait d'`originatorVersion`, puis SHA-256 :
+- Reference implementation, Moodle plugin `quizaccess_seb`, branch
+  `MOODLE_405_STABLE`:
+  - `classes/config_key.php` — removal of `originatorVersion`, then SHA-256:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/config_key.php>
   - `classes/property_list.php` — `to_json()`, `array_sort()`,
-    `prepare_plist_for_json_encoding()` ; c'est le fichier qui porte réellement
-    l'algorithme :
+    `prepare_plist_for_json_encoding()`; this is the file that really carries
+    the algorithm:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/property_list.php>
-  - `classes/seb_access_manager.php` — `check_key()` et
-    `check_browser_exam_keys()`, la formule des deux en-têtes :
+  - `classes/seb_access_manager.php` — `check_key()` and
+    `check_browser_exam_keys()`, the formula of the two headers:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/seb_access_manager.php>
-  - `classes/link_generator.php` — le schéma `sebs://` :
+  - `classes/link_generator.php` — the `sebs://` scheme:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/link_generator.php>
-  - `classes/helper.php` — `Content-Type: application/seb`, `filename=config.seb` :
+  - `classes/helper.php` — `Content-Type: application/seb`, `filename=config.seb`:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/helper.php>
-  - `classes/seb_quiz_settings.php` — `process_seb_config_manually()`, qui
-    montre qu'une configuration **partielle** est légitime :
+  - `classes/seb_quiz_settings.php` — `process_seb_config_manually()`, which
+    shows that a **partial** configuration is legitimate:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/classes/seb_quiz_settings.php>
-  - `tests/config_key_test.php` — les trois vecteurs de Config Key :
+  - `tests/config_key_test.php` — the three Config Key vectors:
     <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/tests/config_key_test.php>
-- Configuration `.seb` non chiffrée publiée par le projet SEB lui-même, d'où
-  viennent la forme des règles de filtrage d'URL et la confirmation que le
-  fichier est du plist XML nu :
+- Unencrypted `.seb` configuration published by the SEB project itself, where
+  the shape of the URL filter rules and the confirmation that the file is bare
+  XML plist come from:
   <https://github.com/SafeExamBrowser/SafeExamBrowser-Website/blob/master/exams/MoodleDemoEduhubDaysFilterUC.seb>
 
-## Algorithme de la Config Key
+## Algorithm of the Config Key
 
-Porté de `property_list::to_json()`. Chaque règle est commentée dans
-`configKey.ts` avec sa ligne de référence.
+Ported from `property_list::to_json()`. Every rule is commented in
+`configKey.ts` with its reference line.
 
-0. **Retirer `originatorVersion`** (`config_key::generate`). C'est de la
-   métadonnée : « which SEB version saved the config file ». Le retrait est
-   récursif, comme `plist_map`.
-1. **Aucun espace, aucun retour à la ligne.**
-2. **Aucun échappement de caractère**, en particulier **pas** les antislash des
-   règles de filtrage d'URL. PHP ne sait pas désactiver l'échappement de
-   l'antislash dans `json_encode` ; la référence le contourne en remplaçant
-   chaque `\` par une chaîne sentinelle avant l'encodage, puis à l'envers. Le
-   port émet directement l'antislash brut. Conséquence : **la chaîne SEB-JSON
-   n'est pas du JSON valide** dès qu'une chaîne contient un antislash. C'est
-   voulu par la spécification.
-3. **Tri des clés de chaque `<dict>`**, récursivement, y compris dans les
-   tableaux. Ordre : algorithme de collation Unicode, locale racine, force par
-   défaut — donc la casse est une différence *tertiaire* et la minuscule passe
-   en premier : `allowWlan` avant `allowWLAN`. Ce n'est **pas** un tri
-   ASCII, ni un `localeCompare` sur la locale courante.
-4. **Suppression des `<dict>` vides**, en cascade de bas en haut : un
-   dictionnaire qui ne contient que des dictionnaires vides disparaît lui aussi.
-   Les **tableaux** vides, eux, sont conservés (`"additionalResources":[]` dans
-   le vecteur mac).
-5. Chaînes en UTF-8, laissées littérales (`JSON_UNESCAPED_UNICODE`).
-6. Base16 en minuscules.
-7. `<data>` → sa chaîne base64, telle qu'écrite dans le plist.
+0. **Remove `originatorVersion`** (`config_key::generate`). It is metadata:
+   "which SEB version saved the config file". The removal is recursive, like
+   `plist_map`.
+1. **No whitespace, no newline.**
+2. **No character escaping**, in particular **not** the backslashes of the URL
+   filter rules. PHP cannot turn off backslash escaping in `json_encode`; the
+   reference works around it by replacing every `\` with a sentinel string
+   before encoding, then back again. The port emits the raw backslash directly.
+   Consequence: **the SEB-JSON string is not valid JSON** as soon as a string
+   contains a backslash. That is what the specification wants.
+3. **Sorting the keys of every `<dict>`**, recursively, including inside
+   arrays. Order: Unicode collation algorithm, root locale, default strength —
+   so case is a *tertiary* difference and lower case comes first: `allowWlan`
+   before `allowWLAN`. This is **not** an ASCII sort, nor a `localeCompare` on
+   the current locale.
+4. **Removal of empty `<dict>`s**, cascading from the bottom up: a dictionary
+   that contains nothing but empty dictionaries disappears as well. Empty
+   **arrays**, on the other hand, are kept (`"additionalResources":[]` in the
+   mac vector).
+5. Strings in UTF-8, left literal (`JSON_UNESCAPED_UNICODE`).
+6. Lower-case base16.
+7. `<data>` → its base64 string, as written in the plist.
 8. `<date>` → ISO 8601.
 
-Puis SHA-256 de cette chaîne, en hexadécimal minuscule.
+Then SHA-256 of that string, in lower-case hexadecimal.
 
-### Trois pièges, et ce que fait ce port
+### Three traps, and what this port does
 
-- **La configuration vide donne `[]`, pas `{}`.** La référence sérialise le
-  plist en tableau PHP, et `json_encode` d'un tableau PHP vide donne `[]`.
-  D'où la clé `4f53cda1…` du vecteur « configuration vide », qui est bien
-  `sha256("[]")`. `serialiseDict` reproduit ce comportement.
-- **Le tri dépend de la locale du moteur.** `new Intl.Collator('root')` est
-  rejeté par Node, et `'und'` retombe sur la locale par défaut de la machine
-  (`en-US` ici) : le résultat dépendrait du poste. Le port fixe `'en'`, qui ne
-  porte aucun ajustement de collation dans CLDR et vaut donc l'ordre racine. Ce
-  qui *prouve* que l'ordre est le bon, ce n'est pas ce raisonnement mais le
-  vecteur `JSON_unencrypted_mac_001.txt` : 239 clés, plusieurs ne différant que
-  par la casse, comparées caractère par caractère.
-- **Une configuration partielle est légitime.** SEB calcule la Config Key sur
-  le contenu du fichier, pas sur ses réglages une fois les valeurs par défaut
-  appliquées. `seb_quiz_settings::process_seb_config_manually()` part d'un
-  `property_list` vide et n'y met que les réglages du formulaire. `sebFile.ts`
-  fait pareil : il n'écrit qu'une trentaine de clés.
+- **The empty configuration gives `[]`, not `{}`.** The reference serialises
+  the plist as a PHP array, and `json_encode` of an empty PHP array gives `[]`.
+  Hence the key `4f53cda1…` of the "empty configuration" vector, which really
+  is `sha256("[]")`. `serialiseDict` reproduces that behaviour.
+- **The sort depends on the locale of the engine.** `new Intl.Collator('root')`
+  is rejected by Node, and `'und'` falls back to the default locale of the
+  machine (`en-US` here): the result would depend on the workstation. The port
+  pins `'en'`, which carries no collation tailoring in CLDR and therefore
+  amounts to the root order. What *proves* the order is right is not that
+  reasoning but the `JSON_unencrypted_mac_001.txt` vector: 239 keys, several of
+  which differ only by case, compared character by character.
+- **A partial configuration is legitimate.** SEB computes the Config Key over
+  the content of the file, not over its settings once the defaults have been
+  applied. `seb_quiz_settings::process_seb_config_manually()` starts from an
+  empty `property_list` and only puts the settings of the form in it.
+  `sebFile.ts` does the same: it only writes about thirty keys.
 
-## Vérification du démarrage
+## Verification of the start
 
-`seb_access_manager::check_key()` :
-`hash('sha256', $url . $validkey) === $header`. Donc, sur
-`GET /exam/<devoir>/start` :
+`seb_access_manager::check_key()`:
+`hash('sha256', $url . $validkey) === $header`. So, on
+`GET /exam/<assignment>/start`:
 
-- `X-SafeExamBrowser-ConfigKeyHash` doit valoir `sha256(url + configKey)` ;
-- `X-SafeExamBrowser-RequestHash` doit valoir `sha256(url + bek)` pour **au
-  moins un** des BEK acceptés du devoir (`check_browser_exam_keys` boucle sur
-  la liste).
+- `X-SafeExamBrowser-ConfigKeyHash` must be `sha256(url + configKey)`;
+- `X-SafeExamBrowser-RequestHash` must be `sha256(url + bek)` for **at least
+  one** of the accepted BEKs of the assignment (`check_browser_exam_keys` loops
+  over the list).
 
-`url` est l'URL **absolue telle que le navigateur l'a demandée, sans
-fragment**. Les deux comparaisons passent par `hashesEqual`, qui compare les
-condensés SHA-256 des deux chaînes avec `crypto.timingSafeEqual` — longueurs
-toujours égales, donc pas de court-circuit. La boucle sur les BEK ne s'arrête
-pas au premier succès, pour que la durée ne dise pas *quel* BEK a réussi.
+`url` is the **absolute URL as the browser asked for it, without the
+fragment**. Both comparisons go through `hashesEqual`, which compares the
+SHA-256 digests of the two strings with `crypto.timingSafeEqual` — lengths
+always equal, hence no short circuit. The loop over the BEKs does not stop on
+the first success, so that the duration does not tell *which* BEK matched.
 
-### Reconstruire l'URL derrière un frontal
+### Reconstructing the URL behind a front end
 
-`absoluteRequestUrl(req, options)`, trois modes, du plus sûr au moins sûr :
+`absoluteRequestUrl(req, options)`, three modes, from the safest to the least
+safe:
 
-| Réglage | Comportement | Quand |
+| Setting | Behaviour | When |
 | --- | --- | --- |
-| `publicOrigin: "https://codespace.heig-vd.ch"` | origine fixe, rien de ce que le client envoie n'entre dans le calcul | **production** |
-| `trustForwarded: true` | lit `X-Forwarded-Proto` et `X-Forwarded-Host` (premier élément d'une liste) | frontal qui réécrit systématiquement ces en-têtes |
-| aucun des deux | `Host` plus `defaultProtocol` | développement en clair |
+| `publicOrigin: "https://codespace.heig-vd.ch"` | fixed origin, nothing the client sends enters the computation | **production** |
+| `trustForwarded: true` | reads `X-Forwarded-Proto` and `X-Forwarded-Host` (first element of a list) | a front end that rewrites those headers systematically |
+| neither of the two | `Host` plus `defaultProtocol` | cleartext development |
 
-Le piège est réel : un frontal TLS termine le HTTPS, le portail voit
-`http://127.0.0.1:3100/...`, et le haché ne correspond jamais. Le réglage sûr
-est `publicOrigin`, parce qu'un `Host` ou un `X-Forwarded-Host` manipulable
-laisserait l'étudiant choisir l'URL sur laquelle le haché est calculé.
+The trap is real: a TLS front end terminates HTTPS, the portal sees
+`http://127.0.0.1:3100/...`, and the hash never matches. The safe setting is
+`publicOrigin`, because a `Host` or an `X-Forwarded-Host` that can be tampered
+with would let the student choose the URL the hash is computed over.
 
-### Les deux implémentations
+### The two implementations
 
-- `real` : ce qui précède.
-- `simulated` : accepte `X-Dev-SEB: ok`, refuse tout le reste.
-  `createSebVerifier` **lève** si `mode === "simulated"` et
-  `NODE_ENV === "production"` (invariant 8 de `CLAUDE.md`, affirmé par
-  `verify.test.ts`). Le refus est une exception au démarrage, pas un repli
-  silencieux : une production mal configurée ne doit pas démarrer.
+- `real`: everything above.
+- `simulated`: accepts `X-Dev-SEB: ok`, refuses everything else.
+  `createSebVerifier` **throws** when `mode === "simulated"` and
+  `NODE_ENV === "production"` (invariant 8 of `CLAUDE.md`, asserted by
+  `verify.test.ts`). The refusal is an exception at startup, not a silent
+  fallback: a misconfigured production must not start.
 
-Le jeu de cas de refus est passé aux **deux** implémentations dans
-`verify.test.ts` et `routes.test.ts` : aucune requête non explicitement
-autorisée ne passe, quel que soit le mode.
+The set of refusal cases is run against **both** implementations in
+`verify.test.ts` and `routes.test.ts`: no request that is not explicitly
+allowed goes through, whatever the mode.
 
-## Le cookie, et pourquoi le proxy ne lit pas d'en-tête SEB
+## The cookie, and why the proxy reads no SEB header
 
-Invariant 5 de `CLAUDE.md`, motivé par analyse.md § 4.5 : rien ne garantit que
-SEB ajoute ses en-têtes aux mises à niveau websocket ni aux requêtes de service
-worker. Un proxy qui les exigerait casserait l'éditeur, et un proxy qui les
-exigerait « quand ils sont là » ne garantirait rien.
+Invariant 5 of `CLAUDE.md`, motivated by analyse.md § 4.5: nothing guarantees
+that SEB adds its headers to websocket upgrades nor to service-worker requests.
+A proxy that demanded them would break the editor, and a proxy that demanded
+them "when they are there" would guarantee nothing.
 
-Donc : vérification **une fois**, sur `/exam/<devoir>/start`, puis émission d'un
-cookie `exam_session` signé en HMAC-SHA256 portant `assignmentId`, `sessionId`,
-l'adresse du client et l'horodatage. `checkExamRequest(request, …)` est la seule
-chose que `proxy/` appellera ; elle ne touche à aucun en-tête SEB. Adresse
-différente de celle de la vérification initiale → refus `address-mismatch`
-(analyse.md D5).
+Hence: verification **once**, on `/exam/<assignment>/start`, then the issuing
+of an `exam_session` cookie signed with HMAC-SHA256 carrying `assignmentId`,
+`sessionId`, the client address and the timestamp. `checkExamRequest(request,
+…)` is the only thing `proxy/` will ever call; it touches no SEB header. An
+address different from the one of the initial verification → an
+`address-mismatch` refusal (analyse.md D5).
 
-Le cookie n'est pas chiffré : tout ce qu'il porte est déjà connu du client, et
-il ne contient **jamais** de BEK.
+The cookie is not encrypted: everything it carries is already known to the
+client, and it **never** contains a BEK.
 
-## Le fichier `.seb`
+## The `.seb` file
 
-Plist XML **non chiffré**, servi en `application/seb` sous le nom
-`config.seb`. C'est la forme que sert `quizaccess_seb` et celle des exemples
-publiés par le projet SEB : ni gzip, ni préfixe de quatre octets. Le
-chiffrement ne concerne que les fichiers protégés par mot de passe, écartés par
-analyse.md § 4.4 (« le chiffrement du fichier `.seb` n'apporte rien à
-l'intégrité, la Config Key la garantit »).
+An **unencrypted** XML plist, served as `application/seb` under the name
+`config.seb`. That is the shape `quizaccess_seb` serves and the one of the
+examples published by the SEB project: no gzip, no four-byte prefix.
+Encryption only concerns password-protected files, ruled out by analyse.md
+§ 4.4 ("encrypting the `.seb` file brings nothing to integrity; the Config Key
+guarantees it").
 
-Réglages écrits, tous relevés sur des configurations SEB réelles
-(`fixtures/unencrypted_win_223.seb` et l'exemple du projet SEB) : `startURL`,
-`quitURL`, `URLFilterEnable`/`URLFilterRules` (une seule règle « autoriser »
-sur le domaine du portail), `allowDownUploads: false`,
-`enablePrivateClipboard: true`, kiosque, `sendBrowserExamKey: true`,
-`examKeySalt`, `browserExamKey` vide.
+Settings written, all taken from real SEB configurations
+(`fixtures/unencrypted_win_223.seb` and the SEB project example): `startURL`,
+`quitURL`, `URLFilterEnable`/`URLFilterRules` (a single "allow" rule on the
+portal domain), `allowDownUploads: false`, `enablePrivateClipboard: true`,
+kiosk, `sendBrowserExamKey: true`, `examKeySalt`, an empty `browserExamKey`.
 
-**`browserExamKey` reste vide, à dessein.** Avec un `examKeySalt` propre au
-devoir, SEB calcule le BEK à partir du sel *et de son propre binaire* : un BEK
-par plateforme et par version, d'où la liste côté devoir (analyse.md § 4.4).
-Écrire un BEK dans le fichier donnerait le même BEK partout — et remettrait le
-secret partagé à l'étudiant, ce que project.md § 9 interdit.
+**`browserExamKey` stays empty, on purpose.** With an `examKeySalt` of its own
+per assignment, SEB computes the BEK from the salt *and from its own binary*:
+one BEK per platform and per version, whence the list on the assignment side
+(analyse.md § 4.4). Writing a BEK into the file would give the same BEK
+everywhere — and would hand the shared secret to the student, which
+project.md § 9 forbids.
 
-Le lien remis à l'étudiant est `sebs://<hôte>/exam/<devoir>.seb` : la même URL
-que le `https://`, schéma remplacé, comme `link_generator::get_link()`.
+The link handed to the student is `sebs://<host>/exam/<assignment>.seb`: the
+same URL as the `https://` one, with the scheme swapped, like
+`link_generator::get_link()`.
 
-## Décisions
+## Decisions
 
-1. **Porter, pas réinventer.** Le port suit `property_list.php` ligne à ligne,
-   y compris ses bizarreries (`[]` pour une configuration vide, antislash non
-   échappé dans les valeurs mais échappé dans les clés). Une clé qui
-   « semblerait plus propre » serait une clé fausse.
-2. **Le type plist est conservé** jusqu'à la sérialisation (`SebValue`), au lieu
-   de retomber sur les primitives JavaScript : un `<integer>` et un `<real>` ne
-   se sérialisent pas pareil, un `<data>` non plus.
-3. **Un devoir sans BEK est refusé**, là où Moodle laisse passer quand la liste
-   est vide (`is_allowed_browser_examkeys_configured`). En mode examen, une
-   liste vide est une erreur de configuration, pas une dispense.
-4. **Pas de `@fastify/cookie`** dans `routes.ts` : le greffon doit pouvoir
-   s'enregistrer dans une instance qui l'a déjà, ou pas encore. La valeur est
-   en base64url, sans caractère à échapper.
-5. **Refus journalisé, secret jamais.** Le journal porte l'identifiant du
-   devoir, la raison, l'adresse et l'URL. Ni la liste des BEK, ni les hachés
-   reçus, qui sont des fonctions du secret partagé. Un test l'affirme.
-6. **Vecteurs sourcés uniquement.** Aucune valeur attendue ne sort de ce code.
-   Les trois vecteurs de Config Key et la chaîne SEB-JSON intermédiaire
-   viennent du jeu de tests de `quizaccess_seb` ; les tests qui ne peuvent pas
-   l'être (sensibilité au changement d'un réglage, idempotence) sont des
-   propriétés, pas des valeurs.
+1. **Port, do not reinvent.** The port follows `property_list.php` line by
+   line, quirks included (`[]` for an empty configuration, backslashes left
+   unescaped in values but escaped in keys). A key that "would look cleaner"
+   would be a wrong key.
+2. **The plist type is kept** all the way to serialisation (`SebValue`),
+   instead of falling back on the JavaScript primitives: an `<integer>` and a
+   `<real>` do not serialise the same way, and neither does a `<data>`.
+3. **An assignment without a BEK is refused**, where Moodle lets the request
+   through when the list is empty (`is_allowed_browser_examkeys_configured`).
+   In exam mode, an empty list is a configuration error, not a dispensation.
+4. **No `@fastify/cookie`** in `routes.ts`: the plugin has to be registrable in
+   an instance that already has it, or does not have it yet. The value is
+   base64url, with no character that needs escaping.
+5. **The refusal is logged, the secret never is.** The log carries the
+   identifier of the assignment, the reason, the address and the URL. Neither
+   the list of BEKs, nor the hashes received, which are functions of the shared
+   secret. A test asserts it.
+6. **Sourced vectors only.** No expected value comes out of this code. The
+   three Config Key vectors and the intermediate SEB-JSON string come from the
+   test suite of `quizaccess_seb`; the tests that cannot come from there
+   (sensitivity to a changed setting, idempotence) are properties, not values.
 
 ## `TODO(verify)`
 
-Rien n'a été vérifié contre un binaire SEB : aucun n'est installé sur ce poste.
-La preuve B manuelle, [docs/preuve-b-manuelle.md](../../../../docs/preuve-b-manuelle.md),
-existe pour lever ces points.
+Nothing has been checked against a SEB binary: none is installed on this
+workstation. The manual proof B,
+[docs/preuve-b-manuelle.md](../../../../docs/preuve-b-manuelle.md), exists to
+clear these points.
 
-- **`configKey.ts`, `isoDate()`** — format des `<date>`. La référence lit un
-  horodatage Unix et le formate avec le `'c'` de PHP, soit
-  `1940-10-09T22:13:56+00:00`, décalage explicite et non `Z`. Aucun vecteur
-  publié n'exerce ce chemin : le seul test Moodle qui touche une date affirme
-  que deux fixtures portant la même date ont la même clé, ce qui ne fixe pas le
-  format. Les configurations que ce portail génère ne contiennent aucune
-  `<date>`, donc le chemin est écrit d'après la référence et non prouvé.
-- **`configKey.ts`, `jsonNumber()`** — très grands flottants. PHP écrit
-  `1.0e+30`, JavaScript `1e+30`. Les seuls `<real>` d'un `.seb` sont les seuils
-  de batterie, dans `[0,1]` : divergence laissée non traitée et non testée.
-- **`sebFile.ts`, `browserViewMode: 1`** — les deux configurations de référence
-  valent `0`. La valeur `1` (plein écran) n'a pas été vérifiée sur une version
-  épinglée de SEB.
-- **`sebFile.ts`, `browserURLSalt: true`** — valeur reprise des deux
-  configurations de référence ; sa sémantique exacte n'a pas été vérifiée sur
-  une version épinglée.
-- **`sebFile.ts`, `browserExamKey: ""`** — les deux configurations de référence
-  le laissent vide, ce qui conforte le choix, mais la sémantique d'un
-  `browserExamKey` **non** vide (BEK imposé au client) n'a pas été vérifiée.
-- **Version de SEB** — aucun réglage n'a été confronté à une version épinglée
-  du client. Les noms et types viennent de configurations enregistrées par SEB
-  Windows 2.2.3 et macOS 2.1.4, qui sont anciennes.
-- **Suppression d'un `<dict>` vide contenu dans un `<array>`** — la référence
-  supprime pendant l'itération (`$parent->del($key)` sur un `CFArray`), ce qui
-  peut décaler les indices. Ce port supprime proprement. Aucun `.seb` connu ne
-  contient de dictionnaire vide dans un tableau ; la divergence est théorique
-  et non testée.
+- **`configKey.ts`, `isoDate()`** — format of the `<date>`s. The reference
+  reads a Unix timestamp and formats it with PHP's `'c'`, that is
+  `1940-10-09T22:13:56+00:00`, an explicit offset and not `Z`. No published
+  vector exercises that path: the only Moodle test that touches a date asserts
+  that two fixtures carrying the same date have the same key, which does not
+  pin the format. The configurations this portal generates contain no `<date>`
+  at all, so the path is written after the reference and not proven.
+- **`configKey.ts`, `jsonNumber()`** — very large floats. PHP writes
+  `1.0e+30`, JavaScript `1e+30`. The only `<real>`s of a `.seb` are the battery
+  thresholds, in `[0,1]`: the divergence is left unhandled and untested.
+- **`sebFile.ts`, `browserViewMode: 1`** — both reference configurations have
+  `0`. The value `1` (full screen) has not been checked against a pinned
+  version of SEB.
+- **`sebFile.ts`, `browserURLSalt: true`** — value carried over from both
+  reference configurations; its exact semantics has not been checked against a
+  pinned version.
+- **`sebFile.ts`, `browserExamKey: ""`** — both reference configurations leave
+  it empty, which supports the choice, but the semantics of a **non**-empty
+  `browserExamKey` (a BEK imposed on the client) has not been checked.
+- **SEB version** — no setting has been confronted with a pinned version of the
+  client. The names and types come from configurations saved by SEB Windows
+  2.2.3 and macOS 2.1.4, which are old.
+- **Removal of an empty `<dict>` contained in an `<array>`** — the reference
+  deletes during the iteration (`$parent->del($key)` on a `CFArray`), which can
+  shift the indices. This port deletes cleanly. No known `.seb` contains an
+  empty dictionary inside an array; the divergence is theoretical and untested.
 
 ## Tests
 
@@ -247,8 +248,8 @@ existe pour lever ces points.
 pnpm --filter @hgc/codespace test
 ```
 
-`configKey.test.ts` (vecteurs et règles de normalisation), `verify.test.ts`
-(formule, cas de refus, invariant 8, reconstruction d'URL),
-`examSession.test.ts` (cookie), `sebFile.test.ts` (génération, idempotence,
-lien `sebs://`), `routes.test.ts` (les deux routes, les deux implémentations,
-le chemin du proxy).
+`configKey.test.ts` (vectors and normalisation rules), `verify.test.ts`
+(formula, refusal cases, invariant 8, URL reconstruction),
+`examSession.test.ts` (cookie), `sebFile.test.ts` (generation, idempotence,
+`sebs://` link), `routes.test.ts` (both routes, both implementations, the proxy
+path).

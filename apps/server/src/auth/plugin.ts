@@ -126,7 +126,7 @@ async function authPluginImpl(app: FastifyInstance, opts: { config: AppConfig })
     "requireSession",
     async (req: FastifyRequest, reply: FastifyReply) => {
       if (!req.user) return reply.code(401).send({ error: "unauthenticated" });
-      // Double-submit anti-CSRF (docs/03 « Contrat API ») on every mutation.
+      // Double-submit anti-CSRF (docs/03 "API contract") on every mutation.
       if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
         const cookie = req.cookies[CSRF_COOKIE];
         const header = req.headers[CSRF_HEADER];

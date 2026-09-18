@@ -11,12 +11,12 @@ const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
 const fixture = (name: string): string => readFileSync(join(FIXTURES, name), "utf8");
 
 /**
- * Les valeurs attendues viennent toutes du jeu de tests de `quizaccess_seb`,
- * jamais de ce code. Voir fixtures/PROVENANCE.md.
+ * The expected values all come from the test suite of `quizaccess_seb`, never
+ * from this code. See fixtures/PROVENANCE.md.
  * <https://github.com/moodle/moodle/blob/MOODLE_405_STABLE/mod/quiz/accessrule/seb/tests/config_key_test.php>
  */
-describe("Config Key : vecteurs de l'implémentation de référence", () => {
-  it("configuration vide (config_key_test::test_config_key_hash_generated_with_empty_string)", () => {
+describe("Config Key: vectors of the reference implementation", () => {
+  it("empty configuration (config_key_test::test_config_key_hash_generated_with_empty_string)", () => {
     expect(configKeyFromPlistXml("")).toBe(
       "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
     );
@@ -34,51 +34,51 @@ describe("Config Key : vecteurs de l'implémentation de référence", () => {
     );
   });
 
-  it("la chaîne SEB-JSON intermédiaire est identique à la fixture Moodle", () => {
-    // Vecteur plus fin que le haché : une divergence de tri ou d'échappement
-    // se lit directement dans le diff.
+  it("the intermediate SEB-JSON string is identical to the Moodle fixture", () => {
+    // A finer vector than the hash: a divergence in sorting or escaping reads
+    // straight off the diff.
     expect(sebJson(parsePlist(fixture("unencrypted_mac_001.seb")))).toBe(
       fixture("JSON_unencrypted_mac_001.txt"),
     );
   });
 
-  it("originatorVersion ne change pas la clé (test_presence_of_originator_version_does_not_effect_hash)", () => {
-    const avec = configKeyFromPlistXml(fixture("simpleunencrypted.seb"));
-    const sans = configKeyFromPlistXml(fixture("simpleunencryptedwithoutoriginator.seb"));
-    expect(avec).toBe(sans);
+  it("originatorVersion does not change the key (test_presence_of_originator_version_does_not_effect_hash)", () => {
+    const withIt = configKeyFromPlistXml(fixture("simpleunencrypted.seb"));
+    const without = configKeyFromPlistXml(fixture("simpleunencryptedwithoutoriginator.seb"));
+    expect(withIt).toBe(without);
   });
 
-  it("un XML invalide est refusé", () => {
+  it("invalid XML is refused", () => {
     expect(() => configKeyFromPlistXml("<?xml This is some bad xml for sure.")).toThrow();
   });
 });
 
-describe("Config Key : sensibilité aux réglages", () => {
+describe("Config Key: sensitivity to the settings", () => {
   const base = dict([
     ["allowDownUploads", bool(false)],
     ["startURL", str("https://portal.example.org/exam/a1/start")],
     ["allowedDisplaysMaxNumber", int(1)],
   ]);
 
-  it("modifier un seul réglage change la clé", () => {
-    const modifie = dict([
+  it("changing a single setting changes the key", () => {
+    const modified = dict([
       ["allowDownUploads", bool(true)],
       ["startURL", str("https://portal.example.org/exam/a1/start")],
       ["allowedDisplaysMaxNumber", int(1)],
     ]);
-    expect(configKey(modifie)).not.toBe(configKey(base));
+    expect(configKey(modified)).not.toBe(configKey(base));
   });
 
-  it("l'ordre de déclaration des clés n'a aucun effet", () => {
-    const permute = dict([
+  it("the declaration order of the keys has no effect", () => {
+    const permuted = dict([
       ["startURL", str("https://portal.example.org/exam/a1/start")],
       ["allowedDisplaysMaxNumber", int(1)],
       ["allowDownUploads", bool(false)],
     ]);
-    expect(configKey(permute)).toBe(configKey(base));
+    expect(configKey(permuted)).toBe(configKey(base));
   });
 
-  it("une virgule de plus dans une règle d'URL change la clé", () => {
+  it("one extra character in a URL rule changes the key", () => {
     const a = dict([["URLFilterRules", array([dict([["expression", str("portal.example.org")]])])]]);
     const b = dict([
       ["URLFilterRules", array([dict([["expression", str("portal.example.org/")]])])],
@@ -87,8 +87,8 @@ describe("Config Key : sensibilité aux réglages", () => {
   });
 });
 
-describe("Config Key : règles de normalisation", () => {
-  it("tri sensible à la casse selon l'UCA : allowWlan avant allowWLAN (règle 3)", () => {
+describe("Config Key: normalisation rules", () => {
+  it("case-sensitive UCA sort: allowWlan before allowWLAN (rule 3)", () => {
     const value = dict([
       ["allowWLAN", bool(true)],
       ["allowWlan", bool(false)],
@@ -96,7 +96,7 @@ describe("Config Key : règles de normalisation", () => {
     expect(sebJson(value)).toBe('{"allowWlan":false,"allowWLAN":true}');
   });
 
-  it("les dictionnaires imbriqués sont triés aussi (règle 3)", () => {
+  it("nested dictionaries are sorted as well (rule 3)", () => {
     const value = dict([
       ["z", dict([["b", int(2)], ["a", int(1)]])],
       ["a", int(0)],
@@ -104,7 +104,7 @@ describe("Config Key : règles de normalisation", () => {
     expect(sebJson(value)).toBe('{"a":0,"z":{"a":1,"b":2}}');
   });
 
-  it("les dictionnaires vides disparaissent, en cascade (règle 4)", () => {
+  it("empty dictionaries disappear, in cascade (rule 4)", () => {
     const value = dict([
       ["keep", int(1)],
       ["empty", dict([])],
@@ -113,32 +113,32 @@ describe("Config Key : règles de normalisation", () => {
     expect(sebJson(value)).toBe('{"keep":1}');
   });
 
-  it("les tableaux vides sont conservés (la règle 4 ne parle que des dict)", () => {
+  it("empty arrays are kept (rule 4 only speaks of dicts)", () => {
     expect(sebJson(dict([["additionalResources", array([])]]))).toBe(
       '{"additionalResources":[]}',
     );
   });
 
-  it("la configuration vide se sérialise en [] et non en {}", () => {
-    // Conséquence de json_encode() sur un tableau PHP vide, cf. configKey.ts.
+  it("the empty configuration serialises to [] and not to {}", () => {
+    // A consequence of json_encode() on an empty PHP array, see configKey.ts.
     expect(sebJson(dict([]))).toBe("[]");
   });
 
-  it("les antislash des règles d'URL ne sont pas échappés (règle 2)", () => {
+  it("the backslashes of URL rules are not escaped (rule 2)", () => {
     expect(sebJson(dict([["expression", str("a\\d+b")]]))).toBe('{"expression":"a\\d+b"}');
   });
 
-  it("les barres obliques ne sont pas échappées (JSON_UNESCAPED_SLASHES)", () => {
+  it("forward slashes are not escaped (JSON_UNESCAPED_SLASHES)", () => {
     expect(sebJson(dict([["startURL", str("https://x/y")]]))).toBe(
       '{"startURL":"https://x/y"}',
     );
   });
 
-  it("l'unicode reste littéral (JSON_UNESCAPED_UNICODE, règle 5)", () => {
+  it("unicode stays literal (JSON_UNESCAPED_UNICODE, rule 5)", () => {
     expect(sebJson(dict([["k", str("éé")]]))).toBe('{"k":"éé"}');
   });
 
-  it("les données binaires deviennent leur texte base64 (règle 7)", () => {
+  it("binary data becomes its base64 text (rule 7)", () => {
     const xml = toPlistXml(
       dict([["examKeySalt", { kind: "data", value: "QJAqvg89YMP6JagAshUm6QqpqpsrVS9ZWUYjdZhfEao=" }]]),
     );
@@ -147,7 +147,7 @@ describe("Config Key : règles de normalisation", () => {
     );
   });
 
-  it("originatorVersion est retiré à toute profondeur", () => {
+  it("originatorVersion is stripped at every depth", () => {
     const value = dict([
       ["a", int(1)],
       ["originatorVersion", str("SEB_Win_2.1.1")],

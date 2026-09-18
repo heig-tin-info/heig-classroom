@@ -1,6 +1,6 @@
-# Environnement de développement — PostgreSQL + Keycloak (IdP OIDC de test,
-# remplace Switch edu-ID en dev, voir docs/03-architecture.md et ADR-002).
-# Lancement : docker compose -f docker-compose.dev.yml up -d
+# Development environment -- PostgreSQL + Keycloak (test OIDC IdP, standing in
+# for Switch edu-ID in dev, see docs/03-architecture.md and ADR-002).
+# Start with: docker compose -f docker-compose.dev.yml up -d
 services:
   postgres:
     image: postgres:17

@@ -8,7 +8,7 @@ import {
   type ExamClaims,
 } from "./examSession.js";
 
-const SECRET = "secret-de-test-assez-long";
+const SECRET = "long-enough-test-secret";
 const CLAIMS: ExamClaims = {
   assignmentId: "a1",
   sessionId: "s-42",
@@ -19,71 +19,71 @@ const CLAIMS: ExamClaims = {
 const cookie = issueExamCookie(CLAIMS, { secret: SECRET });
 const check = { secret: SECRET, clientAddress: "10.0.0.7", now: CLAIMS.issuedAt + 1000 };
 
-describe("cookie d'examen", () => {
-  it("un cookie fraîchement émis est accepté", () => {
+describe("exam cookie", () => {
+  it("a freshly issued cookie is accepted", () => {
     const verdict = verifyExamCookie(cookie, check);
     expect(verdict).toEqual({ ok: true, claims: CLAIMS });
   });
 
-  it("le cookie ne contient aucun caractère à échapper", () => {
+  it("the cookie contains no character that needs escaping", () => {
     expect(cookie).toMatch(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
   });
 
-  it("le cookie n'expose aucun secret", () => {
+  it("the cookie exposes no secret", () => {
     const payload = Buffer.from(cookie.split(".")[0] as string, "base64url").toString("utf8");
     expect(payload).not.toContain(SECRET);
     expect(JSON.parse(payload)).toEqual(CLAIMS);
   });
 
-  it("cookie absent", () => {
+  it("cookie missing", () => {
     expect(verifyExamCookie(undefined, check)).toEqual({ ok: false, reason: "missing" });
     expect(verifyExamCookie("", check)).toEqual({ ok: false, reason: "missing" });
   });
 
-  it("cookie mal formé", () => {
-    expect(verifyExamCookie("pasdepoint", check)).toMatchObject({ reason: "malformed" });
+  it("malformed cookie", () => {
+    expect(verifyExamCookie("nodot", check)).toMatchObject({ reason: "malformed" });
     expect(verifyExamCookie(".signature", check)).toMatchObject({ reason: "malformed" });
     expect(verifyExamCookie("payload.", check)).toMatchObject({ reason: "malformed" });
   });
 
-  it("signature invalide", () => {
+  it("invalid signature", () => {
     const [payload] = cookie.split(".");
     expect(verifyExamCookie(`${payload}.AAAA`, check)).toMatchObject({
       reason: "bad-signature",
     });
   });
 
-  it("charge utile trafiquée : la signature ne suit pas", () => {
-    const forge = Buffer.from(
+  it("tampered payload: the signature does not follow", () => {
+    const forged = Buffer.from(
       JSON.stringify({ ...CLAIMS, clientAddress: "10.0.0.8" }),
       "utf8",
     ).toString("base64url");
-    expect(verifyExamCookie(`${forge}.${cookie.split(".")[1]}`, check)).toMatchObject({
+    expect(verifyExamCookie(`${forged}.${cookie.split(".")[1]}`, check)).toMatchObject({
       reason: "bad-signature",
     });
   });
 
-  it("secret différent", () => {
-    expect(verifyExamCookie(cookie, { ...check, secret: "un-autre-secret-de-test" })).toMatchObject(
+  it("different secret", () => {
+    expect(verifyExamCookie(cookie, { ...check, secret: "another-test-secret-here" })).toMatchObject(
       { reason: "bad-signature" },
     );
   });
 
-  it("cookie valide présenté depuis une autre adresse : refusé (analyse.md D5)", () => {
+  it("a valid cookie presented from another address: refused (analyse.md D5)", () => {
     expect(verifyExamCookie(cookie, { ...check, clientAddress: "10.0.0.8" })).toEqual({
       ok: false,
       reason: "address-mismatch",
     });
   });
 
-  it("cookie d'un autre devoir", () => {
+  it("cookie of another assignment", () => {
     expect(verifyExamCookie(cookie, { ...check, assignmentId: "a2" })).toEqual({
       ok: false,
       reason: "assignment-mismatch",
     });
   });
 
-  it("cookie périmé", () => {
+  it("expired cookie", () => {
     expect(
       verifyExamCookie(cookie, {
         ...check,
@@ -92,18 +92,18 @@ describe("cookie d'examen", () => {
     ).toEqual({ ok: false, reason: "expired" });
   });
 
-  it("cookie daté du futur", () => {
+  it("cookie dated in the future", () => {
     expect(verifyExamCookie(cookie, { ...check, now: CLAIMS.issuedAt - 1 })).toEqual({
       ok: false,
       reason: "expired",
     });
   });
 
-  it("un secret trop court est refusé à l'émission", () => {
-    expect(() => issueExamCookie(CLAIMS, { secret: "court" })).toThrow();
+  it("a secret that is too short is refused at issue time", () => {
+    expect(() => issueExamCookie(CLAIMS, { secret: "short" })).toThrow();
   });
 
-  it("les attributs du cookie sont ceux d'un cookie de session lié au poste", () => {
+  it("the cookie attributes are those of a session cookie bound to the workstation", () => {
     expect(examCookieAttributes({ secure: true })).toEqual({
       path: "/",
       httpOnly: true,

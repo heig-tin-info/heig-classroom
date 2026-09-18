@@ -2,8 +2,8 @@
  * Assignment milestones: intermediate review checkpoints. Authoring accepts
  * either an absolute date or a J±n offset in days relative to the deadline
  * (stored alongside the resolved date; lifecycle.ts re-resolves offsets when
- * the deadline moves). The barème stays out of the platform: `name` is the
- * tag matched by criteria.yml `milestone:` entries.
+ * the deadline moves). The grading scale stays out of the platform: `name` is
+ * the tag matched by criteria.yml `milestone:` entries.
  */
 import { randomUUID } from "node:crypto";
 

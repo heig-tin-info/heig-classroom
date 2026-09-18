@@ -1,4 +1,4 @@
-/** Volet examen : vérification SEB, cookie de session, génération du `.seb`. */
+/** Exam side: SEB verification, session cookie, generation of the `.seb` file. */
 export { configKey, configKeyFromPlistXml, sebJson, EXEMPT_KEY } from "./configKey.js";
 export {
   EXAM_COOKIE,

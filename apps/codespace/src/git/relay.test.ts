@@ -56,19 +56,19 @@ function fakeForge(urlOf: () => string): Forge & { calls: number } {
 }
 
 describe("refspecs", () => {
-  it("pousse un sha précis, en force (le dépôt de transit fait autorité)", () => {
+  it("pushes an exact sha, forced (the staging repository is authoritative)", () => {
     expect(refspecFor({ ref: "refs/heads/main", sha: "a".repeat(40) })).toBe(
       `+${"a".repeat(40)}:refs/heads/main`,
     );
   });
 
-  it("propage une suppression de ref", () => {
-    expect(refspecFor({ ref: "refs/heads/vieille", sha: NULL_OID })).toBe(":refs/heads/vieille");
+  it("propagates a ref deletion", () => {
+    expect(refspecFor({ ref: "refs/heads/old", sha: NULL_OID })).toBe(":refs/heads/old");
   });
 });
 
-describe("passage du jeton", () => {
-  it("n'est ni dans argv ni dans un fichier : seulement dans l'environnement", () => {
+describe("how the token travels", () => {
+  it("is neither in argv nor in a file: only in the environment", () => {
     const args = buildPushArgs("/vol/staging.git", "https://forge/e/tp.git", ["+abc:refs/heads/main"]);
     expect(args.join(" ")).not.toContain(TOKEN);
     expect(args.join(" ")).not.toMatch(/extraHeader/i);
@@ -83,8 +83,8 @@ describe("passage du jeton", () => {
   });
 });
 
-describe("cadence d'une forge non configurée", () => {
-  it("part d'une minute, double, et plafonne à une heure", () => {
+describe("cadence of a forge that is not configured", () => {
+  it("starts at one minute, doubles, and is capped at one hour", () => {
     expect(UNCONFIGURED_BACKOFF(1)).toBe(60_000);
     expect(UNCONFIGURED_BACKOFF(2)).toBe(120_000);
     expect(UNCONFIGURED_BACKOFF(6)).toBe(1_920_000);
@@ -112,7 +112,7 @@ describe("createRelayWorker", () => {
     return { base, volumesRoot, staging, forgeRepo, store, close, src, repoOf };
   }
 
-  it("relaie les refs enregistrées puis marque relayed", async () => {
+  it("relays the recorded refs then marks them relayed", async () => {
     const s = await scenario();
     const forge = fakeForge(() => s.forgeRepo);
     const worker = createRelayWorker({
@@ -134,9 +134,9 @@ describe("createRelayWorker", () => {
     s.close();
   });
 
-  it("forge injoignable : la ligne reste pending, puis passe relayed au retour", async () => {
+  it("forge unreachable: the row stays pending, then turns relayed when it is back", async () => {
     const s = await scenario();
-    let target = join(s.base, "forge-absente.git");
+    let target = join(s.base, "forge-missing.git");
     const worker = createRelayWorker({
       store: s.store,
       forge: fakeForge(() => target),
@@ -163,11 +163,11 @@ describe("createRelayWorker", () => {
     s.close();
   });
 
-  it("déclare failed seulement après épuisement du budget de tentatives", async () => {
+  it("declares failed only once the attempt budget is exhausted", async () => {
     const s = await scenario();
     const worker = createRelayWorker({
       store: s.store,
-      forge: fakeForge(() => join(s.base, "jamais.git")),
+      forge: fakeForge(() => join(s.base, "never.git")),
       targets: stagingTargets(s.volumesRoot, s.repoOf),
       backoffMs: () => 0,
       maxAttempts: 2,
@@ -181,10 +181,10 @@ describe("createRelayWorker", () => {
     s.close();
   });
 
-  it("forge non configurée : la ligne reste pending indéfiniment, avec l'erreur nommée", async () => {
-    // Déploiement sans GitHub App (docs/deploy.md) : le rendu est enregistré,
-    // le service ne tombe pas, et la ligne ne doit **jamais** passer `failed` —
-    // elle n'a pas eu de destination, ce n'est pas une panne de la forge.
+  it("forge not configured: the row stays pending indefinitely, with the named error", async () => {
+    // Deployment without a GitHub App (docs/deploy.md): the submission is
+    // recorded, the service does not go down, and the row must **never** turn
+    // `failed` — it had no destination, this is not a forge outage.
     const s = await scenario();
     const worker = createRelayWorker({
       store: s.store,
@@ -203,13 +203,13 @@ describe("createRelayWorker", () => {
     const row = (await s.store.bySession(SESSION.sessionId))[0] as PushEventRow;
     expect(row.state).toBe("pending");
     expect(row.attempts).toBe(4);
-    expect(row.lastError).toMatch(/GitHub App non configurée/);
+    expect(row.lastError).toMatch(/GitHub App not configured/);
     s.close();
   });
 
-  it("forge non configurée : une tentative par heure au plus, et un seul warn", async () => {
-    // Mesuré en production : 517 tentatives et 517 `warn`, un par minute. Le
-    // « pending, jamais failed » est voulu ; la cadence, non.
+  it("forge not configured: at most one attempt per hour, and a single warn", async () => {
+    // Measured in production: 517 attempts and 517 `warn`s, one per minute.
+    // The "pending, never failed" part is intended; the cadence is not.
     const s = await scenario();
     const warns: string[] = [];
     let clock = new Date("2026-09-18T08:00:00Z");
@@ -230,25 +230,25 @@ describe("createRelayWorker", () => {
       expect(await worker.runOnce()).toEqual({ relayed: 0, retried: 1, failed: 0 });
       const row = (await s.store.bySession(SESSION.sessionId))[0] as PushEventRow;
       waits.push((row.nextAttemptAt as Date).getTime() - clock.getTime());
-      clock = row.nextAttemptAt as Date; // on saute directement à l'échéance
+      clock = row.nextAttemptAt as Date; // jump straight to the due date
     }
 
-    // 1 min, 2, 4, 8, 16, 32, puis le plafond d'une heure.
+    // 1 min, 2, 4, 8, 16, 32, then the one-hour ceiling.
     expect(waits.slice(0, 6)).toEqual([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000]);
     expect(waits.slice(6)).toEqual(Array(6).fill(3_600_000));
-    // Douze tentatives, un seul warn : le journal reste lisible.
-    expect(warns).toEqual(["relais en attente : la forge n'est pas configurée pour ce dépôt"]);
-    // Et la ligne n'est toujours pas `failed` : elle n'a jamais eu de destination.
+    // Twelve attempts, a single warn: the log stays readable.
+    expect(warns).toEqual(["relay waiting: the forge is not configured for this repository"]);
+    // And the row is still not `failed`: it never had a destination.
     expect((await s.store.bySession(SESSION.sessionId))[0]?.state).toBe("pending");
     s.close();
   });
 
-  it("une panne ordinaire garde sa cadence et son warn par tentative", async () => {
+  it("an ordinary outage keeps its cadence and its warn per attempt", async () => {
     const s = await scenario();
     const warns: string[] = [];
     const worker = createRelayWorker({
       store: s.store,
-      forge: fakeForge(() => join(s.base, "jamais.git")),
+      forge: fakeForge(() => join(s.base, "never.git")),
       targets: stagingTargets(s.volumesRoot, s.repoOf),
       backoffMs: () => 0,
       maxAttempts: 5,
@@ -260,17 +260,17 @@ describe("createRelayWorker", () => {
     await worker.runOnce();
     await worker.runOnce();
     expect(warns).toEqual([
-      "relais en échec, nouvelle tentative programmée",
-      "relais en échec, nouvelle tentative programmée",
+      "relay failed, another attempt scheduled",
+      "relay failed, another attempt scheduled",
     ]);
     s.close();
   });
 
-  it("ne pousse qu'une fois la dernière valeur d'une ref poussée plusieurs fois", async () => {
+  it("pushes only once the last value of a ref pushed several times", async () => {
     const s = await scenario();
     const clone = join(s.base, "clone");
     await git(["clone", s.staging.gitDir, clone], { env: FIXTURE_ENV });
-    await git(["-C", clone, "commit", "--allow-empty", "-m", "deuxième"], { env: FIXTURE_ENV });
+    await git(["-C", clone, "commit", "--allow-empty", "-m", "second"], { env: FIXTURE_ENV });
     await git(["-C", clone, "push", "origin", "HEAD:main"], { env: FIXTURE_ENV });
     const head = (await git(["-C", clone, "rev-parse", "HEAD"], { env: FIXTURE_ENV })).trim();
 
@@ -292,7 +292,7 @@ describe("createRelayWorker", () => {
     s.close();
   });
 
-  it("sans dépôt cible, le push reste local et la ligne est close", async () => {
+  it("with no target repository, the push stays local and the row is closed out", async () => {
     const s = await scenario();
     const worker = createRelayWorker({
       store: s.store,
@@ -337,8 +337,8 @@ async function filesContaining(dir: string, needle: string): Promise<string[]> {
   return hits;
 }
 
-describe("jeton invisible pendant un relais", () => {
-  it("n'apparaît dans aucun /proc/*/cmdline ni sur le disque", async () => {
+describe("token invisible during a relay", () => {
+  it("appears in no /proc/*/cmdline and nowhere on disk", async () => {
     const s = await root();
     const volumesRoot = join(s, "volumes");
     const src = await makeSourceRepo({ dir: join(s, "src"), files: { "a.c": "\n" } });

@@ -25,7 +25,7 @@ const args = engine.runArgs({
   workDir: "/vol/student/tp/work",
 });
 
-/** `--x a` ou `--x=a` : les deux formes existent dans run-hardened.sh. */
+/** `--x a` or `--x=a`: both forms exist in run-hardened.sh. */
 function hasOption(argv: string[], name: string, value?: string): boolean {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i] as string;
@@ -39,9 +39,9 @@ function hasOption(argv: string[], name: string, value?: string): boolean {
   return false;
 }
 
-describe("engine.runArgs — invariant 3, le durcissement vient de run-hardened.sh", () => {
-  // Le test ne réécrit pas la liste : il la *lit* dans le script de P1, pour
-  // qu'un durcissement retiré là-bas fasse échouer le portail ici.
+describe("engine.runArgs — invariant 3, the hardening comes from run-hardened.sh", () => {
+  // The test does not rewrite the list: it *reads* it from the P1 script, so
+  // that a hardening option removed over there makes the portal fail here.
   const required = [
     "--userns=auto",
     "--cap-drop=ALL",
@@ -56,52 +56,52 @@ describe("engine.runArgs — invariant 3, le durcissement vient de run-hardened.
   ];
 
   for (const option of required) {
-    it(`reprend ${option}, que run-hardened.sh impose`, () => {
+    it(`reuses ${option}, which run-hardened.sh mandates`, () => {
       expect(RUN_HARDENED).toContain(option);
       expect(args.join(" ")).toContain(option);
     });
   }
 
-  it("monte le tmpfs /tmp", () => {
+  it("mounts the /tmp tmpfs", () => {
     expect(hasOption(args, "--tmpfs", "/tmp")).toBe(true);
   });
 
-  it("passe le profil seccomp du projet", () => {
+  it("passes the project seccomp profile", () => {
     expect(hasOption(args, "--security-opt", "seccomp=/repo/infra/seccomp/codespace.json")).toBe(
       true,
     );
   });
 
-  it("monte le volume en :U, jamais autrement", () => {
+  it("mounts the volume with :U, never otherwise", () => {
     expect(hasOption(args, "-v", "/vol/student/tp/work:/work:U")).toBe(true);
-    // La négation compte autant : un montage sans `:U` laisserait l'étudiant
-    // sans droit d'écriture sur son propre volume (analyse.md D6).
+    // The negation matters just as much: a mount without `:U` would leave the
+    // student without write access to their own volume (analyse.md D6).
     expect(args.filter((a) => a.includes(":/work")).every((a) => a.endsWith(":U"))).toBe(true);
   });
 });
 
-describe("engine.runArgs — invariant 2, réseau clos", () => {
-  it("attache le réseau codespace sans DNS", () => {
+describe("engine.runArgs — invariant 2, closed network", () => {
+  it("attaches the codespace network without DNS", () => {
     expect(hasOption(args, "--network", "codespace")).toBe(true);
     expect(hasOption(args, "--dns=none")).toBe(true);
   });
 
-  it("déclare portal.internal sur la passerelle du pont", () => {
+  it("declares portal.internal on the bridge gateway", () => {
     expect(hasOption(args, "--add-host", "portal.internal:10.77.0.254")).toBe(true);
   });
 });
 
-describe("engine.runArgs — étiquetage", () => {
-  it("marque la session, et c'est la seule marque que le moteur regarde", () => {
+describe("engine.runArgs — labelling", () => {
+  it("marks the session, and that is the only mark the engine looks at", () => {
     expect(hasOption(args, "--label", `${SESSION_LABEL}=s1`)).toBe(true);
     expect(SESSION_LABEL).toBe("heig-codespace.session");
   });
 
-  it("ne porte pas le label d'ancrage : l'ancrage n'est jamais une session", () => {
+  it("does not carry the anchor label: the anchor is never a session", () => {
     expect(args.join(" ")).not.toContain("heig-codespace.role=anchor");
   });
 
-  it("laisse le devoir imposer son image", () => {
+  it("lets the assignment mandate its image", () => {
     const other = engine.runArgs({
       sessionId: "s2",
       name: "cs-s2",

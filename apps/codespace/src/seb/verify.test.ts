@@ -21,7 +21,7 @@ const ABSOLUTE = `${ORIGIN}${PATH}`;
 
 const KEYS: AssignmentSebKeys = {
   configKey: "2534e4e9f3188f9f9133bf7cf7b4c5d898292bbd7e8d0230f39d1176636a1431",
-  // Deux BEK : un poste Windows et un Mac, cf. analyse.md § 4.4.
+  // Two BEKs: one Windows workstation and one Mac, see analyse.md § 4.4.
   beks: [
     "aaaa111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
     "bbbb111122223333444455556666777788889999aaaabbbbccccddddeeeeffff",
@@ -53,38 +53,38 @@ function sebRequest(
 }
 
 describe("createSebVerifier", () => {
-  it("refuse de construire le mode simulated en production (invariant 8)", () => {
+  it("refuses to build the simulated mode in production (invariant 8)", () => {
     expect(() => createSebVerifier({ mode: "simulated", nodeEnv: "production" })).toThrow(
       SebConfigurationError,
     );
   });
 
-  it("le mode real reste possible en production", () => {
+  it("the real mode stays possible in production", () => {
     expect(createSebVerifier({ mode: "real", nodeEnv: "production" }).mode).toBe("real");
   });
 
-  it("le mode simulated reste possible hors production", () => {
+  it("the simulated mode stays possible outside production", () => {
     for (const env of ["development", "test", ""]) {
       expect(createSebVerifier({ mode: "simulated", nodeEnv: env }).mode).toBe("simulated");
     }
   });
 });
 
-describe("verifier real : la formule", () => {
-  it("accepte quand les deux hachés correspondent (sha256(url + clé))", () => {
+describe("real verifier: the formula", () => {
+  it("accepts when both hashes match (sha256(url + key))", () => {
     const verdict = real.verifyStart(sebRequest(PATH), KEYS);
     expect(verdict).toEqual({ ok: true, url: ABSOLUTE });
   });
 
-  it("le haché attendu est bien sha256(url + clé), sans séparateur", () => {
-    // Formule de seb_access_manager::check_key() :
+  it("the expected hash really is sha256(url + key), with no separator", () => {
+    // Formula of seb_access_manager::check_key():
     // hash('sha256', $url . $validkey) === $key
     expect(expectedHash(ABSOLUTE, KEYS.configKey)).toBe(
       createHash("sha256").update(`${ABSOLUTE}${KEYS.configKey}`).digest("hex"),
     );
   });
 
-  it("accepte le premier BEK de la liste comme le second", () => {
+  it("accepts the first BEK of the list as well as the second", () => {
     for (const bek of KEYS.beks) {
       const req = sebRequest(PATH, { [REQUEST_HASH_HEADER]: expectedHash(ABSOLUTE, bek) });
       expect(real.verifyStart(req, KEYS).ok).toBe(true);
@@ -92,13 +92,13 @@ describe("verifier real : la formule", () => {
   });
 });
 
-describe("verifier real : cas de refus", () => {
-  it("aucun en-tête", () => {
+describe("real verifier: refusal cases", () => {
+  it("no header at all", () => {
     const verdict = real.verifyStart({ url: PATH, headers: { host: "x" } }, KEYS);
     expect(verdict).toMatchObject({ ok: false, reason: "missing-config-key-header" });
   });
 
-  it("Config Key présente, hachage de requête absent", () => {
+  it("Config Key present, request hash missing", () => {
     const verdict = real.verifyStart(
       {
         url: PATH,
@@ -109,7 +109,7 @@ describe("verifier real : cas de refus", () => {
     expect(verdict).toMatchObject({ ok: false, reason: "missing-request-hash-header" });
   });
 
-  it("en-tête forgé", () => {
+  it("forged header", () => {
     const verdict = real.verifyStart(
       sebRequest(PATH, { [CONFIG_KEY_HEADER]: "00".repeat(32) }),
       KEYS,
@@ -117,19 +117,19 @@ describe("verifier real : cas de refus", () => {
     expect(verdict).toMatchObject({ ok: false, reason: "config-key-mismatch" });
   });
 
-  it("hachage calculé sur une URL portant un fragment", () => {
-    // Un navigateur n'envoie jamais le fragment ; un client qui l'aurait inclus
-    // dans son calcul obtient un haché qui ne correspond pas.
+  it("hash computed over a URL carrying a fragment", () => {
+    // A browser never sends the fragment; a client that had included it in its
+    // computation gets a hash that does not match.
     const verdict = real.verifyStart(sebRequest(PATH, {}, `${ABSOLUTE}#section`), KEYS);
     expect(verdict).toMatchObject({ ok: false, reason: "config-key-mismatch" });
   });
 
-  it("un fragment présent dans la cible de la requête est retiré avant hachage", () => {
+  it("a fragment present in the request target is stripped before hashing", () => {
     const verdict = real.verifyStart(sebRequest(`${PATH}#section`, {}, ABSOLUTE), KEYS);
     expect(verdict).toEqual({ ok: true, url: ABSOLUTE });
   });
 
-  it("query réordonnée : le haché porte sur l'URL exacte", () => {
+  it("reordered query: the hash is over the exact URL", () => {
     const asked = `${PATH}?b=2&a=1`;
     const verdict = real.verifyStart(
       sebRequest(asked, {}, `${ORIGIN}${PATH}?a=1&b=2`),
@@ -138,16 +138,16 @@ describe("verifier real : cas de refus", () => {
     expect(verdict).toMatchObject({ ok: false, reason: "config-key-mismatch" });
   });
 
-  it("BEK d'une autre version de SEB", () => {
-    const autreVersion = "cccc111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
+  it("BEK of another version of SEB", () => {
+    const otherVersion = "cccc111122223333444455556666777788889999aaaabbbbccccddddeeeeffff";
     const verdict = real.verifyStart(
-      sebRequest(PATH, { [REQUEST_HASH_HEADER]: expectedHash(ABSOLUTE, autreVersion) }),
+      sebRequest(PATH, { [REQUEST_HASH_HEADER]: expectedHash(ABSOLUTE, otherVersion) }),
       KEYS,
     );
     expect(verdict).toMatchObject({ ok: false, reason: "browser-exam-key-mismatch" });
   });
 
-  it("Config Key d'un autre devoir", () => {
+  it("Config Key of another assignment", () => {
     const verdict = real.verifyStart(
       sebRequest(PATH, {
         [CONFIG_KEY_HEADER]: expectedHash(ABSOLUTE, "4fa9af8e".repeat(8)),
@@ -157,51 +157,51 @@ describe("verifier real : cas de refus", () => {
     expect(verdict).toMatchObject({ ok: false, reason: "config-key-mismatch" });
   });
 
-  it("devoir sans aucun BEK enregistré", () => {
+  it("assignment with no BEK recorded at all", () => {
     const verdict = real.verifyStart(sebRequest(PATH), { configKey: KEYS.configKey, beks: [] });
     expect(verdict).toMatchObject({ ok: false, reason: "no-browser-exam-key-configured" });
   });
 
-  it("l'en-tête de développement ne suffit pas au vérificateur réel", () => {
+  it("the development header is not enough for the real verifier", () => {
     const verdict = real.verifyStart({ url: PATH, headers: { [DEV_HEADER]: "ok" } }, KEYS);
     expect(verdict.ok).toBe(false);
   });
 });
 
-describe("verifier simulated", () => {
+describe("simulated verifier", () => {
   const req = (headers: Record<string, string>): SebRequestFacts => ({
     url: PATH,
     headers: { host: "codespace.heig-vd.ch", ...headers },
   });
 
-  it("accepte X-Dev-SEB: ok", () => {
+  it("accepts X-Dev-SEB: ok", () => {
     expect(simulated.verifyStart(req({ [DEV_HEADER]: "ok" }), KEYS).ok).toBe(true);
   });
 
-  it("refuse toute autre valeur", () => {
+  it("refuses any other value", () => {
     for (const value of ["", "yes", "true", "OK "]) {
       expect(simulated.verifyStart(req({ [DEV_HEADER]: value }), KEYS).ok).toBe(false);
     }
   });
 
-  it("refuse les mêmes requêtes que le vérificateur réel", () => {
-    // Le jeu de cas de refus est commun aux deux implémentations : aucune
-    // requête qui n'est pas explicitement autorisée ne passe.
-    const refus: SebRequestFacts[] = [
+  it("refuses the same requests as the real verifier", () => {
+    // The set of refusal cases is shared by both implementations: no request
+    // that is not explicitly allowed goes through.
+    const refusals: SebRequestFacts[] = [
       { url: PATH, headers: { host: "codespace.heig-vd.ch" } },
       sebRequest(PATH, { [CONFIG_KEY_HEADER]: "00".repeat(32) }),
       sebRequest(PATH, {}, `${ABSOLUTE}#section`),
       sebRequest(`${PATH}?b=2&a=1`, {}, `${ORIGIN}${PATH}?a=1&b=2`),
     ];
-    for (const r of refus) {
+    for (const r of refusals) {
       expect(simulated.verifyStart(r, KEYS).ok, `simulated ${r.url}`).toBe(false);
       expect(real.verifyStart(r, KEYS).ok, `real ${r.url}`).toBe(false);
     }
   });
 });
 
-describe("reconstruction de l'URL absolue", () => {
-  it("publicOrigin ignore ce que le client raconte", () => {
+describe("reconstruction of the absolute URL", () => {
+  it("publicOrigin ignores whatever the client claims", () => {
     const url = absoluteRequestUrl(
       { url: PATH, headers: { host: "evil.example", "x-forwarded-host": "evil.example" } },
       { publicOrigin: ORIGIN },
@@ -209,7 +209,7 @@ describe("reconstruction de l'URL absolue", () => {
     expect(url).toBe(ABSOLUTE);
   });
 
-  it("sans publicOrigin ni confiance, l'en-tête Host sert", () => {
+  it("without publicOrigin and without trust, the Host header is used", () => {
     expect(
       absoluteRequestUrl(
         { url: PATH, headers: { host: "codespace.heig-vd.ch", "x-forwarded-proto": "http" } },
@@ -218,7 +218,7 @@ describe("reconstruction de l'URL absolue", () => {
     ).toBe(ABSOLUTE);
   });
 
-  it("avec trustForwarded, X-Forwarded-Proto et -Host sont lus", () => {
+  it("with trustForwarded, X-Forwarded-Proto and -Host are read", () => {
     expect(
       absoluteRequestUrl(
         {
@@ -234,7 +234,7 @@ describe("reconstruction de l'URL absolue", () => {
     ).toBe(ABSOLUTE);
   });
 
-  it("sans hôte, l'URL est irreconstructible et la requête est refusée", () => {
+  it("with no host, the URL cannot be reconstructed and the request is refused", () => {
     expect(absoluteRequestUrl({ url: PATH, headers: {} }, {})).toBeNull();
     const verdict = createSebVerifier({ mode: "real", nodeEnv: "test" }).verifyStart(
       { url: PATH, headers: {} },
@@ -243,7 +243,7 @@ describe("reconstruction de l'URL absolue", () => {
     expect(verdict).toMatchObject({ ok: false, reason: "url-unreconstructible" });
   });
 
-  it("le fragment est retiré", () => {
+  it("the fragment is stripped", () => {
     expect(
       absoluteRequestUrl({ url: `${PATH}?a=1#frag`, headers: {} }, { publicOrigin: ORIGIN }),
     ).toBe(`${ABSOLUTE}?a=1`);
@@ -251,7 +251,7 @@ describe("reconstruction de l'URL absolue", () => {
 });
 
 describe("hashesEqual", () => {
-  it("compare des hachés hexadécimaux sans se soucier de la casse ni des espaces", () => {
+  it("compares hexadecimal hashes regardless of case and surrounding spaces", () => {
     expect(hashesEqual("AABB", " aabb ")).toBe(true);
     expect(hashesEqual("aabb", "aabc")).toBe(false);
     expect(hashesEqual("aabb", "aabbcc")).toBe(false);

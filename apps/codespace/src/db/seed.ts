@@ -1,14 +1,15 @@
 /**
- * Graine de développement : lit `seed/assignments.yaml`, crée les dépôts dans
- * la forge, y pousse les modèles, écrit les lignes `users` et `assignments`.
+ * Development seed: reads `seed/assignments.yaml`, creates the repositories on
+ * the forge, pushes the templates to them, writes the `users` and `assignments`
+ * rows.
  *
- * Elle vit ici plutôt que dans `scripts/` parce que la racine du dépôt n'a pas
- * de `node_modules` (pnpm workspace) : `scripts/seed.ts` n'est qu'une
- * enveloppe qui appelle `runSeed`.
+ * It lives here rather than in `scripts/` because the repository root has no
+ * `node_modules` (pnpm workspace): `scripts/seed.ts` is only a wrapper that
+ * calls `runSeed`.
  *
- * Idempotente : rejouable. Les dépôts existants sont conservés, les devoirs
- * mis à jour, le sel d'examen **jamais** régénéré — le changer invaliderait la
- * Config Key des `.seb` déjà distribués.
+ * Idempotent: replayable. Existing repositories are kept, assignments are
+ * updated, the exam salt is **never** regenerated — changing it would
+ * invalidate the Config Key of the `.seb` files already handed out.
  */
 import { cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -57,10 +58,10 @@ export type SeedFile = z.infer<typeof SeedSpec>;
 
 interface Forge {
   /**
-   * Crée le dépôt s'il manque. **Public** : le dépôt de transit d'un devoir de
-   * travaux pratiques est un miroir du dépôt cible, lu par un `git fetch` sans
-   * jeton (`git/staging.ts` n'en prend pas). Rien de confidentiel ne vit dans
-   * la forge de développement.
+   * Creates the repository if it is missing. **Public**: the staging repository
+   * of a lab assignment is a mirror of the target repository, read by a
+   * `git fetch` without a token (`git/staging.ts` takes none). Nothing
+   * confidential lives in the development forge.
    */
   ensure(owner: string, name: string): Promise<void>;
   cloneUrl(owner: string, name: string): string;
@@ -84,14 +85,14 @@ export function forgejoSeedForge(baseUrl: string, token: string): Forge {
     async ensure(owner, name) {
       const head = await api(`/repos/${owner}/${name}`);
       if (head.ok) return;
-      if (head.status !== 404) throw new Error(`forge : GET /repos a répondu ${head.status}`);
+      if (head.status !== 404) throw new Error(`forge: GET /repos answered ${head.status}`);
       const body = JSON.stringify({ name, private: false, auto_init: false });
       let created = await api("/user/repos", { method: "POST", body });
       if (!created.ok && created.status !== 409) {
         created = await api(`/orgs/${owner}/repos`, { method: "POST", body });
       }
       if (!created.ok && created.status !== 409) {
-        throw new Error(`forge : création de ${owner}/${name} refusée (${created.status})`);
+        throw new Error(`forge: creation of ${owner}/${name} refused (${created.status})`);
       }
     },
   };
@@ -99,7 +100,7 @@ export function forgejoSeedForge(baseUrl: string, token: string): Forge {
 
 function splitRepo(full: string): { owner: string; name: string } {
   const slash = full.indexOf("/");
-  if (slash <= 0 || slash === full.length - 1) throw new Error(`dépôt mal formé : ${full}`);
+  if (slash <= 0 || slash === full.length - 1) throw new Error(`malformed repository: ${full}`);
   return { owner: full.slice(0, slash), name: full.slice(slash + 1) };
 }
 
@@ -110,7 +111,7 @@ const IDENTITY = {
   GIT_COMMITTER_EMAIL: "seed@codespace.local",
 } as const;
 
-/** Pousse le contenu d'un répertoire de modèle dans un dépôt de la forge. */
+/** Pushes the content of a template directory into a repository on the forge. */
 async function pushTemplate(forge: Forge, full: string, templateDir: string): Promise<string> {
   const { owner, name } = splitRepo(full);
   await forge.ensure(owner, name);
@@ -119,9 +120,9 @@ async function pushTemplate(forge: Forge, full: string, templateDir: string): Pr
     await git(["init", "-q", "--initial-branch=main", work], { env: IDENTITY });
     await cp(templateDir, work, { recursive: true });
     await git(["-C", work, "add", "-A"], { env: IDENTITY });
-    await git(["-C", work, "commit", "-q", "-m", `modèle ${name}`], { env: IDENTITY });
-    // Le jeton part par l'environnement, jamais en argv ni sur disque
-    // (jalon-0 § P3) : même mécanique que `git/relay.ts`.
+    await git(["-C", work, "commit", "-q", "-m", `template ${name}`], { env: IDENTITY });
+    // The token goes through the environment, never in argv nor on disk
+    // (jalon-0 § P3): same mechanism as `git/relay.ts`.
     await git(
       ["-C", work, "push", "--force", forge.cloneUrl(owner, name), "HEAD:refs/heads/main"],
       { env: { ...IDENTITY, ...buildPushEnv(forge.authorization()) } },
@@ -134,9 +135,9 @@ async function pushTemplate(forge: Forge, full: string, templateDir: string): Pr
 
 export interface SeedOptions {
   config: AppConfig;
-  /** Répertoire `seed/` du dépôt. */
+  /** The repository's `seed/` directory. */
   seedDir: string;
-  /** Base déjà ouverte (tests) ; sinon `DATABASE_PATH`. */
+  /** Database already open (tests); otherwise `DATABASE_PATH`. */
   db?: Db;
   log?: (line: string) => void;
 }
@@ -152,7 +153,7 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
   const { config } = opts;
   const log = opts.log ?? ((line: string) => console.log(line));
   if (!config.FORGE_TOKEN) {
-    throw new Error("FORGE_TOKEN absent : voir src/git/README.md");
+    throw new Error("FORGE_TOKEN missing: see src/git/README.md");
   }
   const spec = SeedSpec.parse(
     parse(await readFile(join(opts.seedDir, "assignments.yaml"), "utf8")),
@@ -163,13 +164,13 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
   const now = new Date();
   const report: SeedReport = { users: 0, assignments: [], repos: [], configKeys: {} };
 
-  log(`base : ${config.databasePath}`);
-  log(`forge : ${config.FORGE_URL}`);
+  log(`database: ${config.databasePath}`);
+  log(`forge: ${config.FORGE_URL}`);
 
-  // --- utilisateurs --------------------------------------------------------
-  // Préinscription seulement : `oidc_sub` reste `pending:<login>` jusqu'à la
-  // première connexion, et `auth/plugin.ts` adopte alors la ligne par son
-  // `login`. Aucune session ne naît d'ici (invariant 4).
+  // --- users ---------------------------------------------------------------
+  // Pre-registration only: `oidc_sub` stays `pending:<login>` until the first
+  // login, and `auth/plugin.ts` then adopts the row by its `login`. No session
+  // is born from here (invariant 4).
   for (const u of spec.users) {
     const existing = db.select().from(users).where(eq(users.login, u.login)).get();
     if (existing) {
@@ -191,18 +192,18 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
         .run();
     }
     report.users += 1;
-    log(`  utilisateur : ${u.login} (${u.role})`);
+    log(`  user: ${u.login} (${u.role})`);
   }
   const students = spec.users.filter((u) => u.role === "student");
 
-  // --- devoirs -------------------------------------------------------------
+  // --- assignments ---------------------------------------------------------
   const publicOrigin = config.SEB_PUBLIC_ORIGIN || config.PUBLIC_URL;
   for (const a of spec.assignments) {
-    log(`devoir ${a.id} (${a.mode})`);
+    log(`assignment ${a.id} (${a.mode})`);
     const templateDir = join(opts.seedDir, a.template);
     const modelUrl = await pushTemplate(forge, a.modelRepo, templateDir);
     report.repos.push(a.modelRepo);
-    log(`  dépôt modèle : ${a.modelRepo}`);
+    log(`  template repository: ${a.modelRepo}`);
 
     for (const s of students) {
       const full = (a.targetRepo ?? a.targetRepoPattern ?? "").replace(/\{student\}/g, s.login);
@@ -210,20 +211,20 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
       if (a.seedTargetFromTemplate) {
         await pushTemplate(forge, full, templateDir);
       } else {
-        // Invariant 6 : créé, mais **vide**. Le dépôt de transit de l'épreuve
-        // est amorcé depuis le modèle, jamais depuis le dépôt de l'étudiant.
+        // Invariant 6: created, but **empty**. The exam's staging repository is
+        // seeded from the template, never from the student's repository.
         const { owner, name } = splitRepo(full);
         await forge.ensure(owner, name);
       }
       report.repos.push(full);
-      log(`  dépôt cible : ${full}${a.seedTargetFromTemplate ? "" : " (vide)"}`);
+      log(`  target repository: ${full}${a.seedTargetFromTemplate ? "" : " (empty)"}`);
     }
 
     let configKey: string | null = null;
     let sebConfig: AssignmentSebConfig | null = null;
     if (a.mode === "exam") {
       if (a.beks.length === 0) {
-        throw new Error(`devoir ${a.id} en mode examen sans BEK : refus (seb/README.md, décision 3)`);
+        throw new Error(`assignment ${a.id} in exam mode without a BEK: refused (seb/README.md, decision 3)`);
       }
       const previous = db.select().from(assignments).where(eq(assignments.id, a.id)).get();
       const examKeySalt = previous?.sebConfig?.examKeySalt ?? newExamKeySalt();
@@ -236,7 +237,7 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
       configKey = file.configKey;
       sebConfig = { examKeySalt, quitUrl };
       report.configKeys[a.id] = configKey;
-      log(`  Config Key : ${configKey}`);
+      log(`  Config Key: ${configKey}`);
     }
 
     const row = {
@@ -264,6 +265,6 @@ export async function runSeed(opts: SeedOptions): Promise<SeedReport> {
   }
 
   handle?.close();
-  log("graine posée.");
+  log("seed applied.");
   return report;
 }

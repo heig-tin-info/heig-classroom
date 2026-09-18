@@ -450,7 +450,7 @@ const fr: Record<keyof Dict, string> = {
   "email.org.deleted": "Organisation GitHub supprimée",
 };
 
-/** Les deux dictionnaires, exposés pour qu'un test puisse affirmer qu'une clé existe dans les deux. */
+/** Both dictionaries, exported so a test can assert that a key exists in both. */
 export const DICTS: Record<Locale, Record<string, string>> = { en, fr };
 
 export type TFunction = (key: keyof Dict, vars?: Record<string, string | number>) => string;

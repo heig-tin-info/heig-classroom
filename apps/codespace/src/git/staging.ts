@@ -40,13 +40,12 @@ export interface StagingOptions {
   /** Default branch of a fresh repository. */
   defaultBranch?: string;
   /**
-   * Valeur d'en-tête `Authorization` pour le `git fetch` d'amorçage. Le dépôt
-   * d'un étudiant provisionné par classroom est **privé** : sans elle, le
-   * fetch est refusé et l'espace de travail s'ouvre vide (constaté en
-   * production le 2026-09-17). Elle ne passe jamais par argv ni par un fichier
-   * de configuration : `gitAuthEnv` la porte dans l'environnement du
-   * processus, exactement comme le relais. Absente = fetch anonyme, ce qui
-   * suffit pour un dépôt public.
+   * `Authorization` header value for the seeding `git fetch`. A student
+   * repository provisioned by classroom is **private**: without it the fetch
+   * is refused and the workspace opens empty (observed in production on
+   * 2026-09-17). It never goes through argv nor through a configuration file:
+   * `gitAuthEnv` carries it in the process environment, exactly like the
+   * relay. Absent = anonymous fetch, which is enough for a public repository.
    */
   authorization?: string;
 }
@@ -73,7 +72,7 @@ export function stagingPaths(volumesRoot: string, student: string, assignment: s
     ["assignment", assignment],
   ] as const) {
     if (!SAFE_ID.test(value) || value === "." || value === "..") {
-      throw new Error(`identifiant ${label} invalide pour un chemin : ${JSON.stringify(value)}`);
+      throw new Error(`invalid ${label} identifier for a path: ${JSON.stringify(value)}`);
     }
   }
   const dir = join(volumesRoot, student, assignment);
@@ -113,16 +112,16 @@ async function pickHead(gitDir: string, preferred: string): Promise<void> {
  * is not the authority on a policy that can change mid-session.
  */
 export interface StagingResult extends StagingPaths {
-  /** Le dépôt nu n'existait pas avant cet appel. */
+  /** The bare repository did not exist before this call. */
   created: boolean;
-  /** Un `fetch` a été tenté (source non vide) et a réussi. */
+  /** A `fetch` was attempted (non-empty source) and succeeded. */
   fetched: boolean;
   /**
-   * Nombre de références après amorçage. **Zéro est une information, pas une
-   * erreur** : un dépôt d'étudiant fraîchement créé par classroom n'a aucune
-   * branche, et en mode travaux pratiques l'espace de travail s'ouvre alors
-   * légitimement vide. C'est `sessions/manager.ts` qui tranche (voir
-   * `seedStaging`), parce que lui seul connaît le mode du devoir.
+   * Number of refs after seeding. **Zero is information, not an error**: a
+   * student repository freshly created by classroom has no branch at all, and
+   * in lab-work mode the workspace then legitimately opens empty. It is
+   * `sessions/manager.ts` that decides (see `seedStaging`), because it alone
+   * knows the mode of the assignment.
    */
   refs: number;
 }
@@ -153,8 +152,8 @@ export async function ensureStagingRepo(opts: StagingOptions): Promise<StagingRe
     await gitBare(
       paths.gitDir,
       ["fetch", "--prune", "--no-tags", from, ...REFSPECS],
-      // L'autorisation ne touche ni argv (`ps`, `/proc/<pid>/cmdline`) ni le
-      // disque ; `gitRunner.redactSecrets` la retire des messages d'erreur.
+      // The authorization touches neither argv (`ps`, `/proc/<pid>/cmdline`)
+      // nor the disk; `gitRunner.redactSecrets` strips it from error messages.
       opts.authorization ? { env: gitAuthEnv(opts.authorization) } : {},
     );
     fetched = true;
@@ -164,14 +163,14 @@ export async function ensureStagingRepo(opts: StagingOptions): Promise<StagingRe
   return { ...paths, created: !existed, fetched, refs: refs.size };
 }
 
-/** Branche par défaut du dépôt de transit : ce que `HEAD` désigne, ou rien. */
+/** Default branch of the staging repository: what `HEAD` points at, or nothing. */
 export async function stagingHeadBranch(gitDir: string): Promise<string | null> {
   const head = await gitBare(gitDir, ["symbolic-ref", "--quiet", "HEAD"]).catch(() => "");
   const ref = head.trim();
   if (!ref.startsWith("refs/heads/")) return null;
   const branch = ref.slice("refs/heads/".length);
-  // `symbolic-ref` rend une branche même quand elle n'existe pas encore (dépôt
-  // nu tout neuf) ; seule une branche **présente** est utilisable.
+  // `symbolic-ref` yields a branch even when it does not exist yet (brand new
+  // bare repository); only a branch that is **present** is usable.
   const exists = await gitBare(gitDir, ["rev-parse", "--verify", "--quiet", ref]).catch(() => "");
   return exists.trim() === "" ? null : branch;
 }

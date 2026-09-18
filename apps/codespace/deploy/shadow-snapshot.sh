@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# Instantané des dépôts fantômes, en root (analyse.md § 3.3, docs/v1.md
-# D-V1-1). Lancé par codespace-shadow.timer toutes les trois minutes.
+# Shadow repository snapshot, as root (analyse.md § 3.3, docs/v1.md
+# D-V1-1). Run by codespace-shadow.timer every three minutes.
 #
-# Pourquoi root, et pas le portail. Le volume est monté `:U` : Podman en donne
-# la propriété à la plage d'UID que `--userns=auto` a tirée pour le conteneur.
-# Le portail, en uid du service, lit l'arbre grâce à l'umask 022 du conteneur —
-# mais un simple `chmod 600` de l'étudiant lui rend un fichier illisible et
-# l'instantané devient partiel. C'est la limite nommée dans sessions/shadow.ts.
-# En root, la question ne se pose pas : tout est lisible, l'instantané est
-# complet, et le portail perd un privilège au lieu d'en gagner un — c'est la
-# piste préférée de docs/v1.md § D-V1-1, celle-ci.
+# Why root, and not the portal. The volume is mounted `:U`: Podman hands its
+# ownership to the UID range that `--userns=auto` drew for the container.
+# The portal, under the service uid, reads the tree thanks to the container's
+# umask 022 — but a plain `chmod 600` by the student leaves it an unreadable
+# file and the snapshot becomes partial. That is the limit named in
+# sessions/shadow.ts. As root the question does not arise: everything is
+# readable, the snapshot is complete, and the portal loses a privilege instead
+# of gaining one — this one is the preferred track of docs/v1.md § D-V1-1.
 #
-# Ce script fait exactement ce que fait `snapshot()` de sessions/shadow.ts :
+# This script does exactly what `snapshot()` in sessions/shadow.ts does:
 #   git --git-dir=<vol>/shadow.git --work-tree=<vol>/work add -A --ignore-errors
-#   puis commit s'il y a quelque chose d'indexé.
-# Avec les deux mêmes détails qui comptent :
-#   - `info/exclude` porte `.git`, sans quoi `git add -A` enregistrerait le
-#     dépôt de l'étudiant comme lien de sous-module et ne capturerait rien ;
-#   - l'identité de l'auteur est celle du portail, pas celle de l'étudiant.
+#   then commit if anything is staged.
+# With the same two details that matter:
+#   - `info/exclude` holds `.git`, without which `git add -A` would record the
+#     student's repository as a submodule link and capture nothing;
+#   - the author identity is the portal's, not the student's.
 #
-# Le dépôt fantôme reste la propriété de l'utilisateur du service : le portail
-# prend encore l'instantané de fermeture de session, et deux propriétaires
-# différents feraient échouer l'un des deux sur « dubious ownership ».
+# The shadow repository stays owned by the service user: the portal still takes
+# the session-close snapshot, and two different owners would make one of the
+# two fail on "dubious ownership".
 set -uo pipefail
 
 PREFIX="${CODESPACE_PREFIX:-/srv/codespace}"
@@ -33,9 +33,9 @@ export GIT_AUTHOR_NAME=codespace-portal
 export GIT_AUTHOR_EMAIL=portal@codespace.local
 export GIT_COMMITTER_NAME=codespace-portal
 export GIT_COMMITTER_EMAIL=portal@codespace.local
-# HOME neutralisé comme dans git/gitRunner.ts : aucune configuration
-# personnelle ne doit entrer ici. safe.directory : root opère sur des dépôts
-# qui appartiennent à l'utilisateur du service.
+# HOME neutralised as in git/gitRunner.ts: no personal configuration may enter
+# here. safe.directory: root operates on repositories that belong to the
+# service user.
 export HOME=/nonexistent
 GIT=(git -c 'safe.directory=*')
 
@@ -55,15 +55,15 @@ for work in "$VOLUMES"/*/*/work; do
 	printf '.git\n' > "$gitdir/info/exclude"
 	chown -R "$SVC_USER":"$SVC_USER" "$gitdir" 2>/dev/null || true
 
-	# `--ignore-errors` indexe ce qu'il peut puis sort non nul ; en root il n'y
-	# a normalement rien à ignorer, et on le garde comme filet.
+	# `--ignore-errors` stages what it can then exits non-zero; as root there is
+	# normally nothing to ignore, and we keep it as a safety net.
 	"${GIT[@]}" --git-dir="$gitdir" --work-tree="$work" add -A --ignore-errors >/dev/null 2>&1
 
 	staged="$("${GIT[@]}" --git-dir="$gitdir" --work-tree="$work" diff --cached --name-only 2>/dev/null | head -n 1)"
 	if [ -z "$staged" ]; then
 		skipped=$((skipped+1))
 	elif "${GIT[@]}" --git-dir="$gitdir" --work-tree="$work" \
-		commit -q -m "instantané $(date -Is)" >/dev/null 2>&1; then
+		commit -q -m "snapshot $(date -Is)" >/dev/null 2>&1; then
 		committed=$((committed+1))
 	else
 		failed=$((failed+1))
@@ -71,6 +71,6 @@ for work in "$VOLUMES"/*/*/work; do
 	chown -R "$SVC_USER":"$SVC_USER" "$gitdir" 2>/dev/null || true
 done
 
-printf 'dépôts fantômes : %d instantanés, %d inchangés, %d en échec\n' \
+printf 'shadow repositories: %d snapshots, %d unchanged, %d failed\n' \
 	"$committed" "$skipped" "$failed"
 exit 0

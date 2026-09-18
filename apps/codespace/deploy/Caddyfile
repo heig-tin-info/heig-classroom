@@ -1,17 +1,17 @@
-# heig-codespace — frontal TLS. Installé par deploy/bootstrap.sh en
-# /etc/caddy/Caddyfile, @DOMAIN@ remplacé au passage.
+# heig-codespace — TLS frontend. Installed by deploy/bootstrap.sh as
+# /etc/caddy/Caddyfile, with @DOMAIN@ substituted along the way.
 #
-# Le certificat vient de Let's Encrypt, obtenu par Caddy lui-même (HTTP-01 sur
-# le port 80, laissé ouvert par le pare-feu Hetzner).
+# The certificate comes from Let's Encrypt, obtained by Caddy itself (HTTP-01
+# on port 80, left open by the Hetzner firewall).
 #
-# Les mises à niveau websocket passent **nativement** : depuis Caddy 2,
-# `reverse_proxy` relaie `Connection: Upgrade` sans directive particulière.
-# code-server en dépend entièrement (docs/v1.md, TODO(verify) sur le point de
-# terminaison `/?reconnectionToken=…`).
+# Websocket upgrades pass through **natively**: since Caddy 2, `reverse_proxy`
+# relays `Connection: Upgrade` with no special directive. code-server depends
+# on it entirely (docs/v1.md, TODO(verify) on the `/?reconnectionToken=…`
+# endpoint).
 #
-# Le portail écoute sur 127.0.0.1:3100 et rien d'autre : Caddy est le seul
-# chemin depuis l'extérieur. Le canal Git (9418) est lié à 10.77.0.254, côté
-# pont, et n'est pas proxifié — c'est tout le point de l'invariant 1.
+# The portal listens on 127.0.0.1:3100 and nothing else: Caddy is the only
+# path in from the outside. The Git channel (9418) is bound to 10.77.0.254, on
+# the bridge side, and is not proxied — that is the whole point of invariant 1.
 
 @DOMAIN@ {
 	encode gzip
@@ -21,7 +21,7 @@
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		X-Frame-Options "SAMEORIGIN"
-		# Caddy annonce sa présence par défaut ; inutile de la donner.
+		# Caddy advertises itself by default; no reason to hand that out.
 		-Server
 	}
 
@@ -34,8 +34,8 @@
 	}
 
 	reverse_proxy 127.0.0.1:3100 {
-		# code-server envoie des trames longues ; l'onglet ouvert est un
-		# battement (proxy/index.ts). Pas de tampon sur le flux.
+		# code-server sends long frames; the open tab is a heartbeat
+		# (proxy/index.ts). No buffering on the stream.
 		flush_interval -1
 	}
 }

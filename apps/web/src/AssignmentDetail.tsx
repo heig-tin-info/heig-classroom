@@ -664,8 +664,8 @@ function CodespaceBanner({
 /**
  * Intermediate review checkpoints: at each milestone's date the platform
  * fires one `grade-milestone` review per repository; the criteria tagged
- * `milestone: <name>` in criteria.yml are the graded subset (the barème
- * stays out of the platform). Dates show absolute and J±n side by side,
+ * `milestone: <name>` in criteria.yml are the graded subset (the grading
+ * scale stays out of the platform). Dates show absolute and J±n side by side,
  * counted from the deadline.
  */
 function MilestonesSection({
@@ -934,7 +934,7 @@ export function AssignmentDetail({
   // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
   const canAdjust = showGrades && a.frozenAt != null;
 
-  // Grades sheet (nom, prénom, email, note) — final grade rule: @hgc/domain.
+  // Grades sheet (last name, first name, email, grade) -- final grade rule: @hgc/domain.
   const exportGrades = async () => {
     const XLSX = await import("xlsx");
     const rows = students.map((s) => {
@@ -976,7 +976,7 @@ export function AssignmentDetail({
     URL.revokeObjectURL(url);
   };
 
-  // La recherche trie déjà par pertinence.
+  // Search already sorts by relevance.
   const rows = query.trim() !== "" ? shown : sorted;
 
   const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (

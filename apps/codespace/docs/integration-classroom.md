@@ -1,251 +1,259 @@
-# Intégration avec heig-classroom
+# Integration with heig-classroom
 
-Comment classroom (`apps/server`) et le portail (`apps/codespace`) se parlent,
-et comment les faire tourner ensemble sur un poste. Le contrat des messages est
-[`packages/contracts/src/codespace.ts`](../../../packages/contracts/src/codespace.ts) ;
-la signature est celle de
+How classroom (`apps/server`) and the portal (`apps/codespace`) talk to each
+other, and how to run them together on one workstation. The message contract is
+[`packages/contracts/src/codespace.ts`](../../../packages/contracts/src/codespace.ts);
+the signature is the one of
 [`packages/domain/src/hs256.ts`](../../../packages/domain/src/hs256.ts).
 
-Règle d'import du `CLAUDE.md` racine, inchangée : les deux applications
-n'importent que `packages/*`, jamais le code l'une de l'autre. Tout passe par
-HTTP et par des jetons HS256 signés d'un secret partagé.
+Import rule of the root `CLAUDE.md`, unchanged: the two applications import
+only `packages/*`, never each other's code. Everything goes through HTTP and
+through HS256 tokens signed with a shared secret.
 
-## 1. Les trois appels
+## 1. The three calls
 
-```
-classroom                                     portail (apps/codespace)
-─────────                                     ────────────────────────
-enregistrement d'un devoir « en ligne »
-  PUT /api/assignments/<id> ─────────────────► upsert du devoir
-      Authorization: Bearer <jeton de service>  (mode, image, quota, dépôt
-      corps : CodespaceAssignmentSync           modèle, BEK, fenêtre)
+```text
+classroom                                     portal (apps/codespace)
+─────────                                     ───────────────────────
+registration of an "online" assignment
+  PUT /api/assignments/<id> ─────────────────► upsert of the assignment
+      Authorization: Bearer <service token>     (mode, image, quota, template
+      body: CodespaceAssignmentSync             repository, BEK, window)
   ◄──────────────────────────────────────────── 200 { id, configKey, sebLink }
 
-clic Démarrer de l'étudiant (déjà connecté)
-  302 vers /launch?token=<jeton de lancement> ► GET /launch
-      claims : LaunchTokenClaims                 vérifie, consomme le jti,
-                                                 quota, SEB si examen,
-                                                 crée ou reprend la session
-  ◄──────────────────────────────────────────── 303 vers /s/<session>/
+student clicks Start (already logged in)
+  302 to /launch?token=<launch token> ───────► GET /launch
+      claims: LaunchTokenClaims                  verifies, consumes the jti,
+                                                 quota, SEB if exam,
+                                                 creates or resumes the session
+  ◄──────────────────────────────────────────── 303 to /s/<session>/
                                                  + cookie cs_session
 
-tableau de l'enseignant
+teacher dashboard
   GET /api/assignments/<id>/sessions ─────────► CodespaceSessionSummary[]
-      Authorization: Bearer <jeton de service>
+      Authorization: Bearer <service token>
 ```
 
-Trois audiences, jamais interchangeables :
+Three audiences, never interchangeable:
 
-| Jeton | `iss` | `aud` | Durée | Usage unique |
+| Token | `iss` | `aud` | Lifetime | Single use |
 | --- | --- | --- | --- | --- |
-| service (serveur → serveur) | `heig-classroom` | `heig-codespace-api` | courte | non |
-| lancement (l'étudiant le porte) | `heig-classroom` | `heig-codespace` | 5 min | **oui**, par `jti` |
+| service (server → server) | `heig-classroom` | `heig-codespace-api` | short | no |
+| launch (carried by the student) | `heig-classroom` | `heig-codespace` | 5 min | **yes**, by `jti` |
 
-Un jeton de lancement présenté à l'API de service reçoit 401 ; un jeton de
-service présenté à `/launch` reçoit 403. Deux tests l'affirment.
+A launch token presented to the service API gets 401; a service token
+presented to `/launch` gets 403. Two tests assert it.
 
-### L'étudiant ne se connecte pas deux fois
+### The student does not log in twice
 
-C'est le point de toute l'intégration. `/launch` ne demande **pas** de session
-OIDC du portail : le jeton *est* la preuve d'identité, émise par classroom qui
-vient d'authentifier l'étudiant. Le portail inscrit l'utilisateur depuis les
-revendications, ouvre la session et pose lui-même le cookie `cs_session` que le
-proxy exige. La connexion OIDC du portail (invariant 4) reste en place pour
-l'usage autonome et pour le tableau enseignant du portail.
+This is the whole point of the integration. `/launch` does **not** require a
+portal OIDC session: the token *is* the proof of identity, issued by classroom
+which has just authenticated the student. The portal registers the user from
+the claims, opens the session and itself sets the `cs_session` cookie that the
+proxy requires. The portal's OIDC login (invariant 4) stays in place for
+standalone use and for the portal's teacher dashboard.
 
-## 2. Variables des deux côtés
+## 2. Variables on both sides
 
-Le secret est le même des deux côtés, et c'est la seule chose qui doit l'être.
+The secret is the same on both sides, and it is the only thing that has to be.
 
-| Variable | Côté | Valeur de développement |
+| Variable | Side | Development value |
 | --- | --- | --- |
-| `CODESPACE_LAUNCH_SECRET` | les deux | 32 caractères au moins, **identique** |
-| `CLASSROOM_URL` | portail | `http://localhost:3000` |
-| `PUBLIC_URL` | portail | `http://localhost:3100` |
-| `PORT` | portail | `3100` |
-| `CODESPACE_DEFAULT_IMAGE` | portail | `codespace/c-dev:4.137.0` |
-| `SEB_EXTRA_ALLOWED_HOSTS` | portail | `localhost:8080` (le fournisseur d'identité) |
-| l'URL du portail | classroom | `http://localhost:3100` |
+| `CODESPACE_LAUNCH_SECRET` | both | at least 32 characters, **identical** |
+| `CLASSROOM_URL` | portal | `http://localhost:3000` |
+| `PUBLIC_URL` | portal | `http://localhost:3100` |
+| `PORT` | portal | `3100` |
+| `CODESPACE_DEFAULT_IMAGE` | portal | `codespace/c-dev:4.137.0` |
+| `SEB_EXTRA_ALLOWED_HOSTS` | portal | `localhost:8080` (the identity provider) |
+| the portal URL | classroom | `http://localhost:3100` |
 
-**Secret absent** : le greffon n'est pas enregistré, `PUT /api/assignments/*`,
-`GET /api/assignments/*/sessions` et `GET /launch` répondent 404, et le portail
-reste utilisable en autonome (graine YAML, connexion OIDC, bouton Démarrer).
-C'est le mode par défaut d'un déploiement qui n'a pas de classroom en face.
+**Secret absent**: the plugin is not registered, `PUT /api/assignments/*`,
+`GET /api/assignments/*/sessions` and `GET /launch` answer 404, and the portal
+stays usable standalone (YAML seed, OIDC login, Start button). That is the
+default mode of a deployment that has no classroom facing it.
 
-En production, `loadConfig()` refuse un `CODESPACE_LAUNCH_SECRET` contenant
-`change-me`, comme pour les autres secrets.
+In production, `loadConfig()` refuses a `CODESPACE_LAUNCH_SECRET` containing
+`change-me`, as it does for the other secrets.
 
-## 3. Lancer les deux applications en local
+## 3. Running both applications locally
 
 ```bash
-# --- classroom, sur :3000 ---
-docker compose -f docker-compose.dev.yml up -d      # Postgres + Keycloak de classroom
+# --- classroom, on :3000 ---
+docker compose -f docker-compose.dev.yml up -d      # classroom's Postgres + Keycloak
 pnpm --filter @hgc/server dev
 
-# --- portail, sur :3100 ---
-podman compose -f apps/codespace/infra/compose.dev.yml up -d   # Keycloak + Forgejo du portail
-sudo apps/codespace/infra/net/setup.sh                          # réseau codespace + nft
+# --- portal, on :3100 ---
+podman compose -f apps/codespace/infra/compose.dev.yml up -d   # the portal's Forgejo
+sudo apps/codespace/infra/net/setup.sh                          # codespace network + nft
 pnpm --filter @hgc/codespace seed
 pnpm --filter @hgc/codespace dev
 ```
 
-Un seul Keycloak de développement, celui de classroom (`docker-compose.dev.yml`
-à la racine, realm `hgc-dev`). Le portail y a son propre client
-(`codespace-portal`, redirection sur `localhost:3100`) pour son usage autonome ;
-côté portail, seul Forgejo est à démarrer :
+A single development Keycloak, classroom's (`docker-compose.dev.yml` at the
+root, realm `hgc-dev`). The portal has its own client there
+(`codespace-portal`, redirect on `localhost:3100`) for its standalone use; on
+the portal side, only Forgejo has to be started:
 
 ```bash
-podman compose -f apps/codespace/infra/compose.dev.yml up -d   # Forgejo seulement
+podman compose -f apps/codespace/infra/compose.dev.yml up -d   # Forgejo only
 ```
 
-En production, aucun Keycloak : les deux applications parlent à Switch edu-ID.
+In production, no Keycloak: both applications talk to Switch edu-ID.
 
-Vérifier la chaîne complète sans navigateur :
+Checking the whole chain without a browser:
 
 ```bash
-cd apps/codespace && ./scripts/e2e.sh     # étape 9 : « lancement depuis classroom »
+cd apps/codespace && ./scripts/e2e.sh     # step 9: "launch from classroom"
 ```
 
-L'étape 9 fabrique elle-même ses deux jetons avec `signHs256` et le secret du
-`.env`, pousse un devoir, appelle `/launch`, vérifie que l'éditeur s'ouvre, que
-le push est relayé vers le dépôt **du jeton**, que le rejeu du jeton est refusé
-et que le quota de l'enseignant s'oppose à un second étudiant.
+Step 9 builds its two tokens itself with `signHs256` and the secret of the
+`.env`, pushes an assignment, calls `/launch`, checks that the editor opens,
+that the push is relayed to the repository **of the token**, that replaying the
+token is refused and that the teacher's quota stands in the way of a second
+student.
 
-## 4. Ce que le portail fait du devoir reçu
+## 4. What the portal does with the assignment it receives
 
-| Contrat | Portail |
+| Contract | Portal |
 | --- | --- |
 | `mode: "online"` | `assignments.mode = "lab"` |
 | `mode: "online_seb"` | `assignments.mode = "exam"` |
 | `image: null` | `CODESPACE_DEFAULT_IMAGE` |
-| `sourceRepo` | `assignments.sourceRepo`, et `templateRepo` = son URL de clonage |
+| `sourceRepo` | `assignments.sourceRepo`, and `templateRepo` = its clone URL |
 | `teacher`, `quota` | `teacherId`, `teacherEmail`, `maxActiveSessions` |
 | `startAt`, `deadlineAt` | `opensAt`, `closesAt` |
-| `browserExamKeys` | `assignments.beks` (une liste, cf. analyse.md § 4.4) |
+| `browserExamKeys` | `assignments.beks` (a list, cf. analyse.md § 4.4) |
 
-Le **dépôt cible n'est plus un attribut du devoir**. Il arrive par le jeton de
-lancement, étudiant par étudiant, et vit dans `sessions.targetRepo` : c'est la
-cible du relais et, en mode travaux pratiques, la source du miroir du dépôt de
-transit. Les colonnes `targetRepo` / `targetRepoPattern` du devoir restent pour
-la graine YAML autonome, où le portail n'a personne pour les lui donner.
+The **target repository is no longer an attribute of the assignment**. It
+arrives through the launch token, student by student, and lives in
+`sessions.targetRepo`: it is the target of the relay and, in lab mode, the
+source of the mirror of the staging repository. The `targetRepo` /
+`targetRepoPattern` columns of the assignment remain for the standalone YAML
+seed, where the portal has nobody to give them to it.
 
-Le `PUT` est idempotent : rejoué à l'identique il rend exactement la même
-réponse. En particulier le **sel du Browser Exam Key n'est jamais régénéré** —
-le changer invaliderait la Config Key des `.seb` déjà distribués.
+The `PUT` is idempotent: replayed identically, it returns exactly the same
+answer. In particular the **Browser Exam Key salt is never regenerated** —
+changing it would invalidate the Config Key of the `.seb` files already
+distributed.
 
-## 5. Mode examen : qui authentifie, qui vérifie
+## 5. Exam mode: who authenticates, who verifies
 
-La `startURL` inscrite dans le `.seb` est celle de **classroom** :
+The `startURL` written into the `.seb` file is **classroom's**:
 
-```
+```text
 ${CLASSROOM_URL}/app/codespace/start/<assignmentId>
 ```
 
-SEB démarre donc sur classroom, qui authentifie l'étudiant (il a déjà sa
-session, ou il se connecte), puis redirige vers `/launch?token=…` du portail.
-Le filtre d'URL de SEB doit par conséquent laisser passer **trois** familles
-d'hôtes :
+SEB therefore starts on classroom, which authenticates the student (they
+already have their session, or they log in), then redirects to the portal's
+`/launch?token=…`. SEB's URL filter must consequently let **three** families of
+hosts through:
 
-1. celui de la `startURL` — classroom ; `buildSebConfig` l'ajoute seul ;
-2. celui du portail — sans quoi l'éditeur ne se charge pas ;
-3. ceux de `SEB_EXTRA_ALLOWED_HOSTS` — le fournisseur d'identité, sans quoi la
-   page de connexion est bloquée (docs/pistes.md, « Correction au cadrage
-   relevée par le test SEB »).
+1. the one of the `startURL` — classroom; `buildSebConfig` adds that one by
+   itself;
+2. the portal's — without which the editor does not load;
+3. those of `SEB_EXTRA_ALLOWED_HOSTS` — the identity provider, without which
+   the login page is blocked (docs/pistes.md, "Correction to the framing
+   document raised by the SEB test").
 
-**Invariant 5, précisé.** La vérification SEB — les deux en-têtes, la Config
-Key, les BEK — se fait sur `GET /launch`, une fois, parce que c'est là que SEB
-arrive par une navigation de premier niveau. Le proxy `/s/<session>/*` ne lit
-toujours aucun en-tête SEB : il ne connaît que le cookie `exam_session`, que
-`/launch` pose après la vérification, lié à l'adresse du client. La route
-`/exam/<id>/start` du portail autonome garde exactement le même rôle pour un
-devoir venu de la graine YAML.
+**Invariant 5, made precise.** The SEB verification — the two headers, the
+Config Key, the BEKs — happens on `GET /launch`, once, because that is where
+SEB arrives through a top-level navigation. The `/s/<session>/*` proxy still
+reads no SEB header at all: it only knows the `exam_session` cookie, which
+`/launch` sets after the verification, bound to the client address. The
+`/exam/<id>/start` route of the standalone portal keeps exactly the same role
+for an assignment coming from the YAML seed.
 
-Le fichier `.seb` lui-même reste servi par le portail
-(`GET /exam/<id>.seb`) ; `sebLink` de la réponse du `PUT` est le lien
-`seb://` que l'enseignant distribue.
+The `.seb` file itself is still served by the portal
+(`GET /exam/<id>.seb`); `sebLink` in the `PUT` response is the `seb://` link
+that the teacher distributes.
 
-## 6. Quota par enseignant
+## 6. Quota per teacher
 
-`quota.maxActiveSessions` est un plafond **par enseignant, tous devoirs
-confondus** (docs/pistes.md : « la fonctionnalité est activée par
-l'administrateur, enseignant par enseignant, avec un quota de sessions actives
-par enseignant »). Le comptage :
+`quota.maxActiveSessions` is a ceiling **per teacher, across all assignments**
+(docs/pistes.md: "the feature is enabled by the administrator, teacher by
+teacher, with a quota of active sessions per teacher").
+The counting:
 
-- `sessions.teacherId` est recopié du devoir à la création de la session —
-  recopié et non joint, pour que le compte tienne en une requête et qu'un
-  devoir réaffecté ne déplace pas les sessions déjà ouvertes ;
-- sont comptées les sessions dans un état **vivant** (`starting`, `running`,
-  `stopped`) : `stopped` en fait partie parce que le volume et l'identifiant
-  survivent et qu'un rechargement y revient ;
-- **la reprise ne consomme pas de quota.** Si l'étudiant a déjà une session
-  vivante sur ce devoir, le plafond n'est pas consulté : il ne va pas ouvrir un
-  conteneur de plus (analyse.md D5).
+- `sessions.teacherId` is copied from the assignment when the session is
+  created — copied and not joined, so that the count holds in a single query
+  and so that a reassigned assignment does not move the sessions already open;
+- the sessions counted are those in a **live** state (`starting`, `running`,
+  `stopped`): `stopped` is part of it because the volume and the identifier
+  survive and a reload comes back to it;
+- **resuming does not consume quota.** If the student already has a live
+  session on that assignment, the ceiling is not consulted: it is not going to
+  open one more container (analyse.md D5).
 
-Un dépassement rend une page 429 « quota atteint, réessayez plus tard », et une
-ligne de journal qui porte l'enseignant, le compte courant et le plafond.
+Going over returns a 429 page « quota atteint, réessayez plus tard » (the page
+text is end-user UI), and a log line carrying the teacher, the current count
+and the ceiling.
 
-## 7. Identités : deux chemins, deux lignes
+## 7. Identities: two paths, two rows
 
-`users.login` est l'identifiant institutionnel, et c'est lui qui nomme le
-répertoire de volume (`<VOLUMES_ROOT>/<login>/<devoir>/`), d'où la contrainte
-`SAFE_ID` de `git/staging.ts`.
+`users.login` is the institutional identifier, and it is the one that names the
+volume directory (`<VOLUMES_ROOT>/<login>/<assignment>/`), hence the `SAFE_ID`
+constraint of `git/staging.ts`.
 
-| Origine | `users.oidcSub` | `users.login` | `role` |
+| Origin | `users.oidcSub` | `users.login` | `role` |
 | --- | --- | --- | --- |
-| connexion OIDC du portail | `sub` du jeton d'identité Keycloak | `preferred_username` | recalculé depuis le realm |
-| jeton de lancement classroom | `classroom:<sub du jeton>` | `<sub du jeton>` | `student`, jamais modifié |
+| portal OIDC login | `sub` of the Keycloak identity token | `preferred_username` | recomputed from the realm |
+| classroom launch token | `classroom:<sub of the token>` | `<sub of the token>` | `student`, never modified |
 
-Le préfixe `classroom:` est là pour que les deux espaces de noms de sujets ne
-puissent pas se croiser. Conséquence assumée : **un même humain arrivant par
-les deux chemins est deux lignes**, donc deux arborescences de volumes, tant
-que le sujet de classroom ne vaut pas son `preferred_username`. C'est le prix
-de ne pas rapprocher deux comptes par leur adresse de courriel, ce qui serait
-une reprise de compte déguisée.
+The `classroom:` prefix is there so that the two subject namespaces cannot
+cross. Accepted consequence: **the same human arriving by both paths is two
+rows**, hence two volume trees, as long as classroom's subject is not equal to
+their `preferred_username`. That is the price of not reconciling two accounts
+by their e-mail address, which would be account takeover in disguise.
 
-Un jeton de lancement ne peut pas attribuer le rôle enseignant : `role` n'est
-écrit que par la connexion OIDC (docs/v1.md § D-V1-3). Le tableau
-`/teacher/sessions` du portail reste donc derrière le realm ; le tableau de
-l'enseignant *dans classroom* passe par `GET /api/assignments/<id>/sessions`,
-authentifié par le jeton de service. Son champ `userId` porte l'identifiant de
-classroom quand le compte vient de là, pour que l'appelant le rapproche de ses
-propres utilisateurs.
+A launch token cannot grant the teacher role: `role` is written only by the
+OIDC login (docs/v1.md § D-V1-3). The portal's `/teacher/sessions` dashboard
+therefore stays behind the realm; the teacher's dashboard *inside classroom*
+goes through `GET /api/assignments/<id>/sessions`, authenticated by the service
+token. Its `userId` field carries classroom's identifier when the account comes
+from there, so that the caller can match it with its own users.
 
-## 8. Usage unique du jeton de lancement
+## 8. Single use of the launch token
 
-Le `jti` est consommé par un `INSERT` dans `launch_tokens_used` : la clé
-primaire *est* la garantie, et non une lecture suivie d'une écriture — deux
-requêtes simultanées portant le même jeton ne peuvent pas passer toutes les
-deux. La consommation a lieu **avant** toute autre vérification, juste après la
-signature : un jeton refusé pour une autre raison (devoir inconnu, quota,
-SEB) est donc brûlé, et l'étudiant recommence par le bouton Démarrer de
-classroom, qui en émet un neuf. C'est le comportement voulu — un lien de
-lancement n'est pas une page à recharger.
+The `jti` is consumed by an `INSERT` into `launch_tokens_used`: the primary key
+*is* the guarantee, not a read followed by a write — two simultaneous requests
+carrying the same token cannot both pass. The consumption happens **before**
+any other check, right after the signature: a token refused for any other
+reason (unknown assignment, quota, SEB) is therefore burnt, and the student
+starts again from classroom's Start button, which issues a fresh one. That is
+the intended behaviour — a launch link is not a page to reload.
 
-Les lignes expirées sont purgées à chaque passage : au-delà de `exp`,
-`verifyHs256` refuse déjà le jeton et la ligne n'empêche plus rien.
+Expired rows are purged on every pass: beyond `exp`, `verifyHs256` already
+refuses the token and the row prevents nothing any more.
 
-Rien de ce qui est journalisé ne porte le jeton, sa signature ni un Browser
-Exam Key. Le `jti` seul est écrit : il n'est pas un secret et il relie les
-journaux des deux applications.
+Nothing that is logged carries the token, its signature or a Browser Exam Key.
+The `jti` alone is written: it is not a secret and it links the logs of the two
+applications.
 
 ## 9. `TODO(verify)`
 
-- **SEB, redirection inter-hôtes.** La `startURL` est sur classroom et SEB
-  atteint `/launch` du portail après une redirection vers un autre hôte. Que
-  SEB ajoute bien ses deux en-têtes à *cette* requête, et qu'il les hache sur
-  l'URL du portail avec sa chaîne de requête, n'a été observé sur aucun binaire
-  SEB — le mode `simulated` ne le prouve pas. À confronter lors de la preuve B
-  ([preuve-b-manuelle.md](preuve-b-manuelle.md)). Repli s'il fallait : la
-  `startURL` revient sur le portail et c'est classroom qui pose le jeton par un
-  formulaire.
+- **SEB, cross-host redirect.** The `startURL` is on classroom and SEB reaches
+  the portal's `/launch` after a redirect to another host. That SEB does add
+  its two headers to *that* request, and that it hashes them over the portal's
+  URL with its query string, has not been observed on any SEB binary — the
+  `simulated` mode does not prove it. To be confronted during proof B
+  ([preuve-b-manuelle.md](preuve-b-manuelle.md)). Fallback if needed: the
+  `startURL` comes back to the portal and it is classroom that posts the token
+  through a form.
 
-## 10. Ce qui reste à faire
+## 10. What remains to be done
 
-- La route `/app/codespace/start/<id>` de classroom (celle que la `startURL`
-  du `.seb` désigne) est écrite du côté de classroom ; le portail ne fait que
-  la nommer.
-- `GET /api/assignments/<id>/sessions` ne sait pas encore dire qu'une requête
-  d'examen est venue d'une autre adresse (alerte d'analyse.md D5, § 6.8 de
-  docs/v1.md) : le refus est en place et journalisé, le résumé ne le porte pas.
-- Le relais vers GitHub passe par `createGithubForge`, toujours pas éprouvé
-  contre la vraie App (`TODO(verify)` de `git/forge.ts`).
+- The `/app/codespace/start/<id>` route of classroom (the one the `startURL` of
+  the `.seb` file designates) is written on classroom's side; the portal only
+  names it.
+- `GET /api/assignments/<id>/sessions` does not yet know how to say that an
+  exam request came from a different address (alert of analyse.md D5, § 6.8 of
+  docs/v1.md): the refusal is in place and logged, the summary does not carry
+  it.
+- The relay to GitHub goes through `createGithubForge`, and it **has** been
+  exercised against the real GitHub App: on 2026-09-17, on the production VM, a
+  `git push` from the container reached `staging.git` and the `PushEvent` went
+  `relayed` in 2.2 s onto a private repository (deploy.md § 5, "Measured on the
+  VM on 2026-09-17"). What remains is operational, not code: the App is not
+  installed on the `heig-tin-info` organisation, so the smoke assignment's
+  `PushEvent` stays `pending` there.

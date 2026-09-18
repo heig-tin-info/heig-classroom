@@ -1,11 +1,11 @@
 /**
- * Les pages du portail, en HTML servi par Fastify. Pas de framework front en
- * v0 (analyse.md D8) : le parcours étudiant tient en un bouton et le tableau
- * enseignant en un `<table>`.
+ * The portal pages, as HTML served by Fastify. No front-end framework in v0
+ * (analyse.md D8): the student journey fits in one button and the teacher
+ * dashboard in a `<table>`.
  *
- * La page de refus « session hors SEB » n'est pas ici : elle est fournie par
- * `seb/routes.ts` (`outsideSebPage`), pour que le message ne varie pas selon
- * la route qui refuse.
+ * The "session outside SEB" refusal page is not here: it is provided by
+ * `seb/routes.ts` (`outsideSebPage`), so that the message does not vary with
+ * the route that refuses.
  */
 import type { AssignmentRow, SessionRow } from "../db/schema.js";
 import type { TeacherSessionRow } from "../sessions/store.js";
@@ -71,7 +71,7 @@ export interface HomeAssignment {
   session: SessionRow | null;
 }
 
-/** `/` : les devoirs ouverts, avec leur bouton Démarrer. */
+/** `/`: the open assignments, with their Start button. */
 export function homePage(user: HomeUser, items: HomeAssignment[]): string {
   const nav =
     (user.role === "teacher" ? `<a href="/teacher/sessions">Sessions</a> · ` : "") +
@@ -84,8 +84,8 @@ export function homePage(user: HomeUser, items: HomeAssignment[]): string {
             const open = session
               ? `<a href="/s/${escapeHtml(session.id)}/">Rejoindre la session en cours</a>`
               : "";
-            // Un devoir en mode examen ne se démarre pas d'ici : il se démarre
-            // depuis Safe Exam Browser, par le lien `sebs://` (invariant 5).
+            // An exam-mode assignment does not start from here: it starts from
+            // Safe Exam Browser, through the `sebs://` link (invariant 5).
             const action =
               assignment.mode === "exam"
                 ? `<p class="muted">Épreuve : à ouvrir depuis Safe Exam Browser.
@@ -104,7 +104,7 @@ export function homePage(user: HomeUser, items: HomeAssignment[]): string {
   return layout("Environnements de développement", nav, cards);
 }
 
-/** `/teacher/sessions` : le tableau de surveillance. */
+/** `/teacher/sessions`: the monitoring dashboard. */
 export function teacherSessionsPage(rows: TeacherSessionRow[], now: Date = new Date()): string {
   const body =
     rows.length === 0
@@ -138,18 +138,17 @@ ${rows
   );
 }
 
-/** Page d'erreur générique du portail, en français et sans détail technique. */
+/** Generic portal error page, in French and without technical detail. */
 export function errorPage(title: string, detail: string): string {
   return layout(title, `<a href="/">Retour</a>`, `<p>${escapeHtml(detail)}</p>`);
 }
 
 /**
- * Refus de démarrage parce que le dépôt de l'étudiant n'a pas pu être
- * récupéré. La page existe parce que le contraire — ouvrir l'éditeur sur un
- * répertoire vide — s'est produit en production le 2026-09-17 : rien ne
- * signalait que le dépôt manquait, et l'étudiant a travaillé à côté de son
- * rendu. La cause est courte et sans jargon de git ; le détail complet est
- * dans le journal du portail, pas ici.
+ * Start refusal because the student's repository could not be fetched. The page
+ * exists because the opposite — opening the editor on an empty directory —
+ * happened in production on 2026-09-17: nothing signalled that the repository
+ * was missing, and the student worked beside their submission. The cause is
+ * short and free of git jargon; the full detail is in the portal log, not here.
  */
 export function workspaceErrorPage(cause: string): string {
   return errorPage(

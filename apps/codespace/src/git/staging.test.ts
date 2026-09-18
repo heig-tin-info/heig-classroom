@@ -18,14 +18,14 @@ afterAll(async () => {
 });
 
 describe("stagingPaths", () => {
-  it("place staging.git à côté de work/, sous <étudiant>/<devoir>", () => {
+  it("puts staging.git next to work/, under <student>/<assignment>", () => {
     const p = stagingPaths("/srv/codespace/volumes", "e1234567", "tp-pointeurs");
     expect(p.dir).toBe("/srv/codespace/volumes/e1234567/tp-pointeurs");
     expect(p.gitDir).toBe("/srv/codespace/volumes/e1234567/tp-pointeurs/staging.git");
     expect(p.workDir).toBe("/srv/codespace/volumes/e1234567/tp-pointeurs/work");
   });
 
-  it("refuse un identifiant qui sortirait de VOLUMES_ROOT", () => {
+  it("refuses an identifier that would escape VOLUMES_ROOT", () => {
     expect(() => stagingPaths("/srv", "..", "a")).toThrow();
     expect(() => stagingPaths("/srv", "a/../..", "b")).toThrow();
     expect(() => stagingPaths("/srv", "e1", "/etc/passwd")).toThrow();
@@ -33,12 +33,12 @@ describe("stagingPaths", () => {
 });
 
 describe("ensureStagingRepo", () => {
-  it("mode TP : miroir du dépôt de l'étudiant, upload-pack autorisé", async () => {
+  it("lab mode: mirror of the student's repository, upload-pack allowed", async () => {
     const base = await root();
     const src = await makeSourceRepo({
       dir: join(base, "src"),
       files: { "main.c": "int main(void){return 0;}\n" },
-      message: "travail déjà poussé depuis la maison",
+      message: "work already pushed from home",
     });
     const staging = await ensureStagingRepo({
       volumesRoot: join(base, "volumes"),
@@ -58,17 +58,17 @@ describe("ensureStagingRepo", () => {
     );
   });
 
-  it("mode examen : amorcé depuis le modèle, jamais depuis le dépôt de l'étudiant", async () => {
+  it("exam mode: seeded from the template, never from the student's repository", async () => {
     const base = await root();
     const template = await makeSourceRepo({
-      dir: join(base, "modele"),
-      files: { "enonce.md": "# Épreuve\n", "squelette.c": "int main(void){}\n" },
-      message: "énoncé de l'enseignant",
+      dir: join(base, "template"),
+      files: { "statement.md": "# Exam\n", "skeleton.c": "int main(void){}\n" },
+      message: "teacher's statement",
     });
     const student = await makeSourceRepo({
-      dir: join(base, "etudiant"),
-      files: { "antiseche.txt": "solutions préparées à la maison\n" },
-      message: "préparation interdite",
+      dir: join(base, "student"),
+      files: { "cheatsheet.txt": "solutions prepared at home\n" },
+      message: "forbidden preparation",
     });
 
     const staging = await ensureStagingRepo({
@@ -83,14 +83,14 @@ describe("ensureStagingRepo", () => {
     // Invariant 6: nothing the student prepared at home is reachable here.
     expect([...refs.values()]).not.toContain(student.sha);
     const tree = await gitBare(staging.gitDir, ["ls-tree", "--name-only", "-r", "HEAD"]);
-    expect(tree.split("\n").filter(Boolean).sort()).toEqual(["enonce.md", "squelette.c"]);
+    expect(tree.split("\n").filter(Boolean).sort()).toEqual(["skeleton.c", "statement.md"]);
   });
 
-  it("propage un correctif d'énoncé poussé sur le modèle pendant l'épreuve", async () => {
+  it("propagates a statement fix pushed to the template during the exam", async () => {
     const base = await root();
     const template = await makeSourceRepo({
-      dir: join(base, "modele"),
-      files: { "enonce.md": "# Épreuve\n" },
+      dir: join(base, "template"),
+      files: { "statement.md": "# Exam\n" },
     });
     const opts = {
       volumesRoot: join(base, "volumes"),
@@ -103,7 +103,7 @@ describe("ensureStagingRepo", () => {
     // The teacher fixes a typo in the statement, mid-exam.
     const clone = join(base, "clone");
     await git(["clone", template.gitDir, clone], { env: FIXTURE_ENV });
-    await git(["-C", clone, "commit", "--allow-empty", "-m", "correctif d'énoncé"], {
+    await git(["-C", clone, "commit", "--allow-empty", "-m", "statement fix"], {
       env: FIXTURE_ENV,
     });
     await git(["-C", clone, "push", "origin", "HEAD:main"], { env: FIXTURE_ENV });
@@ -114,7 +114,7 @@ describe("ensureStagingRepo", () => {
     expect((await refSnapshot(staging.gitDir)).get("refs/heads/main")).toBe(fixed);
   });
 
-  it("mode vide : dépôt nu prêt à recevoir, sans aucune ref", async () => {
+  it("empty mode: bare repository ready to receive, with no ref at all", async () => {
     const base = await root();
     const staging = await ensureStagingRepo({
       volumesRoot: join(base, "volumes"),
@@ -126,54 +126,54 @@ describe("ensureStagingRepo", () => {
     expect((await gitBare(staging.gitDir, ["config", "http.receivepack"])).trim()).toBe("true");
   });
 
-  it("rend le nombre de références, et zéro n'est pas une erreur", async () => {
+  it("returns the number of refs, and zero is not an error", async () => {
     const base = await root();
-    const vide = await ensureStagingRepo({
+    const empty = await ensureStagingRepo({
       volumesRoot: join(base, "volumes"),
       student: "e1234567",
       assignment: "libre",
       source: { mode: "empty" },
     });
-    expect(vide).toMatchObject({ refs: 0, fetched: false, created: true });
-    expect(await stagingHeadBranch(vide.gitDir)).toBeNull();
+    expect(empty).toMatchObject({ refs: 0, fetched: false, created: true });
+    expect(await stagingHeadBranch(empty.gitDir)).toBeNull();
 
     const src = await makeSourceRepo({
       dir: join(base, "src"),
       branch: "master",
       files: { "a.c": "int main(void){}\n" },
     });
-    const plein = await ensureStagingRepo({
+    const seeded = await ensureStagingRepo({
       volumesRoot: join(base, "volumes"),
       student: "e1234567",
       assignment: "tp",
       source: { mode: "lab", mirrorFrom: src.gitDir },
     });
-    expect(plein).toMatchObject({ refs: 1, fetched: true });
-    // `master` aussi bien que `main` : c'est la branche du dépôt de
-    // l'étudiant qui décide, pas une convention du portail.
-    expect(await stagingHeadBranch(plein.gitDir)).toBe("master");
+    expect(seeded).toMatchObject({ refs: 1, fetched: true });
+    // `master` just as well as `main`: the branch of the student's repository
+    // decides, not a convention of the portal.
+    expect(await stagingHeadBranch(seeded.gitDir)).toBe("master");
   });
 
-  it("un dépôt source injoignable lève : plus de repli silencieux sur un dépôt vide", async () => {
+  it("an unreachable source repository throws: no more silent fallback to an empty repository", async () => {
     const base = await root();
     await expect(
       ensureStagingRepo({
         volumesRoot: join(base, "volumes"),
         student: "e1234567",
         assignment: "tp",
-        source: { mode: "lab", mirrorFrom: join(base, "jamais-cree.git") },
+        source: { mode: "lab", mirrorFrom: join(base, "never-created.git") },
       }),
     ).rejects.toThrow();
   });
 
   /**
-   * Le point du correctif du 2026-09-17 : le dépôt d'un étudiant provisionné
-   * par classroom est **privé**, et le `fetch` d'amorçage doit porter
-   * l'autorisation de la forge — dans l'environnement, jamais dans argv ni sur
-   * disque. Un vrai serveur privé serait un test d'intégration ; ici un `git`
-   * postiche intercepte le `fetch` et écrit ce qu'il a reçu.
+   * The point of the 2026-09-17 fix: a student repository provisioned by
+   * classroom is **private**, and the seeding `fetch` has to carry the forge
+   * authorization — in the environment, never in argv nor on disk. A real
+   * private server would be an integration test; here a fake `git` intercepts
+   * the `fetch` and writes down what it received.
    */
-  it("passe l'autorisation par l'environnement, jamais par argv", async () => {
+  it("passes the authorization through the environment, never through argv", async () => {
     const base = await root();
     const bin = join(base, "bin");
     const trace = join(base, "trace.txt");
@@ -189,8 +189,8 @@ describe("ensureStagingRepo", () => {
         "    exit 0",
         "  fi",
         "done",
-        // Tout le reste (`init`, `config`, `for-each-ref`…) va au vrai git,
-        // retrouvé par le PATH d'origine.
+        // Everything else (`init`, `config`, `for-each-ref`, …) goes to the
+        // real git, found through the original PATH.
         `exec env PATH=${JSON.stringify(realPath)} git "$@"`,
       ].join("\n"),
       "utf8",
@@ -204,8 +204,8 @@ describe("ensureStagingRepo", () => {
         volumesRoot: join(base, "volumes"),
         student: "e1234567",
         assignment: "tp",
-        source: { mode: "lab", mirrorFrom: "https://github.com/org/prive.git" },
-        authorization: "Bearer ghs_jetondinstallation",
+        source: { mode: "lab", mirrorFrom: "https://github.com/org/private.git" },
+        authorization: "Bearer ghs_installationtoken",
       });
     } finally {
       process.env["PATH"] = previous;
@@ -214,14 +214,14 @@ describe("ensureStagingRepo", () => {
     const seen = await readFile(trace, "utf8");
     expect(seen).toContain("COUNT=1");
     expect(seen).toContain("KEY0=http.extraHeader");
-    expect(seen).toContain("VALUE0=Authorization: Bearer ghs_jetondinstallation");
+    expect(seen).toContain("VALUE0=Authorization: Bearer ghs_installationtoken");
     const argv = /^ARGV=(.*)$/m.exec(seen)?.[1] ?? "";
-    expect(argv).toContain("https://github.com/org/prive.git");
+    expect(argv).toContain("https://github.com/org/private.git");
     expect(argv).not.toContain("ghs_");
     expect(argv).not.toContain("Authorization");
   });
 
-  it("uploadPack: false se traduit par http.uploadpack=false dans le dépôt", async () => {
+  it("uploadPack: false becomes http.uploadpack=false in the repository", async () => {
     const base = await root();
     const staging = await ensureStagingRepo({
       volumesRoot: join(base, "volumes"),

@@ -1,14 +1,14 @@
 /**
- * Cycle de vie d'une session : création ou reprise, battement, ramasse-miettes,
- * réconciliation avec Podman, instantanés du dépôt fantôme.
+ * Life cycle of a session: creation or resumption, heartbeat, garbage
+ * collection, reconciliation with Podman, shadow repository snapshots.
  *
- * Invariants tenus ici :
- *  - une seule session vivante par couple (étudiant, devoir) — analyse.md D5 ;
- *  - le dépôt de transit d'un devoir en mode examen est amorcé depuis le
- *    modèle de l'enseignant, jamais depuis le dépôt de l'étudiant —
- *    invariant 6, appliqué en choisissant la `StagingSource` ;
- *  - le conteneur d'ancrage n'est jamais vu : le moteur ne rend que les
- *    conteneurs portant le label de session.
+ * Invariants held here:
+ *  - a single live session per (student, assignment) pair — analyse.md D5;
+ *  - the staging repository of an assignment in exam mode is seeded from the
+ *    teacher's template, never from the student's repository —
+ *    invariant 6, applied by choosing the `StagingSource`;
+ *  - the anchor container is never seen: the engine only returns the
+ *    containers carrying the session label.
  */
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
@@ -53,20 +53,20 @@ export interface ManagerOptions {
   db: Db;
   engine: Engine;
   volumesRoot: string;
-  /** Grâce après le dernier battement avant destruction du conteneur. */
+  /** Grace period after the last heartbeat before the container is destroyed. */
   graceMs: number;
   gcIntervalMs: number;
   shadowIntervalMs: number;
   healthTimeoutMs: number;
-  /** Hôte du remote `origin` écrit dans l'espace de travail : `portal.internal`. */
+  /** Host of the `origin` remote written into the workspace: `portal.internal`. */
   gitRemoteHost: string;
   gitRemotePort: number;
   /**
-   * Origine publique de classroom (`CLASSROOM_URL`) et du portail
-   * (`PUBLIC_URL`). Elles ne servent qu'à une chose : l'URL de retour passée
-   * au conteneur pour le bouton « Fermer » de l'extension de barre d'état
-   * (`images/c-dev/extension`). Vides, aucune URL n'est transmise et le bouton
-   * n'apparaît pas.
+   * Public origin of classroom (`CLASSROOM_URL`) and of the portal
+   * (`PUBLIC_URL`). They serve exactly one purpose: the return URL passed to
+   * the container for the status-bar extension's "Close" button
+   * (`images/c-dev/extension`). Empty, no URL is passed on and the button does
+   * not appear.
    */
   classroomUrl?: string;
   publicUrl?: string;
@@ -79,60 +79,60 @@ export interface ManagerOptions {
 
 export interface StartResult {
   session: SessionRow;
-  /** Vrai si un conteneur a été lancé (session neuve ou reprise). */
+  /** True if a container was launched (new or resumed session). */
   launched: boolean;
-  /** Millisecondes entre le `podman run` et le `/healthz` du conteneur. */
+  /** Milliseconds between the `podman run` and the container's `/healthz`. */
   healthyInMs: number | null;
-  /** Le jeton du cookie, rendu une fois : il n'a pas à ressortir ensuite. */
+  /** The cookie token, returned once: it has no reason to come out again. */
   cookieToken: string;
 }
 
 /**
- * Ce que l'appelant apporte en plus du couple (étudiant, devoir). Tout est
- * facultatif : le bouton Démarrer du portail autonome n'en pose aucun, le
- * jeton de lancement de classroom les pose tous.
+ * What the caller brings in addition to the (student, assignment) pair.
+ * Everything is optional: the standalone portal's Start button sets none of
+ * them, classroom's launch token sets them all.
  */
 export interface StartOptions {
-  /** La session est née d'une vérification SEB (invariant 5). */
+  /** The session was born from an SEB verification (invariant 5). */
   sebVerified?: boolean;
-  /** Enseignant porteur du quota, recopié du devoir. */
+  /** Teacher who carries the quota, copied from the assignment. */
   teacherId?: string | null;
-  /** `jti` du jeton de lancement, pour la trace. */
+  /** `jti` of the launch token, for the audit trail. */
   launchJti?: string | null;
-  /** Dépôt de l'étudiant apporté par le jeton ; remplace la convention du devoir. */
+  /** Student repository brought by the token; replaces the assignment's convention. */
   targetRepo?: AssignmentRepoRef | null;
 }
 
 export interface SessionManager {
   start(user: UserRow, assignment: AssignmentRow, opts?: StartOptions): Promise<StartResult>;
-  /** Relance le conteneur s'il a disparu ; sinon ne fait rien. */
+  /** Restarts the container if it has vanished; otherwise does nothing. */
   ensureRunning(sessionId: string): Promise<SessionRow>;
   close(sessionId: string, reason: string): Promise<void>;
   touch(sessionId: string, at?: Date): void;
-  /** Vérifie le jeton de cookie d'une session, en temps constant. */
+  /** Checks a session's cookie token, in constant time. */
   checkCookie(session: SessionRow, token: string | undefined): boolean;
   reconcile(): Promise<{ resumed: number; stopped: number; orphans: number }>;
   collect(now?: Date): Promise<{ closed: number }>;
   snapshotAll(): Promise<{ committed: number; skipped: number }>;
   startTimers(): void;
   stopTimers(): Promise<void>;
-  /** Pour `git/httpBackend.ts` : l'adresse du conteneur authentifie la session. */
+  /** For `git/httpBackend.ts`: the container's address authenticates the session. */
   readonly lookup: SessionLookup;
   /**
-   * Pour `git/relay.ts` : où relayer les pushes d'un événement. La session
-   * décide (elle porte le dépôt du jeton) ; le devoir n'est qu'un repli.
+   * For `git/relay.ts`: where to relay an event's pushes. The session decides
+   * (it carries the token's repository); the assignment is only a fallback.
    */
   repoOfEvent(row: { sessionId?: string; student: string; assignment: string }): RepoRef | undefined;
 }
 
-/** Nom de conteneur déterministe : la réconciliation le retrouve seule. */
+/** Deterministic container name: reconciliation finds it on its own. */
 export function containerNameFor(sessionId: string): string {
   return `cs-${sessionId}`;
 }
 
 /**
- * Invariant 6. Le mode du devoir décide seul de la source, et le mode examen
- * n'a qu'une branche possible.
+ * Invariant 6. The assignment's mode alone decides the source, and exam mode
+ * has only one possible branch.
  */
 export function stagingSourceFor(
   assignment: AssignmentRow,
@@ -141,7 +141,7 @@ export function stagingSourceFor(
   if (assignment.mode === "exam") {
     if (!assignment.templateRepo) {
       throw new Error(
-        `devoir ${assignment.id} en mode examen sans dépôt modèle : refus d'amorcer autrement`,
+        `assignment ${assignment.id} in exam mode without a template repository: refusing to seed otherwise`,
       );
     }
     return { mode: "exam", templateFrom: assignment.templateRepo };
@@ -151,18 +151,18 @@ export function stagingSourceFor(
 }
 
 /**
- * **Les seules** variables d'environnement que le portail pose sur un
- * conteneur étudiant, en plus de celles de l'image. Invariant 1 : aucun secret
- * ne sort du portail, et cette liste est ce qu'un test affirme.
+ * **The only** environment variables the portal sets on a student container,
+ * in addition to those of the image. Invariant 1: no secret leaves the portal,
+ * and this list is what a test asserts.
  *
- * Les trois `CODESPACE_` sont lues par `heig.codespace-statusbar`, l'extension
- * de barre d'état cuite dans l'image (`images/c-dev/extension`).
+ * The three `CODESPACE_` ones are read by `heig.codespace-statusbar`, the
+ * status-bar extension baked into the image (`images/c-dev/extension`).
  *
- * Les quatre `GIT_` sont l'identité de l'étudiant (`users.display_name`,
- * `users.email`). Git les honore **sans aucun fichier de configuration**, donc
- * un `git commit` depuis le terminal comme depuis l'extension git de VS Code
- * porte le nom et l'adresse académique de l'étudiant. Ce ne sont pas des
- * secrets : l'étudiant lit déjà les deux dans classroom.
+ * The four `GIT_` ones are the student's identity (`users.display_name`,
+ * `users.email`). Git honours them **without any configuration file at all**,
+ * so a `git commit` from the terminal as well as from VS Code's git extension
+ * carries the student's name and academic address. They are not secrets: the
+ * student already reads both of them in classroom.
  */
 export const CONTAINER_ENV_KEYS = [
   "CODESPACE_DEADLINE",
@@ -174,7 +174,7 @@ export const CONTAINER_ENV_KEYS = [
   "GIT_COMMITTER_EMAIL",
 ] as const;
 
-/** Base d'URL rendue absolue, ou `undefined` si elle n'est pas exploitable. */
+/** Base URL made absolute, or `undefined` if it cannot be used. */
 function rootUrl(base: string | undefined): string | undefined {
   if (!base || base.trim() === "") return undefined;
   try {
@@ -185,17 +185,17 @@ function rootUrl(base: string | undefined): string | undefined {
 }
 
 /**
- * Ce que le conteneur apprend de sa session, et rien de plus.
+ * What the container learns about its session, and nothing more.
  *
- *  - `CODESPACE_DEADLINE` : l'échéance du devoir (`deadlineAt` de classroom,
- *    stockée dans `assignments.closesAt`). Absente quand le devoir n'en a
- *    pas : l'extension n'affiche alors aucun compte à rebours ;
- *  - `CODESPACE_RETURN_URL` : classroom pour une session née d'un jeton de
- *    lancement (`launchJti`), le portail sinon. C'est là que ramène le bouton
- *    « Fermer » ;
- *  - `CODESPACE_ASSIGNMENT_NAME` : le titre du devoir, montré dans l'infobulle.
+ *  - `CODESPACE_DEADLINE`: the assignment's deadline (classroom's `deadlineAt`,
+ *    stored in `assignments.closesAt`). Absent when the assignment has none:
+ *    the extension then shows no countdown;
+ *  - `CODESPACE_RETURN_URL`: classroom for a session born from a launch token
+ *    (`launchJti`), the portal otherwise. That is where the "Close" button
+ *    takes you back;
+ *  - `CODESPACE_ASSIGNMENT_NAME`: the assignment title, shown in the tooltip.
  *
- * Aucune de ces valeurs n'est un secret, et il n'en existe pas de quatrième.
+ * None of these values is a secret, and there is no fourth one.
  */
 export function containerEnvFor(
   session: Pick<SessionRow, "launchJti">,
@@ -205,8 +205,8 @@ export function containerEnvFor(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   if (assignment.closesAt) env.CODESPACE_DEADLINE = assignment.closesAt.toISOString();
-  // La session vient de classroom si et seulement si un jeton de lancement
-  // l'a ouverte ou reprise : c'est `launchJti` qui le dit, pas le devoir.
+  // The session comes from classroom if and only if a launch token opened or
+  // resumed it: `launchJti` is what says so, not the assignment.
   const back = rootUrl(session.launchJti ? urls.classroomUrl : urls.publicUrl);
   if (back) env.CODESPACE_RETURN_URL = back;
   if (assignment.title.trim() !== "") env.CODESPACE_ASSIGNMENT_NAME = assignment.title;
@@ -221,13 +221,13 @@ export function containerEnvFor(
 }
 
 /**
- * Identité git d'un étudiant, ou `null` s'il n'en a pas d'exploitable.
+ * A student's git identity, or `null` if they have none that can be used.
  *
- * **Tout ou rien** : une adresse sans nom, ou l'inverse, ferait tomber git sur
- * sa détection automatique (`student@<nom du conteneur>`) pour la moitié
- * manquante, ce qui est pire qu'une absence franche. `display_name` est ce que
- * le jeton de lancement de classroom apporte ; le login institutionnel prend
- * le relais quand il est vide.
+ * **All or nothing**: an address without a name, or the other way round, would
+ * make git fall back to its automatic detection (`student@<container name>`)
+ * for the missing half, which is worse than a plain absence. `display_name` is
+ * what classroom's launch token brings; the institutional login takes over
+ * when it is empty.
  */
 export function gitIdentityOf(
   user: Pick<UserRow, "displayName" | "email" | "login">,
@@ -239,28 +239,29 @@ export function gitIdentityOf(
 }
 
 export interface ManagerDeps extends ManagerOptions {
-  /** URL de clonage du dépôt cible d'un étudiant, pour le miroir en mode TP. */
+  /** Clone URL of a student's target repository, for the mirror in lab mode. */
   forgeUrlOf?: (repo: RepoRef) => string;
   /**
-   * En-tête `Authorization` de la forge pour le dépôt donné. Un dépôt
-   * d'étudiant provisionné par classroom est **privé** : sans elle, le `git
-   * fetch` d'amorçage est refusé et l'espace de travail s'ouvre vide. Lève
-   * `ForgeUnconfiguredError` quand la forge n'a pas d'identifiants : on tente
-   * alors le fetch en anonyme, ce qui suffit pour un dépôt public, et la cause
-   * est conservée pour la page d'erreur si le fetch échoue.
+   * The forge's `Authorization` header for the given repository. A student
+   * repository provisioned by classroom is **private**: without it, the seeding
+   * `git fetch` is refused and the workspace opens empty. Throws
+   * `ForgeUnconfiguredError` when the forge has no credentials: the fetch is
+   * then attempted anonymously, which is enough for a public repository, and
+   * the cause is kept for the error page should the fetch fail.
    */
   forgeAuthorization?: (repo: RepoRef) => Promise<string>;
 }
 
 /**
- * L'espace de travail de la session n'a pas pu être préparé. **La session ne
- * démarre pas** : aucun conteneur n'est lancé et l'étudiant reçoit une page
- * qui nomme la cause. Ouvrir un éditeur sur un répertoire vide, comme le
- * portail le faisait jusqu'au 2026-09-17, est le pire des comportements — rien
- * ne signale que le dépôt manque et l'étudiant travaille à côté de son rendu.
+ * The session's workspace could not be prepared. **The session does not
+ * start**: no container is launched and the student gets a page that names the
+ * cause. Opening an editor on an empty directory, as the portal did up to
+ * 2026-09-17, is the worst possible behaviour — nothing signals that the
+ * repository is missing and the student works beside their submission.
  *
- * `shortCause` est la phrase montrée à l'étudiant ; `message` porte le détail
- * (déjà expurgé de tout jeton) pour le journal `warn`.
+ * `shortCause` is the sentence shown to the student (kept in French, it is
+ * rendered into the student page); `message` carries the detail (already
+ * stripped of any token) for the `warn` log.
  */
 export class WorkspaceBootstrapError extends Error {
   constructor(
@@ -273,24 +274,24 @@ export class WorkspaceBootstrapError extends Error {
 }
 
 /**
- * Branche par défaut du dépôt de l'étudiant, telle que classroom l'annonce
- * dans le jeton de lancement. Elle décide de deux choses : le `HEAD` du dépôt
- * de transit, donc ce que `git clone` sortirait, et la branche locale de
- * `work/` avec son suivi.
+ * Default branch of the student's repository, as classroom announces it in the
+ * launch token. It decides two things: the `HEAD` of the staging repository,
+ * hence what `git clone` would check out, and the local branch of `work/` with
+ * its tracking.
  *
- * Ce n'est **pas** `main` par convention. Mesuré en production : le dépôt
- * `heig-test-classroom2/labo-02-quadratic-yves-chevallier` est sur `master`,
- * et il porte aussi une branche `grading` écrite par la CI de classroom.
- * Sans cette valeur, `pickHead` ne trouvait pas `main` et retombait sur la
- * première branche venue — `grading`, c'est-à-dire le rapport de correction
- * plutôt que le travail.
+ * It is **not** `main` by convention. Measured in production: the repository
+ * `heig-test-classroom2/labo-02-quadratic-yves-chevallier` is on `master`,
+ * and it also carries a `grading` branch written by classroom's CI.
+ * Without this value, `pickHead` did not find `main` and fell back on the
+ * first branch that came — `grading`, that is to say the grading report rather
+ * than the work.
  */
 export function defaultBranchOf(
   session: Pick<SessionRow, "targetRepo">,
   assignment: Pick<AssignmentRow, "mode" | "sourceRepo">,
 ): string {
-  // Invariant 6 : en mode examen la source est le modèle de l'enseignant, donc
-  // sa branche à lui, pas celle du dépôt de l'étudiant.
+  // Invariant 6: in exam mode the source is the teacher's template, hence
+  // their own branch, not that of the student's repository.
   if (assignment.mode === "exam") return assignment.sourceRepo?.defaultBranch ?? "main";
   return session.targetRepo?.defaultBranch ?? assignment.sourceRepo?.defaultBranch ?? "main";
 }
@@ -303,7 +304,7 @@ export function repoRefFromUrl(url: string): RepoRef | undefined {
   return owner && name ? { owner, name } : undefined;
 }
 
-/** Ce que l'étudiant lit sur la page de refus. Court, et sans jargon de git. */
+/** What the student reads on the refusal page. Short, and free of git jargon. Kept in French: this text is rendered into the student page. */
 export function shortCauseOf(err: unknown, repo: RepoRef | undefined): string {
   const where = repo ? `${repo.owner}/${repo.name}` : "le dépôt source";
   if (err instanceof ForgeUnconfiguredError) {
@@ -323,33 +324,33 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
   const { db, engine, log } = opts;
   let gcTimer: NodeJS.Timeout | null = null;
   let shadowTimer: NodeJS.Timeout | null = null;
-  /** Une session à la fois : deux `start` concurrents ne lancent qu'un conteneur. */
+  /** One session at a time: two concurrent `start` calls launch only one container. */
   const inFlight = new Map<string, Promise<SessionRow>>();
 
   function assignmentOf(session: SessionRow): AssignmentRow {
     const row = findAssignment(db, session.assignmentId);
-    if (!row) throw new Error(`devoir ${session.assignmentId} introuvable`);
+    if (!row) throw new Error(`assignment ${session.assignmentId} not found`);
     return row;
   }
 
   /**
-   * Amorce le dépôt de transit. **Échec bruyant** : plus de repli silencieux
-   * sur un dépôt vide. Un miroir injoignable, un dépôt inexistant ou une forge
-   * sans identifiants font refuser la session, avec une cause nommée.
+   * Seeds the staging repository. **Loud failure**: no more silent fallback on
+   * an empty repository. An unreachable mirror, a repository that does not
+   * exist or a forge without credentials all cause the session to be refused,
+   * with a named cause.
    *
-   * Deux nuances, toutes deux documentées dans `docs/deploy.md` § 5 :
+   * Two subtleties, both documented in `docs/deploy.md` § 5:
    *
-   *  - un **dépôt cible sans aucune branche** en mode travaux pratiques est
-   *    légitime (classroom vient de le créer) : le `fetch` réussit, rapporte
-   *    zéro référence, l'espace de travail s'ouvre vide et le journal le dit en
-   *    `info`. En mode examen c'est au contraire une erreur : l'étudiant
-   *    n'aurait pas l'énoncé ;
-   *  - le miroir du mode travaux pratiques n'est récupéré **qu'au premier
-   *    amorçage**, tant que le dépôt de transit n'a aucune référence. Le
-   *    reprendre à chaque ouverture ramènerait les références de la forge par
-   *    dessus celles que l'étudiant a poussées mais que le relais n'a pas
-   *    encore transmises. En mode examen il l'est toujours : c'est ainsi qu'un
-   *    correctif d'énoncé se propage (invariant 6).
+   *  - a **target repository with no branch at all** in lab mode is legitimate
+   *    (classroom has just created it): the `fetch` succeeds, reports zero
+   *    refs, the workspace opens empty and the log says so at `info` level. In
+   *    exam mode it is on the contrary an error: the student would not have the
+   *    assignment statement;
+   *  - the lab-mode mirror is fetched **only at the first seeding**, as long as
+   *    the staging repository has no ref. Redoing it at every opening would
+   *    bring the forge's refs back on top of those the student has pushed but
+   *    that the relay has not yet passed on. In exam mode it always is: that is
+   *    how a fix to the statement propagates (invariant 6).
    */
   async function seedStaging(
     session: SessionRow,
@@ -367,8 +368,8 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       source.mode === "lab" ? source.mirrorFrom : source.mode === "exam" ? source.templateFrom : null;
     const sourceRepo = from ? repoRefFromUrl(from) : undefined;
 
-    // La forge peut n'avoir aucun identifiant : on tente alors le fetch en
-    // anonyme (un dépôt public marche), et on garde la cause sous le coude.
+    // The forge may have no credentials at all: the fetch is then attempted
+    // anonymously (a public repository works), and the cause is kept at hand.
     let authorization: string | undefined;
     let authError: unknown;
     if (sourceRepo && opts.forgeAuthorization) {
@@ -392,19 +393,19 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       if (result.refs === 0 && wanted.mode === "exam") {
         throw new WorkspaceBootstrapError(
           "le modèle de l'enseignant ne contient aucune branche",
-          `modèle ${from ?? "?"} sans référence : l'épreuve n'a pas d'énoncé à distribuer`,
+          `template ${from ?? "?"} without a ref: the exam has no statement to hand out`,
         );
       }
       if (result.refs === 0 && wanted.mode === "lab") {
         log.info(
           { sessionId: session.id, repo: sourceRepo ?? null },
-          "dépôt cible sans aucune branche : espace de travail vide, c'est normal en travaux pratiques",
+          "target repository with no branch at all: empty workspace, which is normal in lab mode",
         );
       }
       return result;
     } catch (err) {
       if (err instanceof WorkspaceBootstrapError) {
-        log.warn({ sessionId: session.id, err: err.message }, "amorçage du dépôt de transit refusé");
+        log.warn({ sessionId: session.id, err: err.message }, "staging repository seeding refused");
         throw err;
       }
       const detail = redactSecrets(String((err as Error).message ?? err));
@@ -419,24 +420,24 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
           forge: authError ? redactSecrets(String((authError as Error).message ?? authError)) : null,
           err: detail,
         },
-        "amorçage du dépôt de transit impossible : la session ne démarre pas",
+        "staging repository seeding impossible: the session does not start",
       );
       throw new WorkspaceBootstrapError(cause, detail);
     }
   }
 
   /**
-   * Achève l'espace de travail **depuis le conteneur**, quand `:U` en a donné
-   * la propriété à la plage d'UID de celui-ci et que le portail n'y écrit plus
-   * (reprise d'une session dont le premier amorçage avait échoué).
+   * Completes the workspace **from inside the container**, when `:U` has given
+   * ownership of it to the container's UID range and the portal can no longer
+   * write there (resumption of a session whose first seeding had failed).
    *
-   * Aucun secret n'y entre : le `fetch` va sur `portal.internal:9418`, que
-   * l'adresse IP source authentifie (invariant 1).
+   * No secret gets in: the `fetch` goes to `portal.internal:9418`, which the
+   * source IP address authenticates (invariant 1).
    *
-   * Un échec est journalisé en `warn` mais **ne ferme pas la session** : si
-   * l'étudiant a déjà écrit un fichier que le dépôt apporte, `checkout` refuse
-   * — mieux vaut un espace de travail incomplet qu'un étudiant privé de ce
-   * qu'il a écrit.
+   * A failure is logged at `warn` level but **does not close the session**: if
+   * the student has already written a file that the repository brings,
+   * `checkout` refuses — an incomplete workspace is better than a student
+   * deprived of what they wrote.
    */
   async function finishWorkspace(
     session: SessionRow,
@@ -448,7 +449,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       const out = await engine.exec(name, ["sh", "-lc", completionScript(workspace.branch)]);
       log.info(
         { sessionId: session.id, branch: workspace.branch, head: out.trim().split("\n").pop() },
-        "espace de travail complété dans le conteneur (reprise)",
+        "workspace completed inside the container (resumption)",
       );
     } catch (err) {
       log.warn(
@@ -457,19 +458,19 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
           branch: workspace.branch,
           err: redactSecrets(String((err as Error).message ?? err)),
         },
-        "achèvement de l'espace de travail dans le conteneur impossible",
+        "completing the workspace inside the container impossible",
       );
     }
   }
 
   /**
-   * Pose l'identité git **dans le conteneur** quand l'hôte ne peut plus écrire
-   * dans `work/.git/config` (même contrainte que `finishWorkspace`).
+   * Sets the git identity **inside the container** when the host can no longer
+   * write to `work/.git/config` (same constraint as `finishWorkspace`).
    *
-   * Aucun secret n'y entre : un nom d'étudiant et une adresse académique. Un
-   * échec est journalisé et ne ferme rien — les variables `GIT_*` posées au
-   * `podman run` suffisent déjà à `git commit`, ceci n'est que la version
-   * lisible par `git config user.name`.
+   * No secret gets in: a student's name and an academic address. A failure is
+   * logged and closes nothing — the `GIT_*` variables set at `podman run` are
+   * already enough for `git commit`, this is only the version readable through
+   * `git config user.name`.
    */
   async function ensureIdentityInContainer(
     session: SessionRow,
@@ -482,12 +483,12 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     } catch (err) {
       log.warn(
         { sessionId: session.id, err: redactSecrets(String((err as Error).message ?? err)) },
-        "identité git non posée dans work/.git/config",
+        "git identity not set in work/.git/config",
       );
     }
   }
 
-  /** Lance le conteneur et attend son `/healthz`. */
+  /** Launches the container and waits for its `/healthz`. */
   async function launch(
     session: SessionRow,
     assignment: AssignmentRow,
@@ -495,8 +496,9 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     const paths = stagingPaths(opts.volumesRoot, session.student, assignment.id);
     const user = findUser(db, session.userId);
     const identity = user ? gitIdentityOf(user) : null;
-    // **Avant** le `podman run` : après lui, `:U` a donné `work/` à la plage
-    // d'UID du conteneur et le portail n'y écrit plus (voir workspace.ts).
+    // **Before** the `podman run`: after it, `:U` has given `work/` to the
+    // container's UID range and the portal no longer writes there (see
+    // workspace.ts).
     const workspace = await ensureWorkspace({
       paths,
       sessionId: session.id,
@@ -524,7 +526,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     if (!info.ip) {
       await engine.rm(name);
       updateSession(db, session.id, { state: "failed" });
-      throw new Error(`conteneur ${name} sans adresse sur le réseau codespace`);
+      throw new Error(`container ${name} without an address on the codespace network`);
     }
     const healthyInMs = await engine.waitHealthy(info.ip, opts.healthTimeoutMs);
     const updated = updateSession(db, session.id, {
@@ -534,15 +536,15 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       state: "running",
       lastSeen: new Date(),
     });
-    // Reprise d'un volume dont `work/` appartient déjà au conteneur : c'est le
-    // seul moment où l'achèvement est possible, le conteneur venant de naître.
-    // L'identité d'abord : elle conditionne tout commit à venir.
+    // Resumption of a volume whose `work/` already belongs to the container:
+    // this is the only moment when completion is possible, the container having
+    // just been born. Identity first: it conditions every commit to come.
     if (workspace.needsIdentity) await ensureIdentityInContainer(updated, identity);
     await finishWorkspace(updated, workspace);
     return { session: updated, healthyInMs };
   }
 
-  /** Champs que le jeton de lancement apporte, posés à la création comme à la reprise. */
+  /** Fields the launch token brings, set both at creation and at resumption. */
   function launchPatch(startOpts: StartOptions): Partial<SessionRow> {
     const patch: Partial<SessionRow> = {};
     if (startOpts.teacherId !== undefined) patch.teacherId = startOpts.teacherId;
@@ -558,27 +560,27 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
   ): Promise<StartResult> {
     const sebVerified = startOpts.sebVerified ?? false;
     const patch = launchPatch(startOpts);
-    // Une ligne par couple (étudiant, devoir), quel que soit son état : c'est
-    // ce qui rend l'identifiant de session **stable pour la vie du volume**,
-    // donc le remote `origin` écrit dans `work/` valable après une fermeture
-    // et une réouverture. Le portail ne pourrait pas le réécrire : après le
-    // premier `:U`, `work/.git/config` ne lui appartient plus.
+    // One row per (student, assignment) pair, whatever its state: this is what
+    // makes the session id **stable for the lifetime of the volume**, hence the
+    // `origin` remote written into `work/` still valid after a close and a
+    // reopen. The portal could not rewrite it: after the first `:U`,
+    // `work/.git/config` no longer belongs to it.
     const existing = findAnySession(db, user.login, assignment.id);
     const paths = stagingPaths(opts.volumesRoot, user.login, assignment.id);
 
     if (existing) {
-      // D5 : toute nouvelle ouverture revient sur la session vivante.
+      // D5: every new opening comes back to the live session.
       const alive =
         existing.state === "running" &&
         existing.containerName !== null &&
         (await engine.inspect(existing.containerName))?.state === "running";
       if (alive) {
-        // Le conteneur tourne déjà : on ne le relance pas (invariant 10). Mais
-        // un dépôt de transit **sans aucune référence** est le symptôme d'un
-        // amorçage manqué, et c'est exactement l'état laissé par le premier
-        // essai réel du 2026-09-17. On le refait, et on complète l'espace de
-        // travail dans le conteneur vivant. Rien ne peut être écrasé : par
-        // construction, il n'y avait rien.
+        // The container is already running: it is not restarted (invariant
+        // 10). But a staging repository **with no ref at all** is the symptom of
+        // a missed seeding, and that is exactly the state left by the first real
+        // trial of 2026-09-17. It is redone, and the workspace is completed
+        // inside the live container. Nothing can be overwritten: by
+        // construction, there was nothing.
         const identity = gitIdentityOf(user);
         const refs = await refSnapshot(paths.gitDir).catch(() => new Map<string, string>());
         if (refs.size === 0) {
@@ -593,9 +595,9 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
           });
           await finishWorkspace(existing, workspace);
         }
-        // Le conteneur vivant ne recevra pas de nouvelles variables `GIT_*` —
-        // elles sont posées au `podman run` —, mais `work/.git/config` peut
-        // encore être réparé, et c'est ce que lit `git config user.name`.
+        // The live container will not receive new `GIT_*` variables — they are
+        // set at `podman run` — but `work/.git/config` can still be repaired,
+        // and that is what `git config user.name` reads.
         await ensureIdentityInContainer(existing, identity);
         const touched = updateSession(db, existing.id, { ...patch, lastSeen: new Date() });
         return {
@@ -614,12 +616,12 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       try {
         await seedStaging(revived, assignment);
         const { session, healthyInMs } = await launch(revived, assignment);
-        log.info({ sessionId: session.id, student: user.login }, "session reprise sur son volume");
+        log.info({ sessionId: session.id, student: user.login }, "session resumed on its volume");
         return { session, launched: true, healthyInMs, cookieToken: revived.cookieToken };
       } catch (err) {
-        // La session reste reprenable : son volume est intact et rien n'a été
-        // lancé. `stopped` la garde vivante au sens de D5, contrairement à
-        // `failed` qui la sortirait du couple (étudiant, devoir).
+        // The session stays resumable: its volume is intact and nothing was
+        // launched. `stopped` keeps it live in the sense of D5, unlike `failed`
+        // which would take it out of the (student, assignment) pair.
         updateSession(db, existing.id, { state: "stopped", containerIp: null, containerId: null });
         throw err;
       }
@@ -647,11 +649,11 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       })
       .returning()
       .all();
-    if (!created) throw new Error("création de session sans ligne");
+    if (!created) throw new Error("session creation returned no row");
     try {
       await seedStaging(created, assignment);
       const { session, healthyInMs } = await launch(created, assignment);
-      log.info({ sessionId: session.id, student: user.login }, "session créée");
+      log.info({ sessionId: session.id, student: user.login }, "session created");
       return { session, launched: true, healthyInMs, cookieToken };
     } catch (err) {
       updateSession(db, id, { state: "failed" });
@@ -678,8 +680,8 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         resolve = res;
         reject = rej;
       });
-      // Sans ce `catch`, un échec de démarrage sans second appelant devient
-      // un rejet non traité et tue le processus.
+      // Without this `catch`, a start failure with no second caller becomes an
+      // unhandled rejection and kills the process.
       shared.catch(() => undefined);
       inFlight.set(key, shared);
       try {
@@ -696,9 +698,9 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
 
     async ensureRunning(sessionId) {
       const session = findSession(db, sessionId);
-      if (!session) throw new Error(`session ${sessionId} inconnue`);
+      if (!session) throw new Error(`session ${sessionId} unknown`);
       if (session.state === "closed" || session.state === "failed") {
-        throw new Error(`session ${sessionId} fermée`);
+        throw new Error(`session ${sessionId} closed`);
       }
       const name = session.containerName ?? containerNameFor(session.id);
       const info = await engine.inspect(name);
@@ -713,8 +715,8 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         }
         return session;
       }
-      // Conteneur mort, session vivante : on relance sur le même volume.
-      log.warn({ sessionId }, "conteneur absent pour une session vivante, relance");
+      // Dead container, live session: relaunch on the same volume.
+      log.warn({ sessionId }, "container missing for a live session, relaunching");
       const assignment = assignmentOf(session);
       await seedStaging(session, assignment);
       const { session: relaunched } = await launch(session, assignment);
@@ -724,12 +726,12 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     async close(sessionId, reason) {
       const session = findSession(db, sessionId);
       if (!session) return;
-      // Dernier instantané avant de perdre le conteneur : sans lui, une
-      // session fermée juste après une frappe n'aurait rien dans shadow.git.
+      // Last snapshot before losing the container: without it, a session closed
+      // right after a keystroke would have nothing in shadow.git.
       await snapshot(session.volumeDir).catch((err: unknown) => {
         log.warn(
           { sessionId, err: String((err as Error).message ?? err) },
-          "instantané de fermeture impossible",
+          "closing snapshot impossible",
         );
         return null;
       });
@@ -741,7 +743,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         containerIp: null,
         containerId: null,
       });
-      log.info({ sessionId, reason }, "session fermée, volume conservé");
+      log.info({ sessionId, reason }, "session closed, volume kept");
     },
 
     touch(sessionId, at = new Date()) {
@@ -777,7 +779,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
           continue;
         }
         if (container) await engine.rm(container.name || container.id);
-        // Volume conservé : la session est reprise au prochain accès.
+        // Volume kept: the session is resumed at the next access.
         updateSession(db, session.id, { state: "stopped", containerIp: null, containerId: null });
         stopped += 1;
       }
@@ -788,7 +790,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         await engine.rm(container.name || container.id);
         orphans += 1;
       }
-      log.info({ resumed, stopped, orphans }, "réconciliation Podman ↔ base");
+      log.info({ resumed, stopped, orphans }, "Podman ↔ database reconciliation");
       return { resumed, stopped, orphans };
     },
 
@@ -797,7 +799,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       let closed = 0;
       for (const session of listLiveSessions(db)) {
         if (session.lastSeen.getTime() > deadline) continue;
-        await manager.close(session.id, "grâce écoulée");
+        await manager.close(session.id, "grace period elapsed");
         closed += 1;
       }
       return { closed };
@@ -814,14 +816,14 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
           if (result.unreadable.length > 0) {
             log.warn(
               { sessionId: session.id, unreadable: result.unreadable },
-              "instantané partiel : chemins illisibles par le portail (voir sessions/shadow.ts)",
+              "partial snapshot: paths unreadable by the portal (see sessions/shadow.ts)",
             );
           }
         } catch (err) {
           skipped += 1;
           log.warn(
             { sessionId: session.id, err: String((err as Error).message ?? err) },
-            "instantané impossible",
+            "snapshot impossible",
           );
         }
       }
@@ -833,7 +835,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         gcTimer = setInterval(() => {
           void manager
             .collect()
-            .catch((err: unknown) => log.error({ err }, "ramasse-miettes en échec"));
+            .catch((err: unknown) => log.error({ err }, "garbage collection failed"));
         }, opts.gcIntervalMs);
         gcTimer.unref();
       }
@@ -841,7 +843,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         shadowTimer = setInterval(() => {
           void manager
             .snapshotAll()
-            .catch((err: unknown) => log.error({ err }, "instantanés en échec"));
+            .catch((err: unknown) => log.error({ err }, "snapshots failed"));
         }, opts.shadowIntervalMs);
         shadowTimer.unref();
       }
@@ -875,10 +877,10 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
 
     repoOfEvent(row) {
       const assignment = findAssignment(db, row.assignment);
-      // Le dépôt du jeton de lancement, quand la session en porte un ; la
-      // convention du devoir sinon. La session est consultée par son
-      // identifiant, pas par le couple, parce qu'elle survit à sa fermeture :
-      // le relais doit rester juste après la destruction du conteneur.
+      // The launch token's repository, when the session carries one; the
+      // assignment's convention otherwise. The session is looked up by its id,
+      // not by the pair, because it survives its own closing: the relay must
+      // stay correct right after the container has been destroyed.
       const session = row.sessionId ? findSession(db, row.sessionId) : undefined;
       if (session) return targetRepoOfSession(session, assignment);
       if (!assignment) return undefined;

@@ -1,13 +1,14 @@
-# Graine de développement du portail (jalon-0 § V1).
+# Development seed of the portal (jalon-0 § V1).
 #
-# « Un devoir est un fichier YAML jusqu'au pilote » (analyse.md § 5) :
-# l'interface enseignant de création est hors périmètre de v0.
+# "An assignment is a YAML file until the pilot" (analyse.md § 5):
+# the teacher-side creation interface is out of scope for v0.
 #
-# Les comptes doivent exister dans le realm Keycloak
-# `infra/keycloak/codespace-dev-realm.json` : c'est lui qui authentifie, la
-# graine ne fait que préinscrire les lignes (invariant 4 — aucune autre source
-# d'identité). Le rôle d'un compte est recalculé à chaque connexion depuis les
-# rôles de realm ; celui écrit ici ne sert qu'avant la première connexion.
+# The accounts must exist in the Keycloak realm
+# `infra/keycloak/hgc-dev-realm.json` at the repository root (realm `hgc-dev`,
+# shared with classroom, see OIDC_ISSUER in .env.example): the realm is what
+# authenticates, the seed only pre-registers the rows (invariant 4 — no other
+# identity source). A role is recomputed at every sign-in from the realm roles;
+# the one written here only serves before the first sign-in.
 
 users:
   - login: teacher
@@ -29,13 +30,13 @@ assignments:
     mode: lab
     image: codespace/c-dev:4.137.0
     uploadPack: true
-    # Répertoire local, relatif à seed/ : contenu poussé dans le dépôt modèle
-    # puis dans le dépôt cible de chaque étudiant.
+    # Local directory, relative to seed/: contents pushed into the model
+    # repository and then into each student's target repository.
     template: templates/tp-pointeurs
-    # Dépôt modèle de l'enseignant sur la forge.
+    # The teacher's model repository on the forge.
     modelRepo: codespace/tp-pointeurs-modele
-    # Dépôt cible par étudiant : c'est aussi le miroir dont le dépôt de transit
-    # est amorcé en mode travaux pratiques (analyse.md § 3.2).
+    # Target repository per student: it is also the mirror the staging
+    # repository is bootstrapped from in lab mode (analyse.md § 3.2).
     targetRepoPattern: codespace/tp-pointeurs-{student}
     seedTargetFromTemplate: true
 
@@ -47,11 +48,11 @@ assignments:
     template: templates/exam-c
     modelRepo: codespace/exam-c-modele
     targetRepoPattern: codespace/exam-c-{student}
-    # Invariant 6 : en mode examen le dépôt cible est créé **vide**, et le
-    # dépôt de transit est amorcé depuis le modèle. Jamais l'inverse.
+    # Invariant 6: in exam mode the target repository is created **empty**, and
+    # the staging repository is bootstrapped from the model. Never the reverse.
     seedTargetFromTemplate: false
-    # Un BEK par couple (plateforme, version) du parc (analyse.md § 4.4). Ceux
-    # d'une vraie salle se lisent dans l'outil de configuration SEB ; celui-ci
-    # est un vecteur de développement, inutilisable ailleurs.
+    # One BEK per (platform, version) pair of the fleet (analyse.md § 4.4). The
+    # ones of a real exam room are read from the SEB configuration tool; this
+    # one is a development vector, unusable anywhere else.
     beks:
       - "0000000000000000000000000000000000000000000000000000000000000000"

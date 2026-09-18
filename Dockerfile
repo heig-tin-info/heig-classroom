@@ -10,7 +10,7 @@ COPY packages/domain/package.json packages/domain/
 COPY packages/contracts/package.json packages/contracts/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/
-# apps/codespace est un autre déploiement (VM moteur) : présent pour le lockfile, jamais construit ici
+# apps/codespace is another deployment (engine VM): here for the lockfile, never built here
 COPY apps/codespace/package.json apps/codespace/
 RUN pnpm install --frozen-lockfile
 COPY tsconfig.base.json ./

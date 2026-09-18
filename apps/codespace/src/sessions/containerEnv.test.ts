@@ -1,11 +1,11 @@
 /**
- * Ce que le portail pose sur le conteneur étudiant, et **rien d'autre**
- * (invariant 1 : aucun secret dans le conteneur).
+ * What the portal sets on the student container, and **nothing else**
+ * (invariant 1: no secret inside the container).
  *
- * Deux niveaux, tous deux unitaires et sans Podman :
- *  - `containerEnvFor` : la décision, devoir par devoir ;
- *  - `engine.runArgs` : ce que la décision devient en arguments `podman run`,
- *    et le fait qu'il n'y entre aucune quatrième variable.
+ * Two levels, both unit tests and without Podman:
+ *  - `containerEnvFor`: the decision, assignment by assignment;
+ *  - `engine.runArgs`: what the decision becomes as `podman run` arguments, and
+ *    the fact that no eighth variable gets in.
  */
 import { describe, expect, it } from "vitest";
 
@@ -37,8 +37,8 @@ function user(
   };
 }
 
-describe("containerEnvFor — ces variables, pas une de plus", () => {
-  it("ne produit jamais de clé hors de CONTAINER_ENV_KEYS", () => {
+describe("containerEnvFor — these variables, not one more", () => {
+  it("never produces a key outside CONTAINER_ENV_KEYS", () => {
     const env = containerEnvFor(
       session({ launchJti: "jti-1" }),
       assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }),
@@ -48,7 +48,7 @@ describe("containerEnvFor — ces variables, pas une de plus", () => {
     expect(Object.keys(env).sort()).toEqual([...CONTAINER_ENV_KEYS].sort());
   });
 
-  it("n'a aucun secret dans ses valeurs : ni jeton, ni clé, ni mot de passe", () => {
+  it("has no secret in its values: no token, no key, no password", () => {
     const env = containerEnvFor(
       session({ launchJti: "jti-1" }),
       assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }),
@@ -61,41 +61,41 @@ describe("containerEnvFor — ces variables, pas une de plus", () => {
     expect(Object.values(env).join(" ")).not.toMatch(/token|secret|password|ghs_|ghp_/i);
   });
 
-  it("transmet l'échéance du devoir en ISO 8601", () => {
+  it("passes on the assignment deadline in ISO 8601", () => {
     const env = containerEnvFor(session(), assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }), URLS);
     expect(env.CODESPACE_DEADLINE).toBe("2026-10-01T12:00:00.000Z");
   });
 
-  it("n'en transmet aucune quand le devoir n'a pas d'échéance", () => {
+  it("passes none on when the assignment has no deadline", () => {
     const env = containerEnvFor(session(), assignment(), URLS);
     expect(env.CODESPACE_DEADLINE).toBeUndefined();
   });
 
-  it("renvoie vers classroom quand un jeton de lancement a ouvert la session", () => {
+  it("points back to classroom when a launch token opened the session", () => {
     const env = containerEnvFor(session({ launchJti: "jti-1" }), assignment(), URLS);
     expect(env.CODESPACE_RETURN_URL).toBe("https://classroom.chevallier.io/");
   });
 
-  it("renvoie vers le portail pour une session autonome", () => {
+  it("points back to the portal for a standalone session", () => {
     const env = containerEnvFor(session(), assignment(), URLS);
     expect(env.CODESPACE_RETURN_URL).toBe("https://code.chevallier.io/");
   });
 
-  it("n'invente pas d'URL de retour quand l'origine n'est pas configurée", () => {
+  it("does not invent a return URL when the origin is not configured", () => {
     expect(containerEnvFor(session(), assignment(), {}).CODESPACE_RETURN_URL).toBeUndefined();
     expect(
-      containerEnvFor(session(), assignment(), { publicUrl: "pas une URL" }).CODESPACE_RETURN_URL,
+      containerEnvFor(session(), assignment(), { publicUrl: "not a URL" }).CODESPACE_RETURN_URL,
     ).toBeUndefined();
   });
 
-  it("transmet le titre du devoir", () => {
+  it("passes on the assignment title", () => {
     const env = containerEnvFor(session(), assignment(), URLS);
     expect(env.CODESPACE_ASSIGNMENT_NAME).toBe("TP 3 — pointeurs et tableaux");
   });
 });
 
-describe("identité git de l'étudiant", () => {
-  it("pose auteur et committer depuis display_name et email", () => {
+describe("the student's git identity", () => {
+  it("sets author and committer from display_name and email", () => {
     const env = containerEnvFor(session(), assignment(), URLS, user());
     expect(env.GIT_AUTHOR_NAME).toBe("Pierre Bressy");
     expect(env.GIT_AUTHOR_EMAIL).toBe("pierre.bressy@heig-vd.ch");
@@ -103,23 +103,23 @@ describe("identité git de l'étudiant", () => {
     expect(env.GIT_COMMITTER_EMAIL).toBe("pierre.bressy@heig-vd.ch");
   });
 
-  it("retombe sur le login institutionnel quand display_name est vide", () => {
+  it("falls back on the institutional login when display_name is empty", () => {
     expect(gitIdentityOf(user({ displayName: "  " }))?.name).toBe("pierre.bressy");
   });
 
-  it("tout ou rien : sans adresse, aucune des quatre variables", () => {
+  it("all or nothing: without an address, none of the four variables", () => {
     const env = containerEnvFor(session(), assignment(), URLS, user({ email: "" }));
     expect(gitIdentityOf(user({ email: "" }))).toBeNull();
     expect(Object.keys(env).some((k) => k.startsWith("GIT_"))).toBe(false);
   });
 
-  it("n'en pose aucune quand la session n'a pas d'utilisateur connu", () => {
+  it("sets none when the session has no known user", () => {
     const env = containerEnvFor(session(), assignment(), URLS);
     expect(Object.keys(env).some((k) => k.startsWith("GIT_"))).toBe(false);
   });
 });
 
-describe("engine.runArgs — l'environnement du conteneur ne porte que ces variables", () => {
+describe("engine.runArgs — the container environment carries only these variables", () => {
   const engine = createEngine({
     podmanUrl: "unix:///run/podman/podman.sock",
     network: "codespace",
@@ -139,23 +139,23 @@ describe("engine.runArgs — l'environnement du conteneur ne porte que ces varia
   );
   const args = engine.runArgs({ sessionId: "s1", name: "cs-s1", workDir: "/vol/a/b/work", env });
 
-  /** Les valeurs de chaque `-e` de la ligne de commande. */
+  /** The values of every `-e` on the command line. */
   function envArgs(argv: string[]): string[] {
     return argv.filter((_, i) => argv[i - 1] === "-e" || argv[i - 1] === "--env");
   }
 
-  it("pose exactement les variables attendues", () => {
+  it("sets exactly the expected variables", () => {
     expect(envArgs(args).map((a) => a.split("=")[0]).sort()).toEqual([...CONTAINER_ENV_KEYS].sort());
   });
 
-  it("porte les valeurs décidées par le gestionnaire de sessions", () => {
+  it("carries the values decided by the session manager", () => {
     expect(envArgs(args)).toContain("CODESPACE_DEADLINE=2026-10-01T12:00:00.000Z");
     expect(envArgs(args)).toContain("CODESPACE_RETURN_URL=https://classroom.chevallier.io/");
     expect(envArgs(args)).toContain("GIT_AUTHOR_NAME=Pierre Bressy");
     expect(envArgs(args)).toContain("GIT_COMMITTER_EMAIL=pierre.bressy@heig-vd.ch");
   });
 
-  it("passe un nom à espaces tel quel : execFile, aucun shell", () => {
+  it("passes a name with spaces as it is: execFile, no shell", () => {
     const spaced = engine.runArgs({
       sessionId: "s3",
       name: "cs-s3",
@@ -165,17 +165,17 @@ describe("engine.runArgs — l'environnement du conteneur ne porte que ces varia
     expect(envArgs(spaced)).toContain("GIT_AUTHOR_NAME=Jean-Luc D'Arc");
   });
 
-  it("n'utilise jamais --env-file : la liste doit rester lisible dans les arguments", () => {
+  it("never uses --env-file: the list must stay readable in the arguments", () => {
     expect(args).not.toContain("--env-file");
     expect(args.some((a) => a.startsWith("--env-file"))).toBe(false);
   });
 
-  it("ne pose aucune variable quand l'appelant n'en donne aucune", () => {
+  it("sets no variable when the caller gives none", () => {
     const bare = engine.runArgs({ sessionId: "s2", name: "cs-s2", workDir: "/vol/a/b/work" });
     expect(envArgs(bare)).toEqual([]);
   });
 
-  it("laisse le durcissement et le volume intacts", () => {
+  it("leaves the hardening and the volume untouched", () => {
     expect(args).toContain("--userns=auto");
     expect(args).toContain("--read-only");
     expect(args.at(-1)).toBe("codespace/c-dev:4.137.0");

@@ -10,9 +10,9 @@ dist/
 !.env.example
 coverage/
 
-# Données personnelles réelles (exemples locaux, LPD)
+# Real personal data (local samples, data protection)
 /*.xlsx
 
-# Secrets locaux (PEM GitHub App, etc.) — ADR-010
+# Local secrets (GitHub App PEM, etc.) -- ADR-010
 secrets/
 site/

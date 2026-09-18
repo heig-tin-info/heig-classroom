@@ -1,11 +1,11 @@
 /**
- * La forge GitHub par App : résolution de l'installation **par organisation**,
- * cache du jeton, renouvellement avant expiration, et refus nommé quand l'App
- * n'est pas installée.
+ * The GitHub forge through an App: resolving the installation **per
+ * organisation**, caching the token, renewing it before it expires, and a
+ * named refusal when the App is not installed.
  *
- * Octokit est remplacé par `GithubAppApi` : ce qui est vérifié ici est la
- * logique du portail, pas la bibliothèque. Le branchement réel est éprouvé sur
- * la VM (docs/deploy.md § 5).
+ * Octokit is replaced by `GithubAppApi`: what is checked here is the portal's
+ * logic, not the library. The real wiring is exercised on the VM
+ * (docs/deploy.md § 5).
  */
 import { describe, expect, it } from "vitest";
 
@@ -22,7 +22,7 @@ interface Spy extends GithubAppApi {
   tokenCalls: number[];
 }
 
-/** Ce que github.com attend du transport git : `Basic x-access-token:<jeton>`. */
+/** What github.com expects from the git transport: `Basic x-access-token:<token>`. */
 const basic = (token: string): string =>
   `Basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`;
 
@@ -46,54 +46,54 @@ function fakeApi(
 }
 
 describe("createGithubForge", () => {
-  it("résout l'installation par l'organisation du dépôt, et met le jeton en cache", async () => {
+  it("resolves the installation from the repository organisation, and caches the token", async () => {
     let now = 1_000_000;
     const api = fakeApi({ "heig-test-classroom2": 77 }, (n) => ({
-      token: `ghs_jeton${n}`,
+      token: `ghs_token${n}`,
       expiresAt: now + INSTALLATION_TOKEN_TTL_MS,
     }));
     const forge = createGithubForge({
       appId: "4284518",
-      privateKey: "-----BEGIN RSA PRIVATE KEY-----\nfaux\n-----END RSA PRIVATE KEY-----\n",
+      privateKey: "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----\n",
       api,
       now: () => now,
     });
     const repo = { owner: "heig-test-classroom2", name: "labo-02-quadratic-yves-chevallier" };
 
-    expect(await forge.authorization(repo)).toBe(basic("ghs_jeton1"));
-    // Deuxième appel une minute plus tard : ni installation, ni jeton neufs.
+    expect(await forge.authorization(repo)).toBe(basic("ghs_token1"));
+    // Second call one minute later: neither a fresh installation nor a fresh token.
     now += 60_000;
-    expect(await forge.authorization(repo)).toBe(basic("ghs_jeton1"));
+    expect(await forge.authorization(repo)).toBe(basic("ghs_token1"));
     expect(api.orgCalls).toEqual(["heig-test-classroom2"]);
     expect(api.tokenCalls).toEqual([77]);
-    // L'URL de clonage ne porte jamais le jeton (invariant du module).
+    // The clone URL never carries the token (invariant of the module).
     expect(forge.pushUrl(repo)).toBe(
       "https://github.com/heig-test-classroom2/labo-02-quadratic-yves-chevallier.git",
     );
   });
 
-  it("renouvelle le jeton une minute avant son expiration, jamais après", async () => {
+  it("renews the token one minute before it expires, never after", async () => {
     let now = 0;
     const api = fakeApi({ org: 12 }, (n) => ({
       token: `ghs_${n}`,
       expiresAt: now + INSTALLATION_TOKEN_TTL_MS,
     }));
     const forge = createGithubForge({ appId: 1, privateKey: "pem", api, now: () => now });
-    const repo = { owner: "org", name: "depot" };
+    const repo = { owner: "org", name: "repo" };
 
     expect(await forge.authorization(repo)).toBe(basic("ghs_1"));
-    // 59 minutes : le jeton vaut encore, il reste plus d'une minute.
+    // 59 minutes: the token is still valid, more than a minute is left.
     now = INSTALLATION_TOKEN_TTL_MS - 61_000;
     expect(await forge.authorization(repo)).toBe(basic("ghs_1"));
     expect(api.tokenCalls).toEqual([12]);
-    // Moins d'une minute avant l'expiration : un push commencé ne doit pas
-    // survivre à son jeton.
+    // Less than a minute before expiry: a push that has started must not
+    // outlive its token.
     now = INSTALLATION_TOKEN_TTL_MS - 59_000;
     expect(await forge.authorization(repo)).toBe(basic("ghs_2"));
     expect(api.tokenCalls).toEqual([12, 12]);
   });
 
-  it("un jeton par organisation : deux classes, deux installations", async () => {
+  it("one token per organisation: two classes, two installations", async () => {
     const api = fakeApi({ "org-a": 1, "org-b": 2 }, (n) => ({
       token: `ghs_${n}`,
       expiresAt: Date.now() + INSTALLATION_TOKEN_TTL_MS,
@@ -102,24 +102,26 @@ describe("createGithubForge", () => {
 
     expect(await forge.authorization({ owner: "org-a", name: "d" })).toBe(basic("ghs_1"));
     expect(await forge.authorization({ owner: "org-b", name: "d" })).toBe(basic("ghs_2"));
-    expect(await forge.authorization({ owner: "org-a", name: "autre" })).toBe(basic("ghs_1"));
+    expect(await forge.authorization({ owner: "org-a", name: "other" })).toBe(basic("ghs_1"));
     expect(api.orgCalls).toEqual(["org-a", "org-b"]);
     expect(api.tokenCalls).toEqual([1, 2]);
   });
 
-  it("App non installée sur l'organisation : erreur de configuration, pas de panne", async () => {
+  it("App not installed on the organisation: a configuration error, not an outage", async () => {
     const api = fakeApi({}, () => ({ token: "x", expiresAt: 0 }));
     const forge = createGithubForge({ appId: 1, privateKey: "pem", api });
-    await expect(forge.authorization({ owner: "inconnue", name: "d" })).rejects.toBeInstanceOf(
+    await expect(forge.authorization({ owner: "unknown-org", name: "d" })).rejects.toBeInstanceOf(
       ForgeUnconfiguredError,
     );
-    // Le message nomme l'organisation : c'est ce que l'exploitant doit lire.
-    await expect(forge.authorization({ owner: "inconnue", name: "d" })).rejects.toThrow(/inconnue/);
+    // The message names the organisation: that is what the operator has to read.
+    await expect(forge.authorization({ owner: "unknown-org", name: "d" })).rejects.toThrow(
+      /unknown-org/,
+    );
   });
 });
 
 describe("createUnconfiguredGithubForge", () => {
-  it("sert l'URL publique et refuse toute autorisation, sans appel réseau", async () => {
+  it("serves the public URL and refuses any authorization, with no network call", async () => {
     const forge = createUnconfiguredGithubForge();
     expect(forge.pushUrl({ owner: "o", name: "d" })).toBe("https://github.com/o/d.git");
     await expect(forge.authorization({ owner: "o", name: "d" })).rejects.toBeInstanceOf(

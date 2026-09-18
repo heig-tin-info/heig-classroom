@@ -1,103 +1,104 @@
-# ADR-013 — Environnement en ligne : pas de credential étudiant, donc pas de droit d'écriture
+# ADR-013 — Online workspace: no student credential, therefore no write access
 
-## Statut
+## Status
 
-Accepté (2026-09-17, jalon 2 du portail).
+Accepted (2026-09-17, portal milestone 2).
 
-## Contexte
+## Context
 
-Le portail `apps/codespace` fait travailler l'étudiant dans un conteneur durci servi par
-code-server, éventuellement sous Safe Exam Browser. Son invariant fondateur est qu'**aucun
-secret n'entre dans le conteneur étudiant** : ni jeton GitHub, ni clé SSH, ni credential
-helper. C'est le conteneur qui pousse — par un relais authentifié par l'adresse IP source sur
-le pont interne — et non l'étudiant depuis son éditeur.
+The `apps/codespace` portal makes the student work inside a hardened container served by
+code-server, possibly under Safe Exam Browser. Its founding invariant is that **no secret
+enters the student container**: no GitHub token, no SSH key, no credential helper. It is the
+container that pushes — through a relay authenticated by the source IP address on the
+internal bridge — and not the student from their editor.
 
-Or, dans le flux historique de classroom (mode « libre »), le dépôt étudiant est provisionné
-avec la permission `push` : l'étudiant clone et pousse avec son propre compte GitHub. Si on
-garde ce droit en mode en ligne, deux chemins d'écriture coexistent sur le même dépôt (le
-relais du portail, et l'étudiant depuis n'importe quel navigateur), ce qui rend le contenu
-d'un examen indéfendable : rien ne distingue un commit produit dans la session surveillée d'un
-commit poussé depuis la maison.
+Now, in the historical classroom flow (the "free" mode), the student repository is
+provisioned with `push` permission: the student clones and pushes with their own GitHub
+account. Keeping that right in online mode would mean two write paths coexisting on the same
+repository (the portal relay, and the student from any browser), which makes the content of
+an exam indefensible: nothing distinguishes a commit produced in the supervised session from
+a commit pushed from home.
 
-Il faut aussi décider qui peut activer la fonctionnalité. Le moteur de conteneurs est un
-composant privilégié sur une VM dédiée, à capacité bornée (quelques dizaines de sessions) ;
-l'ouvrir à tous les enseignants de `classroom.chevallier.io` d'un coup n'a pas de sens tant
-que le pilote porte sur une ou deux classes.
+We also have to decide who may turn the feature on. The container engine is a privileged
+component on a dedicated VM with bounded capacity (a few dozen sessions); opening it to every
+teacher of `classroom.chevallier.io` at once makes no sense while the pilot covers one or two
+classes.
 
-## Décision
+## Decision
 
-1. **Un devoir a un mode de travail** (`assignments.work_mode`, `WorkMode` du contrat
-   partagé) : `free` (inchangé), `online`, `online_seb`. Le défaut est `free` : tous les
-   devoirs existants gardent exactement leur comportement.
-2. **Pas de credential étudiant, donc pas de droit d'écriture.** Le provisionnement
-   (`github/provision.ts`) invite l'étudiant avec la permission :
-   - `free` → `push` (flux historique, strictement inchangé) ;
-   - `online` → `pull` : l'étudiant lit son dépôt, relit ses commits, mais seul le relais du
-     portail y écrit — il n'existe donc aucun credential étudiant à distribuer, à faire
-     expirer ou à révoquer ;
-   - `online_seb` → **aucune invitation** : en examen, l'étudiant n'a pas accès au dépôt
-     avant la notation.
-   Le ruleset anti force-push et anti-suppression (`hgc-protect`, GH-21..23) reste posé dans
-   les trois modes : il protège aussi contre le relais.
-3. **Porte à sens unique.** Un devoir publié en mode `online*` ne peut pas revenir à `free`
-   (409 `work_mode_frozen`). Ses dépôts ont été provisionnés sans droit d'écriture ; repasser
-   à `free` laisserait chaque étudiant devant un dépôt qu'il ne peut pas pousser, et
-   re-accorder `push` après coup contredirait précisément l'invariant que ce mode protège. On
-   crée un nouveau devoir.
-4. **Activation par l'administrateur, enseignant par enseignant**, avec un quota de sessions
-   simultanées : deux colonnes sur `teacher_grants` (`codespace_enabled` à `false`,
-   `codespace_max_active_sessions` à 2). Un enseignant sans habilitation ne voit pas la
-   section « Work mode » du formulaire (le front lit `Me.codespace`) et l'API refuse tout mode
-   non `free` par un 403 — la vérification serveur est la seule qui fasse foi.
-5. **Absence globale possible.** `CODESPACE_URL` vide = la fonctionnalité n'existe pas :
-   pas de colonne d'administration, pas de sélecteur, et les routes `/app/codespace/*`
-   répondent 404. `CODESPACE_URL` sans `CODESPACE_LAUNCH_SECRET` d'au moins 32 caractères
-   fait échouer le démarrage (ADR-010 : les secrets passent par l'environnement).
-6. **Deux messages signés HS256, jamais d'import croisé** (règle d'import du `CLAUDE.md`
-   racine) :
-   - classroom → portail : `PUT ${CODESPACE_URL}/api/assignments/:id` avec le corps
-     `CodespaceAssignmentSync` et un `ServiceTokenClaims` de 2 minutes en `Authorization:
-     Bearer`. L'appel passe par **un job pg-boss** (`codespace.sync`, clé singleton
-     `codespace:<assignment>`, ADR-004/ADR-011) : un portail en cours de redémarrage ne fait
-     jamais échouer l'enregistrement d'un devoir, la reprise est gratuite, et l'état de la
-     dernière tentative (`codespace_synced_at`, `codespace_sync_error`) est affiché à
-     l'enseignant avec un bouton « Resync ».
-   - étudiant → portail : `GET /app/codespace/start/:aid` vérifie inscription, acceptation,
-     publication et mode, émet un `LaunchTokenClaims` de 5 minutes avec un `jti` aléatoire et
-     redirige en 303 vers `${CODESPACE_URL}/launch?token=…`. C'est un **GET navigable** parce
-     que le portail s'en sert aussi comme `startURL` de Safe Exam Browser, qui ne sait que
-     naviguer. L'émission est journalisée (`codespace.launch_issued`) par son `jti` ; le jeton
-     lui-même n'entre jamais dans le journal (AU-41).
-7. **Les Browser Exam Keys sont des secrets côté enseignant.** Elles sont stockées sur le
-   devoir (`browser_exam_keys`), envoyées au portail dans le message de synchronisation, et
-   **jamais** incluses dans une charge utile étudiante.
+1. **An assignment has a work mode** (`assignments.work_mode`, `WorkMode` of the shared
+   contract): `free` (unchanged), `online`, `online_seb`. The default is `free`: every
+   existing assignment keeps exactly its behaviour.
+2. **No student credential, therefore no write access.** Provisioning
+   (`github/provision.ts`) invites the student with the permission:
+   - `free` → `push` (the historical flow, strictly unchanged);
+   - `online` → `pull`: the student reads their repository and re-reads their commits, but
+     only the portal relay writes to it — so there is no student credential to distribute,
+     expire or revoke;
+   - `online_seb` → **no invitation at all**: during an exam, the student has no access to
+     the repository before grading.
+   The anti force-push and anti-deletion ruleset (`hgc-protect`, GH-21..23) stays in place in
+   all three modes: it also protects against the relay.
+3. **A one-way door.** An assignment published in an `online*` mode cannot go back to `free`
+   (409 `work_mode_frozen`). Its repositories were provisioned without write access; going
+   back to `free` would leave every student in front of a repository they cannot push to, and
+   granting `push` after the fact would contradict exactly the invariant this mode protects.
+   A new assignment is created instead.
+4. **Activation by the administrator, teacher by teacher**, with a quota of simultaneous
+   sessions: two columns on `teacher_grants` (`codespace_enabled` at `false`,
+   `codespace_max_active_sessions` at 2). A teacher without that grant does not see the
+   "Work mode" section of the form (the front end reads `Me.codespace`) and the API refuses
+   any non-`free` mode with a 403 — the server-side check is the only authoritative one.
+5. **Global absence is possible.** An empty `CODESPACE_URL` means the feature does not exist:
+   no administration column, no selector, and the `/app/codespace/*` routes answer 404. A
+   `CODESPACE_URL` without a `CODESPACE_LAUNCH_SECRET` of at least 32 characters makes
+   startup fail (ADR-010: secrets travel through the environment).
+6. **Two HS256-signed messages, never a cross import** (the import rule of the root
+   `CLAUDE.md`):
+   - classroom → portal: `PUT ${CODESPACE_URL}/api/assignments/:id` with a
+     `CodespaceAssignmentSync` body and a 2-minute `ServiceTokenClaims` in
+     `Authorization: Bearer`. The call goes through **a pg-boss job** (`codespace.sync`,
+     singleton key `codespace:<assignment>`, ADR-004/ADR-011): a portal that is restarting
+     never makes saving an assignment fail, recovery is free, and the state of the last
+     attempt (`codespace_synced_at`, `codespace_sync_error`) is shown to the teacher with a
+     "Resync" button.
+   - student → portal: `GET /app/codespace/start/:aid` checks enrollment, acceptance,
+     publication and mode, issues a 5-minute `LaunchTokenClaims` with a random `jti` and
+     redirects with a 303 to `${CODESPACE_URL}/launch?token=…`. It is a **navigable GET**
+     because the portal also uses it as the `startURL` of Safe Exam Browser, which can only
+     navigate. Issuance is logged (`codespace.launch_issued`) by its `jti`; the token itself
+     never enters the log (AU-41).
+7. **Browser Exam Keys are teacher-side secrets.** They are stored on the assignment
+   (`browser_exam_keys`), sent to the portal in the synchronization message, and **never**
+   included in a student payload.
 
-## Conséquences
+## Consequences
 
-- En mode en ligne, un étudiant ne peut plus pousser depuis son poste : c'est l'effet
-  recherché, mais cela veut dire que le portail devient indispensable au rendu. La panne du
-  portail pendant un TP en ligne est donc un incident de rendu, pas seulement de confort —
-  le mode `free` reste le défaut pour tout ce qui n'a pas besoin de surveillance.
-- La CI de notation est inchangée : elle se déclenche sur les pushes du relais exactement
-  comme sur ceux d'un étudiant, et toute la chaîne de notation (GR-05..16) ignore le mode.
-- La migration est purement additive (colonnes à défaut, aucune réécriture) : la production en
-  service reçoit `work_mode = 'free'` partout et ne change pas de comportement.
-- Le quota est porté par le **propriétaire de la classe**, pas par le membre du staff qui
-  enregistre le devoir : c'est le porteur du cours qui consomme la capacité de la VM.
-- Le portail reste extractible : il ne connaît de classroom que ces deux messages signés.
+- In online mode a student can no longer push from their own machine: that is the intended
+  effect, but it means the portal becomes indispensable to submission. An outage of the
+  portal during an online lab is therefore a submission incident, not merely a comfort one —
+  the `free` mode stays the default for everything that does not need supervision.
+- The grading CI is unchanged: it triggers on the relay's pushes exactly as on a student's,
+  and the whole grading chain (GR-05..16) ignores the mode.
+- The migration is purely additive (columns with defaults, no rewrite): the production
+  service gets `work_mode = 'free'` everywhere and does not change behaviour.
+- The quota is carried by the **owner of the class**, not by the staff member who saves the
+  assignment: it is the person running the course who consumes the VM's capacity.
+- The portal stays extractable: all it knows of classroom is those two signed messages.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Garder `push` en mode en ligne** et se fier à la surveillance : deux chemins d'écriture
-   sur le même dépôt, contenu d'examen indéfendable, et l'invariant « aucun secret dans le
-   conteneur » perdrait son intérêt puisque l'étudiant aurait de toute façon un credential.
-2. **Distribuer un jeton à durée de vie courte dans le conteneur** pour que l'étudiant pousse
-   lui-même : c'est exactement le secret que le durcissement du conteneur interdit, et il
-   serait exfiltrable par n'importe quel terminal de l'éditeur.
-3. **Appel HTTP synchrone vers le portail à l'enregistrement du devoir** : une VM de portail
-   indisponible ferait échouer une action d'enseignant sans rapport, et il faudrait
-   réinventer la reprise que pg-boss fournit déjà.
-4. **Activation globale par variable d'environnement** : impossible de piloter une classe sans
-   exposer toutes les autres, et aucun endroit où poser le quota par enseignant.
-5. **Un quota unique global** plutôt que par enseignant : un enseignant qui lance un examen
-   consommerait la capacité de tous les autres sans qu'aucun écran ne le montre.
+1. **Keeping `push` in online mode** and relying on supervision: two write paths on the same
+   repository, indefensible exam content, and the "no secret in the container" invariant
+   would lose its point since the student would have a credential anyway.
+2. **Distributing a short-lived token inside the container** so the student pushes
+   themselves: that is exactly the secret the container hardening forbids, and it would be
+   exfiltrable from any terminal in the editor.
+3. **A synchronous HTTP call to the portal when the assignment is saved**: an unavailable
+   portal VM would make an unrelated teacher action fail, and we would have to reinvent the
+   recovery that pg-boss already provides.
+4. **Global activation through an environment variable**: it would be impossible to run one
+   class without exposing all the others, and there would be nowhere to put the per-teacher
+   quota.
+5. **A single global quota** rather than one per teacher: a teacher starting an exam would
+   consume everyone else's capacity without any screen showing it.

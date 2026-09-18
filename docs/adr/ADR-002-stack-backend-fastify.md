@@ -1,44 +1,44 @@
-# ADR-002 — Backend Node.js + TypeScript + Fastify
+# ADR-002 — Node.js + TypeScript + Fastify backend
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Le backend doit intégrer profondément GitHub (App, webhooks, Git Data), OIDC Switch edu-ID,
-et exposer une trentaine d'endpoints REST plus un flux SSE. Un seul mainteneur, du code
-souvent repris par des assistants ; le débogage de nuit avant une deadline est le scénario
-dimensionnant. Octokit, client GitHub officiel, est TypeScript.
+The backend has to integrate deeply with GitHub (App, webhooks, Git Data) and with OIDC
+Switch edu-ID, and to expose some thirty REST endpoints plus an SSE stream. There is a single
+maintainer, and the code is often picked up by assistants; debugging at night before a
+deadline is the sizing scenario. Octokit, the official GitHub client, is TypeScript.
 
-## Décision
+## Decision
 
-1. **Node.js 22 LTS + TypeScript 5 strict**, un seul langage pour back, front et CLI, avec
-   schémas Zod partagés (`packages/contracts`) : contrat unique, zéro duplication de types.
-2. **Fastify 5** comme framework HTTP : léger, validation par schémas native (Zod via
-   type provider), SSE trivial, OpenAPI générée (`@fastify/swagger`), rate limiting
+1. **Node.js 22 LTS + TypeScript 5 strict**, a single language for back end, front end and
+   CLI, with shared Zod schemas (`packages/contracts`): one contract, zero type duplication.
+2. **Fastify 5** as the HTTP framework: lightweight, native schema validation (Zod via the
+   type provider), trivial SSE, generated OpenAPI (`@fastify/swagger`), rate limiting
    (`@fastify/rate-limit`).
-3. L'autorisation systématique (AU-23/24) est un **middleware Fastify explicite** appliqué à
-   chaque route (ownership classroom pour teacher, enrollment `claimed` pour student).
-4. Bibliothèques d'intégration : `octokit` + plugins `retry`/`throttling` (NFR-10, GH-63),
+3. Systematic authorization (AU-23/24) is an **explicit Fastify middleware** applied to
+   every route (classroom ownership for a teacher, `claimed` enrollment for a student).
+4. Integration libraries: `octokit` plus the `retry`/`throttling` plugins (NFR-10, GH-63),
    `@octokit/webhooks` (HMAC), `openid-client` (AU-01), Luxon (C-02), pino (AU-41).
 
-## Conséquences
+## Consequences
 
-- Pas d'injection de dépendances ni de décorateurs : le flux d'exécution se lit ligne à
-  ligne, un assistant retrouve ses marques sans apprentissage de framework.
-- La discipline de structure (que NestJS imposerait) repose sur les frontières de modules
-  de l'ADR-001 et la revue de code.
-- En développement, un IdP OIDC de test (Keycloak ou mock) remplace Switch edu-ID derrière
-  `openid-client` : le jalon M1 ne dépend pas de la démarche institutionnelle.
+- No dependency injection and no decorators: the execution flow reads line by line, and an
+  assistant finds its bearings without learning a framework.
+- Structural discipline (which NestJS would impose) rests on the module boundaries of
+  ADR-001 and on code review.
+- In development, a test OIDC IdP (Keycloak or a mock) stands in for Switch edu-ID behind
+  `openid-client`: milestone M1 does not depend on the institutional process.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **NestJS** (proposition productivité : modules, DI, guards comme implémentation d'AU-24) :
-   surcouche non indispensable pour une trentaine d'endpoints ; les erreurs de DI et la magie
-   des décorateurs sont précisément ce qu'on ne veut pas déboguer la veille d'un rendu. Les
-   guards sont remplacés par un middleware explicite, même garantie AU-24.
-2. **ts-rest** (productivité) : le partage de types est déjà couvert par Zod + client généré
-   depuis l'OpenAPI ; une dépendance structurante de moins.
-3. **Autre runtime ou langage** (Go, Python) : perdrait l'unicité de langage front/back/CLI
-   et l'écosystème Octokit officiel.
+1. **NestJS** (productivity proposal: modules, DI, guards as the implementation of AU-24):
+   an unnecessary layer for some thirty endpoints; DI errors and decorator magic are exactly
+   what we do not want to debug the night before a submission. The guards are replaced by an
+   explicit middleware, with the same AU-24 guarantee.
+2. **ts-rest** (productivity): type sharing is already covered by Zod plus a client generated
+   from the OpenAPI document; one structural dependency fewer.
+3. **Another runtime or language** (Go, Python): would lose the single front/back/CLI
+   language and the official Octokit ecosystem.

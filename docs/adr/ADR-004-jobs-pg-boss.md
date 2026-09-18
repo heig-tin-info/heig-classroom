@@ -1,42 +1,42 @@
-# ADR-004 — File de jobs pg-boss sur Postgres
+# ADR-004 — pg-boss job queue on Postgres
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Les jobs critiques (provisionnement, deadline, revert, grading, synchro, e-mails) doivent
-être durables, idempotents, rejouables et rattrapés après panne (NFR-09). Les webhooks sont
-acquittés en moins de 5 s (GH-60) puis traités en asynchrone. Le pire débit attendu est une
-rafale de deadline : environ 100 pushes plus 100 `workflow_run` en quelques minutes, soit
-moins de 10 jobs/s.
+The critical jobs (provisioning, deadline, revert, grading, synchronization, e-mails) must be
+durable, idempotent, replayable and caught up after an outage (NFR-09). Webhooks are
+acknowledged in under 5 s (GH-60) and then processed asynchronously. The worst expected
+throughput is a deadline burst: about 100 pushes plus 100 `workflow_run` events within a few
+minutes, i.e. fewer than 10 jobs/s.
 
-## Décision
+## Decision
 
-1. **pg-boss 10** : file de jobs persistante **dans PostgreSQL** — retries exponentiels,
-   `singletonKey` (idempotence), jobs planifiés, cron intégré, rétention et archivage.
-2. Concurrence bornée par type de job (10 workers) : les rafales remplissent la file sans
-   jamais menacer l'acquittement des webhooks ni les quotas GitHub.
-3. Échec de handler : 5 tentatives à backoff exponentiel, puis **dead-letter** visible dans
-   l'écran d'administration technique avec relance manuelle et alerte log.
-4. Clés singleton normalisées : `provision:<assignment>:<user>` (GH-20),
+1. **pg-boss 10**: a job queue persisted **in PostgreSQL** — exponential retries,
+   `singletonKey` (idempotency), scheduled jobs, built-in cron, retention and archiving.
+2. Bounded concurrency per job type (10 workers): bursts fill the queue without ever
+   threatening webhook acknowledgement or the GitHub quotas.
+3. Handler failure: 5 attempts with exponential backoff, then **dead-letter**, visible in the
+   technical administration screen with manual replay and a log alert.
+4. Normalized singleton keys: `provision:<assignment>:<user>` (GH-20),
    `deadline:<assignment>` (GH-43), `revert:<repo>:<head_sha>`.
 
-## Conséquences
+## Consequences
 
-- Aucun broker ni Redis à exploiter : la file survit à un crash avec la base, est couverte
-  par la même sauvegarde et s'inspecte en SQL.
-- Le débit requis est de plusieurs ordres de grandeur sous les capacités de pg-boss ; la
-  charge de la file sur Postgres est négligeable à cette échelle.
-- Les métriques d'exploitation (profondeur de file, lag, jobs en dead-letter) sont exposées
-  sur `/metrics` (emprunt à la proposition robustesse).
+- No broker and no Redis to operate: the queue survives a crash together with the database,
+  is covered by the same backup, and can be inspected in SQL.
+- The required throughput is orders of magnitude below what pg-boss can do; the load the
+  queue puts on Postgres is negligible at this scale.
+- Operational metrics (queue depth, lag, dead-lettered jobs) are exposed on `/metrics`
+  (borrowed from the robustness proposal).
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **BullMQ + Redis** : file performante mais impose un deuxième composant stateful à
-   sauvegarder, superviser et sécuriser, pour un débit dont le projet n'a pas besoin.
-2. **RabbitMQ, SQS ou broker dédié** : sur-ingénierie manifeste pour 20 classrooms ;
-   aucune NFR ne le justifie.
-3. **Cron système + tables maison** : réinventer retries, backoff et singleton sans les
-   garanties éprouvées de pg-boss.
+1. **BullMQ + Redis**: a fast queue, but it imposes a second stateful component to back up,
+   monitor and secure, for throughput the project does not need.
+2. **RabbitMQ, SQS or a dedicated broker**: obvious over-engineering for 20 classrooms; no
+   NFR justifies it.
+3. **System cron + home-made tables**: reinventing retries, backoff and singletons without
+   the proven guarantees of pg-boss.

@@ -1,176 +1,176 @@
-# Preuve B, partie manuelle : un vrai Safe Exam Browser
+# Proof B, manual part: a real Safe Exam Browser
 
-La partie automatisée de la preuve B est dans
-[`src/seb/`](../src/seb/README.md) : elle prouve que le
-portail calcule la même Config Key que l'implémentation de référence et qu'il
-refuse tout ce qui n'est pas une requête SEB valide. Elle ne peut pas prouver
-qu'un **vrai** SEB accepte la configuration générée et envoie les en-têtes
-attendus : aucun binaire SEB ne tourne sur Linux.
+The automated part of proof B is in
+[`src/seb/`](../src/seb/README.md): it proves that the
+portal computes the same Config Key as the reference implementation and that it
+refuses anything that is not a valid SEB request. It cannot prove
+that a **real** SEB accepts the generated configuration and sends the expected
+headers: no SEB binary runs on Linux.
 
-Cette procédure comble ce trou. Elle demande une trentaine de minutes, un poste
-Windows ou macOS, et une seule exécution par version de SEB déployée en salle.
+This procedure fills that hole. It takes about thirty minutes, a
+Windows or macOS machine, and a single run per version of SEB deployed in the exam room.
 
-Elle lève aussi les `TODO(verify)` listés dans le README du module : profitez-en
-pour noter ce que SEB fait réellement de `browserViewMode`, de `browserURLSalt`
-et d'un `browserExamKey` vide.
+It also clears the `TODO(verify)` items listed in the module README: take the opportunity
+to note what SEB actually does with `browserViewMode`, with `browserURLSalt`
+and with an empty `browserExamKey`.
 
-## 0. Ce qu'il faut avant de commencer
+## 0. What is needed before starting
 
-- Le portail joignable depuis le poste de test **sur son URL publique en
-  HTTPS**, celle qui sera utilisée en salle. Pas `localhost`, pas une adresse
-  IP : la Config Key et le hachage de requête portent sur l'URL absolue, et un
-  `sebs://` sur `localhost` ne prouve rien de l'installation réelle.
-- Safe Exam Browser installé sur le poste, dans la version exacte du parc.
+- The portal reachable from the test machine **at its public URL over
+  HTTPS**, the one that will be used in the exam room. Not `localhost`, not an IP
+  address: the Config Key and the request hash are computed over the absolute URL, and a
+  `sebs://` on `localhost` proves nothing about the real installation.
+- Safe Exam Browser installed on the machine, in the exact version of the fleet.
   <https://safeexambrowser.org/download_en.html>
-- L'outil de configuration : sur Windows, **SEB Configuration Tool**, installé
-  avec SEB ; sur macOS, **SEB → Préférences**, fenêtre qu'il faut avoir
-  autorisée (`allowPreferencesWindow`) — ce que la configuration d'examen
-  interdit, d'où l'étape 2 qui ouvre le fichier dans l'outil et **non** dans
-  SEB en mode examen.
-- Un devoir en mode examen dans `seed/assignments.yaml`, avec une liste de BEK
-  **vide** pour l'instant.
-- Le portail en `SEB_VERIFIER=real`. En `simulated`, tout passe et la preuve ne
-  vaut rien.
+- The configuration tool: on Windows, **SEB Configuration Tool**, installed
+  together with SEB; on macOS, **SEB → Preferences**, a window that must have been
+  allowed (`allowPreferencesWindow`) — which the exam configuration
+  forbids, hence step 2, which opens the file in the tool and **not** in
+  SEB in exam mode.
+- An assignment in exam mode in `seed/assignments.yaml`, with an **empty**
+  list of BEKs for now.
+- The portal in `SEB_VERIFIER=real`. In `simulated`, everything passes and the proof is
+  worthless.
 
-## 1. Récupérer le fichier de configuration du devoir
+## 1. Retrieve the configuration file of the assignment
 
-Depuis un navigateur ordinaire du poste de test :
+From an ordinary browser on the test machine:
 
 ```
-https://<portail>/exam/<devoir>.seb
+https://<portal>/exam/<assignment>.seb
 ```
 
-Le portail répond en `application/seb`, nom `config.seb`. Enregistrez le fichier
-sans l'ouvrir. Vérifiez, dans un éditeur de texte, qu'il commence par
-`<?xml version="1.0"` : un `.seb` non chiffré est du plist XML nu.
+The portal answers with `application/seb`, filename `config.seb`. Save the file
+without opening it. Check, in a text editor, that it begins with
+`<?xml version="1.0"`: an unencrypted `.seb` is bare XML plist.
 
-Vérifiez aussi qu'il ne contient **aucun** Browser Exam Key : le champ
-`browserExamKey` doit être une chaîne vide. Si vous y trouvez une clé, arrêtez :
-le secret partagé est en train d'être remis à l'étudiant.
+Also check that it contains **no** Browser Exam Key: the
+`browserExamKey` field must be an empty string. If you find a key in it, stop:
+the shared secret is being handed to the student.
 
-## 2. Lire le Browser Exam Key dans l'outil de configuration
+## 2. Read the Browser Exam Key in the configuration tool
 
-> **Ne ré-enregistrez pas le fichier.** C'est le piège principal. Ouvrir la
-> configuration dans l'outil et cliquer « Enregistrer » régénère `examKeySalt`,
-> ce qui change la Config Key *et* tous les BEK des autres plateformes. Vous
-> devriez alors tout recommencer sur chaque poste.
+> **Do not save the file again.** This is the main trap. Opening the
+> configuration in the tool and clicking "Save" regenerates `examKeySalt`,
+> which changes the Config Key *and* all the BEKs of the other platforms. You
+> would then have to start over on every machine.
 
-**Windows.** Lancez *SEB Configuration Tool*, `Fichier → Ouvrir`, choisissez le
-`config.seb` téléchargé. Onglet **Exam**. Le champ **Browser Exam Key** affiche
-une chaîne de 64 caractères hexadécimaux. Copiez-la. L'onglet affiche aussi la
-**Config Key** : comparez-la à celle que le portail a enregistrée pour le
-devoir. Si les deux diffèrent, tout le reste échouera ; c'est le signe que la
-normalisation ou la génération du fichier diverge — notez la valeur affichée et
-ouvrez un ticket avant de continuer.
+**Windows.** Launch *SEB Configuration Tool*, `File → Open`, choose the
+`config.seb` you downloaded. Tab **Exam**. The **Browser Exam Key** field displays
+a string of 64 hexadecimal characters. Copy it. The tab also displays the
+**Config Key**: compare it with the one the portal recorded for the
+assignment. If the two differ, everything else will fail; it is the sign that the
+normalisation or the file generation diverges — note the value displayed and
+open a ticket before continuing.
 
-**macOS.** Lancez SEB, `SEB → Préférences`, `Fichier → Ouvrir les réglages`,
-choisissez le même `config.seb`. Onglet **Exam**, même champ **Browser Exam
-Key**. Copiez-la.
+**macOS.** Launch SEB, `SEB → Preferences`, `File → Open Settings`,
+choose the same `config.seb`. Tab **Exam**, same **Browser Exam
+Key** field. Copy it.
 
-**Le BEK diffère par plateforme et par version.** C'est sa raison d'être : il
-atteste du binaire autant que de la configuration. Un BEK lu sur Windows ne
-vaudra pas sur macOS, et un BEK lu sur la version 3.7 ne vaudra pas sur la 3.8.
-Recommencez l'étape 2 sur **chaque** couple (plateforme, version) du parc, à
-partir du **même** fichier téléchargé, sans jamais l'enregistrer.
+**The BEK differs per platform and per version.** That is its very purpose: it
+attests to the binary as much as to the configuration. A BEK read on Windows will
+not be valid on macOS, and a BEK read on version 3.7 will not be valid on 3.8.
+Repeat step 2 on **every** (platform, version) pair of the fleet, starting
+from the **same** downloaded file, without ever saving it.
 
-## 3. Enregistrer les BEK dans le devoir
+## 3. Record the BEKs in the assignment
 
-Dans `seed/assignments.yaml`, sur le devoir concerné :
+In `seed/assignments.yaml`, on the assignment concerned:
 
 ```yaml
   beks:
-    - "…64 caractères, poste Windows 3.8…"
-    - "…64 caractères, poste macOS 3.4…"
+    - "…64 hex characters, Windows machine 3.8…"
+    - "…64 hex characters, macOS machine 3.4…"
 ```
 
-C'est une **liste**, une entrée par couple (plateforme, version) : analyse.md
-§ 4.4. Redémarrez le portail.
+It is a **list**, one entry per (platform, version) pair: analyse.md
+§ 4.4. Restart the portal.
 
-Le BEK est un secret partagé : il ne va pas dans un dépôt public, il n'apparaît
-pas dans l'interface enseignant, il ne va pas dans les journaux (un test
-l'affirme), et il se change à chaque session d'examen (project.md § 9).
+The BEK is a shared secret: it does not go into a public repository, it does not appear
+in the teacher interface, it does not go into the logs (a test
+asserts it), and it is changed for every exam session (project.md § 9).
 
-## 4. Le chemin nominal : ouvrir le lien `sebs://`
+## 4. The nominal path: open the `sebs://` link
 
-Depuis un navigateur ordinaire du poste, ouvrez la page du devoir et cliquez le
-lien :
+From an ordinary browser on the machine, open the page of the assignment and click the
+link:
 
 ```
-sebs://<portail>/exam/<devoir>.seb
+sebs://<portal>/exam/<assignment>.seb
 ```
 
-Attendu, dans l'ordre :
+Expected, in this order:
 
-1. le navigateur demande à ouvrir Safe Exam Browser ; acceptez ;
-2. SEB démarre, passe en mode kiosque, télécharge la configuration ;
-3. SEB ouvre `startURL`, c'est-à-dire `https://<portail>/exam/<devoir>/start` ;
-4. le portail vérifie les deux en-têtes, pose le cookie `exam_session` et
-   redirige vers `/s/<session>/` ;
-5. **l'éditeur code-server s'affiche**, et le terminal fonctionne.
+1. the browser asks to open Safe Exam Browser; accept;
+2. SEB starts, switches to kiosk mode, downloads the configuration;
+3. SEB opens `startURL`, that is to say `https://<portal>/exam/<assignment>/start`;
+4. the portal checks the two headers, sets the `exam_session` cookie and
+   redirects to `/s/<session>/`;
+5. **the code-server editor appears**, and the terminal works.
 
-Notez ici ce que vous observez sur les `TODO(verify)` : SEB est-il en plein
-écran (`browserViewMode: 1`) ? La barre d'outils du navigateur est-elle
-masquée ? Le presse-papiers est-il isolé ?
+Note here what you observe about the `TODO(verify)` items: is SEB full
+screen (`browserViewMode: 1`)? Is the browser toolbar
+hidden? Is the clipboard isolated?
 
-**Si l'étape 4 échoue en 403**, la cause est presque toujours l'une de trois :
+**If step 4 fails with a 403**, the cause is almost always one of three:
 
-- **URL reconstruite à tort derrière le frontal.** Le portail a haché
-  `http://127.0.0.1:3100/exam/…` là où SEB a haché
-  `https://<portail>/exam/…`. Corrigez en fixant `publicOrigin` sur l'origine
-  publique du portail plutôt qu'en faisant confiance à `Host`. La journalisation
-  du refus imprime l'URL retenue : comparez-la à ce que la barre d'adresse de
-  SEB montre.
-- **Config Key différente.** Le fichier a été ré-enregistré entre l'étape 1 et
-  l'étape 4, ou le devoir a été modifié depuis. Retéléchargez, recommencez à
-  l'étape 2.
-- **BEK d'une autre version.** Le poste n'a pas la version pour laquelle le BEK
-  a été lu. La raison journalisée est `browser-exam-key-mismatch`.
+- **URL wrongly reconstructed behind the front end.** The portal hashed
+  `http://127.0.0.1:3100/exam/…` where SEB hashed
+  `https://<portal>/exam/…`. Fix it by pinning `publicOrigin` to the
+  public origin of the portal rather than trusting `Host`. The logging
+  of the refusal prints the URL that was used: compare it with what SEB's address bar
+  shows.
+- **Different Config Key.** The file was saved again between step 1 and
+  step 4, or the assignment has been modified since. Download it again, start over at
+  step 2.
+- **BEK from another version.** The machine does not have the version the BEK
+  was read for. The logged reason is `browser-exam-key-mismatch`.
 
-Vérifiez dans les journaux du portail qu'aucun BEK, ni aucun haché reçu,
-n'apparaît, y compris sur les refus.
+Check in the portal logs that no BEK, and no received hash,
+appears, including on refusals.
 
-## 5. Le chemin qu'il faut casser : copier l'URL dans Edge
+## 5. The path that must break: copy the URL into Edge
 
-C'est la preuve que le dispositif tient. Dans SEB, notez l'URL de session
-affichée à l'étape 4 — de la forme `https://<portail>/s/<session>/`.
+This is the proof that the arrangement holds. In SEB, note the session URL
+displayed at step 4 — of the form `https://<portal>/s/<session>/`.
 
-Quittez SEB (`quitURL`, ou le bouton de sortie si `allowQuit` le permet).
+Quit SEB (`quitURL`, or the exit button if `allowQuit` permits it).
 
-Ouvrez **Microsoft Edge** — ou n'importe quel navigateur ordinaire — et collez
-l'URL de session.
+Open **Microsoft Edge** — or any ordinary browser — and paste
+the session URL.
 
-**Attendu : 403 et la page « Session hors Safe Exam Browser ».** Edge n'a pas le
-cookie `exam_session` : il n'est jamais passé par la route de démarrage.
+**Expected: 403 and the page « Session hors Safe Exam Browser ».** Edge does not have the
+`exam_session` cookie: it never went through the start route.
 
-Trois variantes à vérifier, toutes doivent donner 403 :
+Three variants to check, all must give a 403:
 
-| Variante | Manipulation | Raison journalisée attendue |
+| Variant | Manipulation | Expected logged reason |
 | --- | --- | --- |
-| Sans cookie | coller l'URL de session dans Edge | `missing` |
-| URL de démarrage directe | coller `https://<portail>/exam/<devoir>/start` dans Edge | `missing-config-key-header` |
-| Cookie volé | recopier le cookie `exam_session` du poste SEB vers un **autre poste** (autre adresse IP) et rouvrir l'URL de session | `address-mismatch` |
+| Without cookie | paste the session URL into Edge | `missing` |
+| Start URL directly | paste `https://<portal>/exam/<assignment>/start` into Edge | `missing-config-key-header` |
+| Stolen cookie | copy the `exam_session` cookie from the SEB machine onto **another machine** (another IP address) and reopen the session URL | `address-mismatch` |
 
-La troisième variante est celle qui compte le plus : elle prouve la liaison à
-l'adresse client (analyse.md D5). Sur un même poste, le cookie fonctionnera,
-ce qui est voulu — un second onglet reprend la session.
+The third variant is the one that matters most: it proves the binding to
+the client address (analyse.md D5). On the same machine the cookie will work,
+which is intended — a second tab resumes the session.
 
-## 6. Ce que cette procédure ne prouve pas
+## 6. What this procedure does not prove
 
-- Elle ne prouve rien contre un étudiant qui **obtient le BEK**. project.md § 9
-  l'assume : « un étudiant qui obtient le Browser Exam Key peut forger les
-  en-têtes depuis un navigateur ordinaire ». D'où la rotation à chaque session.
-- Elle ne prouve rien sur Linux : SEB n'y existe pas en version officielle.
-  Un parc de salle hétérogène affaiblit mécaniquement le dispositif.
-- Elle ne dit rien du second appareil ni du voisin. Cela relève de la
-  surveillance humaine.
+- It proves nothing against a student who **obtains the BEK**. project.md § 9
+  accepts it: "a student who obtains the Browser Exam Key can forge the
+  headers from an ordinary browser". Hence the rotation for every session.
+- It proves nothing on Linux: SEB has no official version there.
+  A heterogeneous exam room fleet mechanically weakens the arrangement.
+- It says nothing about a second device or about the neighbour. That falls under
+  human invigilation.
 
-## 7. Trace
+## 7. Trail
 
-Reportez dans ce fichier, en fin de section, la date, la version de SEB, la
-plateforme, la Config Key affichée par l'outil et celle enregistrée par le
-portail, et le résultat des étapes 4 et 5. Une seule ligne par exécution suffit,
-mais elle doit exister : c'est la seule preuve que la preuve B a été faite.
+Record in this file, at the end of the section, the date, the version of SEB, the
+platform, the Config Key displayed by the tool and the one recorded by the
+portal, and the result of steps 4 and 5. A single line per run is enough,
+but it must exist: it is the only proof that proof B was carried out.
 
-| Date | Plateforme et version de SEB | Config Key (outil) | Config Key (portail) | Étape 4 | Étape 5 |
+| Date | Platform and SEB version | Config Key (tool) | Config Key (portal) | Step 4 | Step 5 |
 | --- | --- | --- | --- | --- | --- |
 | | | | | | |
