@@ -1,34 +1,34 @@
 /**
- * Cookie d'examen : la seule preuve que le proxy vers code-server accepte.
+ * Exam cookie: the only proof the proxy to code-server accepts.
  *
- * Invariant 5 de CLAUDE.md : « Le proxy vers code-server ne lit jamais d'en-tête
- * SEB. Il ne connaît que le cookie de session lié à l'adresse client. La
- * vérification SEB se fait une fois, sur la route de démarrage d'examen. »
- * D'où ce module : la vérification SEB de verify.ts produit un jeton signé,
- * et `verifyExamCookie` est la seule chose que le proxy appellera.
+ * Invariant 5 of CLAUDE.md: "The proxy to code-server never reads a SEB
+ * header. It only knows the session cookie bound to the client address. The
+ * SEB verification happens once, on the exam start route." Hence this module:
+ * the SEB verification of verify.ts produces a signed token, and
+ * `verifyExamCookie` is the only thing the proxy will ever call.
  *
- * Motivation, analyse.md § 4.5 : rien ne garantit que SEB ajoute ses en-têtes
- * aux mises à niveau websocket ni aux requêtes de service worker ; un proxy qui
- * les exigerait casserait l'éditeur. Et analyse.md D5 : en mode examen, une
- * requête venue d'une adresse différente de celle de la vérification initiale
- * est refusée.
+ * Rationale, analyse.md § 4.5: nothing guarantees that SEB adds its headers to
+ * websocket upgrades nor to service-worker requests; a proxy that demanded
+ * them would break the editor. And analyse.md D5: in exam mode, a request
+ * coming from an address other than the one of the initial verification is
+ * refused.
  *
- * Le jeton est autoporteur et signé (HMAC-SHA256), pas opaque : le proxy le
- * valide sans toucher la base à chaque trame websocket. Il ne contient aucun
- * secret — surtout pas un BEK — et n'est pas chiffré ; tout ce qu'il porte est
- * déjà connu du client.
+ * The token is self-contained and signed (HMAC-SHA256), not opaque: the proxy
+ * validates it without touching the database on every websocket frame. It
+ * contains no secret — least of all a BEK — and is not encrypted; everything
+ * it carries is already known to the client.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const EXAM_COOKIE = "exam_session";
 
-/** Ce que le cookie transporte. Aucune de ces valeurs n'est un secret. */
+/** What the cookie carries. None of these values is a secret. */
 export interface ExamClaims {
   readonly assignmentId: string;
   readonly sessionId: string;
-  /** Adresse du client au moment de la vérification SEB. */
+  /** Client address at the time of the SEB verification. */
   readonly clientAddress: string;
-  /** Instant d'émission, en millisecondes depuis l'époque. */
+  /** Issue time, in milliseconds since the epoch. */
   readonly issuedAt: number;
 }
 
@@ -46,7 +46,7 @@ export type ExamCookieVerdict =
 
 export interface ExamCookieOptions {
   readonly secret: string;
-  /** Durée de validité. Par défaut quatre heures, la durée d'une séance. */
+  /** Validity window. Four hours by default, the length of a sitting. */
   readonly maxAgeMs?: number;
 }
 
@@ -57,12 +57,12 @@ function sign(payload: string, secret: string): string {
 }
 
 /**
- * Émet le jeton. Format : `<payload en base64url>.<HMAC en base64url>`, sans
- * caractère à échapper dans un cookie.
+ * Issues the token. Format: `<payload in base64url>.<HMAC in base64url>`, with
+ * no character that would need escaping in a cookie.
  */
 export function issueExamCookie(claims: ExamClaims, options: ExamCookieOptions): string {
   if (options.secret.length < 16) {
-    throw new Error("Le secret de signature du cookie d'examen est trop court");
+    throw new Error("The signing secret of the exam cookie is too short");
   }
   const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
   return `${payload}.${sign(payload, options.secret)}`;
@@ -102,17 +102,17 @@ function parseClaims(json: string): ExamClaims | null {
 }
 
 export interface ExamCookieCheck extends ExamCookieOptions {
-  /** Adresse de la requête courante ; doit être celle de la vérification SEB. */
+  /** Address of the current request; must be the one of the SEB verification. */
   readonly clientAddress: string;
-  /** Si fourni, le cookie doit porter ce devoir. */
+  /** If given, the cookie must carry this assignment. */
   readonly assignmentId?: string;
   readonly now?: number;
 }
 
 /**
- * Vérifie le jeton. C'est la fonction que le proxy `/s/<session>/*` appellera :
- * cookie valide **et** adresse client identique, sinon refus explicite avec
- * une raison.
+ * Verifies the token. This is the function the `/s/<session>/*` proxy will
+ * call: a valid cookie **and** an identical client address, otherwise an
+ * explicit refusal with a reason.
  */
 export function verifyExamCookie(
   cookie: string | undefined,
@@ -123,7 +123,7 @@ export function verifyExamCookie(
   if (dot <= 0 || dot === cookie.length - 1) return { ok: false, reason: "malformed" };
   const payload = cookie.slice(0, dot);
   const signature = cookie.slice(dot + 1);
-  // Signature d'abord : le contenu n'est digne d'être lu qu'une fois authentifié.
+  // Signature first: the content is only worth reading once authenticated.
   if (!signaturesEqual(sign(payload, check.secret), signature)) {
     return { ok: false, reason: "bad-signature" };
   }
@@ -138,14 +138,14 @@ export function verifyExamCookie(
   if (check.assignmentId !== undefined && claims.assignmentId !== check.assignmentId) {
     return { ok: false, reason: "assignment-mismatch" };
   }
-  // analyse.md D5 : même session, mais provenance vérifiée.
+  // analyse.md D5: same session, but with the origin verified.
   if (claims.clientAddress !== check.clientAddress) {
     return { ok: false, reason: "address-mismatch" };
   }
   return { ok: true, claims };
 }
 
-/** Attributs du cookie posés sur la réponse, factorisés pour le proxy et la route. */
+/** Cookie attributes set on the response, factored out for the proxy and the route. */
 export function examCookieAttributes(options: {
   readonly secure: boolean;
   readonly maxAgeMs?: number;
@@ -159,8 +159,8 @@ export function examCookieAttributes(options: {
   return {
     path: "/",
     httpOnly: true,
-    // `lax` et non `strict` : SEB arrive sur la route de démarrage par une
-    // navigation de premier niveau depuis le fichier de configuration.
+    // `lax` and not `strict`: SEB reaches the start route through a top-level
+    // navigation from the configuration file.
     sameSite: "lax",
     secure: options.secure,
     maxAge: Math.floor((options.maxAgeMs ?? DEFAULT_MAX_AGE_MS) / 1000),

@@ -1,34 +1,34 @@
 # heig-classroom
 
-Monorepo pnpm de deux applications déployées séparément :
+A pnpm monorepo of two applications deployed separately:
 
-| Chemin | Rôle | Déploiement |
+| Path | Role | Deployment |
 | --- | --- | --- |
-| `apps/server` + `apps/web` | HEIG GitHub Classroom : classes, devoirs, dépôts étudiants, notation par CI | classroom.chevallier.io, VM DigitalOcean 1 Go, **production en service** |
-| `apps/codespace` | Portail d'environnements de développement supervisés (code-server, Podman rootful, mode examen SEB) | VM moteur dédiée, en test |
-| `packages/domain`, `packages/contracts` | Règles métier pures et schémas Zod partagés | |
+| `apps/server` + `apps/web` | HEIG GitHub Classroom: classes, assignments, student repositories, CI-based grading | classroom.chevallier.io, 1 GB DigitalOcean VM, **production in service** |
+| `apps/codespace` | Portal of supervised development environments (code-server, rootful Podman, SEB exam mode) | dedicated engine VM, under test |
+| `packages/domain`, `packages/contracts` | Pure business rules and shared Zod schemas | |
 
-Spécifications et ADR dans `docs/` (classroom) et `apps/codespace/docs/` (portail). Chaque application a son propre `CLAUDE.md` avec ses invariants ; celui d'`apps/codespace` prime pour tout ce qui touche au portail.
+Specifications and ADRs live in `docs/` (classroom) and `apps/codespace/docs/` (portal). Each application has its own `CLAUDE.md` with its invariants; the one in `apps/codespace` takes precedence for anything concerning the portal.
 
-## Production : règles absolues
+## Production: absolute rules
 
-- `classroom.chevallier.io` est en service pour des étudiants. **Tout push sur `main` déclenche la construction de l'image et son déploiement** (`.github/workflows/ci.yml`, `deploy.sh`). On travaille sur des branches ; `main` ne reçoit que des changements prêts à tourner.
-- On ne stoppe pas le service, sauf nécessité de redémarrer ; on ne purge jamais la base ; on ne lance aucune migration destructive sans sauvegarde vérifiée (voir `deploy.md`).
-- Le Dockerfile ne construit **que** `apps/server` et `apps/web` (`pnpm --filter '!@hgc/codespace' build`). Rien d'`apps/codespace` n'entre dans l'image de production.
-- Le moteur de conteneurs du portail ne tourne **jamais** sur la VM de classroom : socket Podman root, nftables et image de 1,5 Go n'ont rien à y faire (956 Mio de RAM, base de production).
+- `classroom.chevallier.io` is in service for students. **Every push to `main` triggers the image build and its deployment** (`.github/workflows/ci.yml`, `deploy.sh`). We work on branches; `main` only receives changes that are ready to run.
+- We do not stop the service, except when a restart is required; we never purge the database; we never run a destructive migration without a verified backup (see `deploy.md`).
+- The Dockerfile builds **only** `apps/server` and `apps/web` (`pnpm --filter '!@hgc/codespace' build`). Nothing from `apps/codespace` goes into the production image.
+- The portal's container engine **never** runs on the classroom VM: a root Podman socket, nftables and a 1.5 GB image have no business there (956 MiB of RAM, production database).
 
-## Règle d'import
+## Import rule
 
-`apps/codespace` n'importe que `packages/*`, jamais `apps/server` ni `apps/web`. L'inverse aussi. Les deux applications se parlent par HTTP avec un jeton de lancement signé (à venir, jalon 2 du portail). Cette règle garde le portail extractible en projet indépendant.
+`apps/codespace` only imports `packages/*`, never `apps/server` or `apps/web`. The same holds the other way round. The two applications talk to each other over HTTP with a signed launch token (to come, portal milestone 2). This rule keeps the portal extractable as an independent project.
 
-## Développement
+## Development
 
 ```bash
 corepack enable pnpm && pnpm install
 docker compose -f docker-compose.dev.yml up -d     # Postgres + Keycloak (classroom)
-pnpm dev                                           # classroom sur :3000
-pnpm build && pnpm typecheck && pnpm test          # les deux applications
-pnpm --filter @hgc/codespace test:integration      # portail : exige Podman rootful, voir apps/codespace/docs/setup-poste.md
+pnpm dev                                           # classroom on :3000
+pnpm build && pnpm typecheck && pnpm test          # both applications
+pnpm --filter @hgc/codespace test:integration      # portal: requires rootful Podman, see apps/codespace/docs/setup-poste.md
 ```
 
-Les tests d'intégration du portail sont exclus du CI ; ses tests unitaires y tournent. Code et identifiants en anglais, documentation et commits en français.
+The portal's integration tests are excluded from CI; its unit tests run there. Everything is written in English: code, identifiers, comments, documentation and commit messages. Only end-user UI text follows the user's language (apps/web i18n).

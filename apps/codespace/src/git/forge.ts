@@ -54,7 +54,7 @@ export function createForgejoForge(opts: ForgejoOptions): Forge {
       const head = await api(`/repos/${repo.owner}/${repo.name}`);
       if (head.ok) return;
       if (head.status !== 404) {
-        throw new Error(`forgejo: GET /repos a répondu ${head.status}`);
+        throw new Error(`forgejo: GET /repos answered ${head.status}`);
       }
       // `/user/repos` creates under the token's owner; `/orgs/<o>/repos`
       // under an organisation. Try the first, fall back to the second.
@@ -65,7 +65,7 @@ export function createForgejoForge(opts: ForgejoOptions): Forge {
       }
       if (!created.ok && created.status !== 409) {
         throw new Error(
-          `forgejo: création de ${repo.owner}/${repo.name} refusée (${created.status})`,
+          `forgejo: creation of ${repo.owner}/${repo.name} refused (${created.status})`,
         );
       }
     },
@@ -73,35 +73,35 @@ export function createForgejoForge(opts: ForgejoOptions): Forge {
 }
 
 /**
- * Ce que la forge GitHub demande à octokit, et rien de plus. L'interface
- * existe pour que les tests unitaires puissent la remplacer : sans elle,
- * vérifier la résolution par organisation, le cache et l'expiration
- * demanderait une vraie App et un vrai réseau.
+ * What the GitHub forge asks of octokit, and nothing more. The interface
+ * exists so that unit tests can replace it: without it, checking the
+ * per-organisation resolution, the cache and the expiry would take a real
+ * App and a real network.
  */
 export interface GithubAppApi {
-  /** `GET /orgs/{org}/installation` ; `null` = App non installée sur l'org. */
+  /** `GET /orgs/{org}/installation`; `null` = App not installed on the org. */
   installationIdFor(org: string): Promise<number | null>;
-  /** Jeton d'installation, avec sa date d'expiration en millisecondes. */
+  /** Installation token, with its expiry date in milliseconds. */
   installationToken(installationId: number): Promise<{ token: string; expiresAt: number }>;
 }
 
 export interface GithubOptions {
   appId: string | number;
-  /** Clé privée PEM de la GitHub App. Lue depuis le disque au démarrage, en mémoire ensuite. */
+  /** PEM private key of the GitHub App. Read from disk at startup, in memory afterwards. */
   privateKey: string;
-  /** GitHub Enterprise ; github.com par défaut. */
+  /** GitHub Enterprise; github.com by default. */
   baseUrl?: string;
-  /** Remplacement d'octokit, pour les tests. */
+  /** Replacement for octokit, for tests. */
   api?: GithubAppApi;
   now?: () => number;
 }
 
-/** Marge de renouvellement : un push commencé ne doit pas survivre à son jeton. */
+/** Renewal margin: a push that has started must not outlive its token. */
 export const TOKEN_RENEWAL_MARGIN_MS = 60_000;
-/** Durée nominale d'un jeton d'installation GitHub, quand l'API ne la donne pas. */
+/** Nominal lifetime of a GitHub installation token, when the API does not give it. */
 export const INSTALLATION_TOKEN_TTL_MS = 3_600_000;
 
-/** Implémentation réelle : octokit, chargé paresseusement. */
+/** Real implementation: octokit, loaded lazily. */
 function octokitApi(opts: Pick<GithubOptions, "appId" | "privateKey" | "baseUrl">): GithubAppApi {
   let app: import("octokit").App | null = null;
   async function theApp(): Promise<import("octokit").App> {
@@ -139,20 +139,21 @@ function octokitApi(opts: Pick<GithubOptions, "appId" | "privateKey" | "baseUrl"
 }
 
 /**
- * GitHub par jeton d'installation d'App, la **même App que heig-classroom**
- * (`apps/server/src/github/app.ts`, dont ce module reprend le geste sans rien
- * lui importer : la règle d'import du monorepo l'interdit).
+ * GitHub through an App installation token, the **same App as
+ * heig-classroom** (`apps/server/src/github/app.ts`, whose gesture this
+ * module repeats without importing anything from it: the monorepo's import
+ * rule forbids that).
  *
- * L'installation n'est pas un réglage : elle est résolue par **organisation**,
- * celle du `owner` du dépôt, parce qu'un portail sert plusieurs classes et que
- * chacune vit dans son organisation GitHub. Le jeton qui en sort vaut une
- * heure ; il est mis en cache par installation et renouvelé une minute avant
- * son expiration.
+ * The installation is not a setting: it is resolved per **organisation**, the
+ * one of the repository `owner`, because a portal serves several classes and
+ * each of them lives in its own GitHub organisation. The token it yields is
+ * valid for an hour; it is cached per installation and renewed one minute
+ * before it expires.
  *
- * Une organisation où l'App n'est pas installée est une erreur de
- * **configuration**, pas une panne : `ForgeUnconfiguredError` laisse la ligne
- * de relais `pending` et fait refuser l'amorçage d'une session avec une cause
- * nommée, plutôt que d'ouvrir un espace de travail vide.
+ * An organisation where the App is not installed is a **configuration**
+ * error, not an outage: `ForgeUnconfiguredError` leaves the relay row
+ * `pending` and makes session bootstrap fail with a named cause, rather than
+ * opening an empty workspace.
  */
 export function createGithubForge(opts: GithubOptions): Forge {
   const host = (opts.baseUrl ?? "https://github.com").replace(/\/+$/, "");
@@ -167,8 +168,8 @@ export function createGithubForge(opts: GithubOptions): Forge {
     const resolved = await api.installationIdFor(org);
     if (resolved === null) {
       throw new ForgeUnconfiguredError(
-        `GitHub App non installée sur l'organisation ${org} : le portail ne peut ni lire ` +
-          `ni écrire ses dépôts. Installez l'App sur cette organisation.`,
+        `GitHub App not installed on organisation ${org}: the portal can neither read ` +
+          `nor write its repositories. Install the App on this organisation.`,
       );
     }
     installations.set(org, resolved);
@@ -188,29 +189,29 @@ export function createGithubForge(opts: GithubOptions): Forge {
     kind: "github",
     pushUrl: (repo) => `${host}/${repo.owner}/${repo.name}.git`,
     /**
-     * **`Basic`, pas `Bearer`.** Le transport git de github.com refuse un
-     * jeton d'installation présenté en `Bearer` (« remote: invalid
-     * credentials », mesuré sur la VM le 2026-09-17) ; il attend l'authent
-     * HTTP de base avec `x-access-token` pour identifiant et le jeton pour
-     * mot de passe. heig-classroom fait la même chose en glissant le couple
-     * dans l'URL (`github/git.ts`, `authUrl`) ; ici il reste dans un en-tête,
-     * donc hors de argv et hors des journaux de git.
+     * **`Basic`, not `Bearer`.** The git transport of github.com refuses an
+     * installation token presented as `Bearer` ("remote: invalid
+     * credentials", measured on the VM on 2026-09-17); it expects HTTP basic
+     * authentication with `x-access-token` as the user name and the token as
+     * the password. heig-classroom does the same by slipping the pair into
+     * the URL (`github/git.ts`, `authUrl`); here it stays in a header, so out
+     * of argv and out of git's logs.
      */
     authorization: async (repo) =>
       `Basic ${Buffer.from(`x-access-token:${await installationToken(repo.owner)}`).toString("base64")}`,
     async ensureRepo() {
-      // Les dépôts sont provisionnés par heig-classroom (analyse.md D3) ; le
-      // portail ne fait que pousser dans ce qui existe déjà.
+      // Repositories are provisioned by heig-classroom (analyse.md D3); the
+      // portal only pushes into what already exists.
     },
   };
 }
 
 /**
- * Erreur de **configuration** du relais, par opposition à une panne de la
- * forge. `relay.ts` la distingue : une forge en panne finit par épuiser le
- * budget de tentatives et la ligne passe `failed` ; une forge non configurée
- * n'est pas une panne, la ligne doit rester `pending` jusqu'à ce que
- * l'exploitant pose les identifiants, et le relais reprendra tout seul.
+ * A relay **configuration** error, as opposed to a forge outage. `relay.ts`
+ * tells them apart: a forge that is down eventually exhausts the attempt
+ * budget and the row turns `failed`; a forge that is not configured is not an
+ * outage, the row must stay `pending` until the operator installs the
+ * credentials, and the relay will resume on its own.
  */
 export class ForgeUnconfiguredError extends Error {
   constructor(message: string) {
@@ -220,23 +221,23 @@ export class ForgeUnconfiguredError extends Error {
 }
 
 /**
- * GitHub **sans** identifiants d'App : tout ce qui ne demande pas de jeton
- * fonctionne (l'URL de clonage d'un dépôt public, dont le dépôt de transit
- * s'amorce en mode travaux pratiques), et le relais refuse explicitement.
+ * GitHub **without** App credentials: everything that does not need a token
+ * works (the clone URL of a public repository, from which the staging
+ * repository bootstraps in lab-work mode), and the relay refuses explicitly.
  *
- * C'est l'état d'un déploiement qui n'a pas encore reçu sa GitHub App : le
- * portail démarre, les sessions s'ouvrent, les `PushEvent` sont écrits
- * (invariant 7) et restent `pending` avec le message ci-dessous dans
- * `last_error`. Rien n'est perdu ; poser `GITHUB_APP_*` suffit à vider la
- * file.
+ * This is the state of a deployment that has not received its GitHub App yet:
+ * the portal starts, sessions open, the `PushEvent`s are written (invariant 7)
+ * and stay `pending` with the message below in `last_error`. Nothing is lost;
+ * setting `GITHUB_APP_*` is enough to drain the queue.
  *
- * Ce qui **ne** fonctionne plus, en revanche, c'est l'amorçage d'un dépôt de
- * transit depuis un dépôt privé : la session est alors refusée avec une cause
- * nommée plutôt qu'ouverte sur un espace de travail vide (docs/deploy.md § 5).
+ * What does **not** work any more, on the other hand, is bootstrapping a
+ * staging repository from a private repository: the session is then refused
+ * with a named cause rather than opened on an empty workspace
+ * (docs/deploy.md § 5).
  */
 export const UNCONFIGURED_GITHUB_MESSAGE =
-  "GitHub App non configurée : GITHUB_APP_ID et GITHUB_APP_PRIVATE_KEY_PATH sont absents " +
-  "de /etc/codespace/env. Seuls les dépôts publics sont accessibles.";
+  "GitHub App not configured: GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY_PATH are missing " +
+  "from /etc/codespace/env. Only public repositories are reachable.";
 
 export function createUnconfiguredGithubForge(opts: { baseUrl?: string } = {}): Forge {
   const host = (opts.baseUrl ?? "https://github.com").replace(/\/+$/, "");
@@ -247,7 +248,7 @@ export function createUnconfiguredGithubForge(opts: { baseUrl?: string } = {}): 
       throw new ForgeUnconfiguredError(UNCONFIGURED_GITHUB_MESSAGE);
     },
     async ensureRepo() {
-      // Les dépôts sont provisionnés par heig-classroom (analyse.md D3).
+      // Repositories are provisioned by heig-classroom (analyse.md D3).
     },
   };
 }

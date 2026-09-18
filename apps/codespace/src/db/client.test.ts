@@ -1,13 +1,13 @@
 /**
- * Les migrations drizzle-kit sont la seule source du schéma physique depuis
- * V1 (`git/db.ts` a disparu). Ce test affirme que la base ouverte par
- * `openDb` porte bien les quatre entités du cadrage, et que `push_events` — la
- * table écrite par P3 — n'a pas dérivé.
+ * The drizzle-kit migrations are the only source of the physical schema since
+ * V1 (`git/db.ts` is gone). This test asserts that the database opened by
+ * `openDb` does carry the four entities of the framing document, and that
+ * `push_events` — the table written by P3 — has not drifted.
  *
- * Cinquième table depuis l'intégration classroom : `launch_tokens_used`. Ce
- * n'est pas une entité du cadrage mais un registre d'unicité — un `jti`
- * consommé et sa date d'expiration — dont la clé primaire *est* la garantie
- * d'usage unique du jeton de lancement.
+ * Fifth table since the classroom integration: `launch_tokens_used`. It is not
+ * an entity of the framing document but a uniqueness register — a consumed
+ * `jti` and its expiry date — whose primary key *is* the single-use guarantee
+ * of the launch token.
  */
 import { describe, expect, it } from "vitest";
 
@@ -15,7 +15,7 @@ import { openDb } from "./client.js";
 import { assignments, pushEvents, sessions, users } from "./schema.js";
 
 describe("migrations", () => {
-  it("crée exactement les quatre entités du cadrage, plus le registre des jetons", () => {
+  it("creates exactly the four entities of the framing document, plus the token register", () => {
     const handle = openDb(":memory:");
     const rows = handle.db.all<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle%' ORDER BY name",
@@ -30,7 +30,7 @@ describe("migrations", () => {
     handle.close();
   });
 
-  it("garde les colonnes que le canal Git écrit", () => {
+  it("keeps the columns the Git channel writes", () => {
     const handle = openDb(":memory:");
     const columns = handle.db
       .all<{ name: string }>("PRAGMA table_info(push_events)")
@@ -55,7 +55,7 @@ describe("migrations", () => {
     handle.close();
   });
 
-  it("accepte les quatre entités et leurs contraintes", () => {
+  it("accepts the four entities and their constraints", () => {
     const handle = openDb(":memory:");
     const now = new Date();
     handle.db
@@ -79,7 +79,7 @@ describe("migrations", () => {
         image: "img",
         uploadPack: true,
         beks: ["a", "b"],
-        sebConfig: { examKeySalt: "sel", quitUrl: "http://x/" },
+        sebConfig: { examKeySalt: "salt", quitUrl: "http://x/" },
         createdAt: now,
       })
       .run();
@@ -112,14 +112,14 @@ describe("migrations", () => {
       })
       .run();
 
-    // Le JSON revient typé, pas en chaîne.
+    // The JSON comes back typed, not as a string.
     const assignment = handle.db.select().from(assignments).get();
     expect(assignment?.beks).toEqual(["a", "b"]);
-    expect(assignment?.sebConfig?.examKeySalt).toBe("sel");
-    // Les horodatages reviennent en Date, pas en nombre.
+    expect(assignment?.sebConfig?.examKeySalt).toBe("salt");
+    // The timestamps come back as Date, not as numbers.
     expect(handle.db.select().from(sessions).get()?.lastSeen).toBeInstanceOf(Date);
 
-    // Clé étrangère : une session sans devoir est refusée.
+    // Foreign key: a session without an assignment is refused.
     expect(() =>
       handle.db
         .insert(sessions)
@@ -127,7 +127,7 @@ describe("migrations", () => {
           id: "s2",
           userId: "u1",
           student: "student",
-          assignmentId: "inexistant",
+          assignmentId: "nonexistent",
           volumeDir: "/v",
           state: "running",
           createdAt: now,
@@ -138,14 +138,14 @@ describe("migrations", () => {
         .run(),
     ).toThrow();
 
-    // Unicité de l'identifiant institutionnel : deux comptes ne partagent pas
-    // un répertoire de volume.
+    // Uniqueness of the institutional identifier: two accounts do not share a
+    // volume directory.
     expect(() =>
       handle.db
         .insert(users)
         .values({
           id: "u2",
-          oidcSub: "autre",
+          oidcSub: "other",
           login: "student",
           email: "s2@x",
           displayName: "S2",
@@ -158,7 +158,7 @@ describe("migrations", () => {
     handle.close();
   });
 
-  it("est rejouable : ouvrir deux fois ne rejoue pas les migrations", () => {
+  it("is replayable: opening twice does not replay the migrations", () => {
     const first = openDb(":memory:");
     first.close();
     const second = openDb(":memory:");

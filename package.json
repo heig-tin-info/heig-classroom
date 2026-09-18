@@ -2,7 +2,7 @@
   "name": "heig-classroom",
   "private": true,
   "version": "0.1.0",
-  "description": "HEIG GitHub Classroom — portail teacher/student adossé à GitHub",
+  "description": "HEIG GitHub Classroom — teacher/student portal backed by GitHub",
   "packageManager": "pnpm@10.34.4",
   "engines": {
     "node": ">=22"

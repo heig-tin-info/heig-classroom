@@ -1,57 +1,58 @@
-// --- Codespace (environnement en ligne) : contrat entre classroom et le portail ---
+// --- Codespace (online workspace): the contract between classroom and the portal ---
 //
-// classroom est la source de vérité des devoirs, des étudiants et des dépôts ;
-// le portail (apps/codespace) est la source de vérité des sessions. Les deux
-// se parlent uniquement par ces messages, signés HS256 avec un secret partagé
-// (`CODESPACE_LAUNCH_SECRET` des deux côtés). Ni l'un ni l'autre n'importe le
-// code de l'autre (règle d'import du CLAUDE.md racine).
+// classroom is the source of truth for assignments, students and repositories;
+// the portal (apps/codespace) is the source of truth for sessions. The two only
+// talk to each other through these messages, signed HS256 with a shared secret
+// (`CODESPACE_LAUNCH_SECRET` on both sides). Neither imports the other's code
+// (the import rule of the root CLAUDE.md).
 
 /**
- * Mode de travail d'un devoir.
- * - `free` : flux historique, l'étudiant clone et pousse avec son compte GitHub.
- * - `online` : le travail se fait dans le portail ; l'étudiant n'a qu'un droit
- *   de lecture sur son dépôt, le portail pousse pour lui.
- * - `online_seb` : comme `online`, et la session n'est ouverte que depuis Safe
- *   Exam Browser (vérification côté portail) ; l'étudiant n'a aucun accès au
- *   dépôt avant la notation.
+ * Work mode of an assignment.
+ * - `free`: the historical flow, the student clones and pushes with their own
+ *   GitHub account.
+ * - `online`: the work happens in the portal; the student only has read access
+ *   to their repository, the portal pushes on their behalf.
+ * - `online_seb`: like `online`, and the session is only opened from Safe Exam
+ *   Browser (checked on the portal side); the student has no access at all to
+ *   the repository before grading.
  */
 export type WorkMode = "free" | "online" | "online_seb";
 export const WORK_MODES: readonly WorkMode[] = ["free", "online", "online_seb"];
 
-/** Réglages "environnement en ligne" d'un enseignant, posés par l'administrateur. */
+/** A teacher's "online workspace" settings, set by the administrator. */
 export interface TeacherCodespaceGrant {
-  /** L'enseignant voit et peut choisir les modes `online*` dans ses devoirs. */
+  /** The teacher sees and can pick the `online*` modes in their assignments. */
   enabled: boolean;
-  /** Sessions actives simultanées autorisées pour l'ensemble de ses devoirs. */
+  /** Simultaneous active sessions allowed across all of their assignments. */
   maxActiveSessions: number;
 }
 
-/** Repo cible d'un étudiant, tel que classroom l'a provisionné. */
+/** A student's target repository, as classroom provisioned it. */
 export interface CodespaceRepoRef {
   fullName: string;
   defaultBranch: string;
 }
 
 /**
- * Devoir tel que le portail doit le connaître. classroom l'envoie (PUT) à
- * chaque enregistrement d'un devoir en mode `online*`, avant qu'un étudiant
- * puisse le lancer ; le portail le crée ou le met à jour (idempotent).
+ * An assignment as the portal needs to know it. classroom sends it (PUT) every
+ * time an assignment in an `online*` mode is saved, before any student can
+ * launch it; the portal creates or updates it (idempotent).
  */
 export interface CodespaceAssignmentSync {
-  /** Identifiant du devoir dans classroom ; clé du devoir dans le portail. */
+  /** Id of the assignment in classroom; the assignment key in the portal. */
   id: string;
   slug: string;
   name: string;
   classroomId: string;
   classroomName: string;
   mode: Exclude<WorkMode, "free">;
-  /** Image du catalogue du portail ; null = image par défaut. */
+  /** Image from the portal catalog; null = default image. */
   image: string | null;
-  /** Dépôt modèle (squashé) : ce dont l'espace de travail est amorcé en mode examen. */
+  /** Template repository (squashed): what the workspace is seeded from in exam mode. */
   sourceRepo: CodespaceRepoRef;
-  /** Browser Exam Keys acceptés (mode `online_seb`), un par couple plateforme/version. */
+  /** Accepted Browser Exam Keys (`online_seb` mode), one per platform/version pair. */
   browserExamKeys: string[];
-  /** Enseignant propriétaire : porteur du quota. */
+  /** Owning teacher: the holder of the quota. */
   teacher: { id: string; email: string };
   quota: { maxActiveSessions: number };
   startAt: string;
@@ -59,9 +60,9 @@ export interface CodespaceAssignmentSync {
 }
 
 /**
- * Jeton de lancement : classroom l'émet quand un étudiant clique Démarrer, le
- * portail le vérifie sur `GET /launch?token=...`. Durée de vie courte (5 min),
- * usage unique (`jti`).
+ * Launch token: classroom issues it when a student clicks Start, and the portal
+ * verifies it on `GET /launch?token=...`. Short-lived (5 min), single use
+ * (`jti`).
  */
 export interface LaunchTokenClaims {
   iss: "heig-classroom";
@@ -69,17 +70,17 @@ export interface LaunchTokenClaims {
   iat: number;
   exp: number;
   jti: string;
-  /** Identifiant de l'utilisateur dans classroom (stable). */
+  /** Id of the user in classroom (stable). */
   sub: string;
   email: string;
   displayName: string;
   githubLogin: string | null;
   assignmentId: string;
-  /** Dépôt cible de l'étudiant ; null s'il n'est pas encore provisionné. */
+  /** The student's target repository; null when it is not provisioned yet. */
   repo: CodespaceRepoRef | null;
 }
 
-/** Jeton de service pour les appels serveur → serveur (PUT devoir, etc.). */
+/** Service token for server-to-server calls (assignment PUT, etc.). */
 export interface ServiceTokenClaims {
   iss: "heig-classroom" | "heig-codespace";
   aud: "heig-codespace-api" | "heig-classroom-api";
@@ -87,7 +88,7 @@ export interface ServiceTokenClaims {
   exp: number;
 }
 
-/** Réponse du portail à `GET /api/assignments/:id/sessions` (tableau enseignant). */
+/** The portal's response to `GET /api/assignments/:id/sessions` (teacher table). */
 export interface CodespaceSessionSummary {
   sessionId: string;
   userId: string;

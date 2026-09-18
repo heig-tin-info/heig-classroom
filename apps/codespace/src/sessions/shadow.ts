@@ -1,41 +1,41 @@
 /**
- * Dépôt fantôme côté hôte (analyse.md § 3.3, filet E15).
+ * Host-side shadow repository (analyse.md § 3.3, safety net E15).
  *
  * `git --git-dir=<vol>/shadow.git --work-tree=<vol>/work add -A && commit`,
- * toutes les trois minutes et une dernière fois à la fermeture de la session.
- * Il capture l'arbre de travail y compris ce que l'étudiant n'a pas commité,
- * sans jamais toucher à son dépôt ni apparaître dans le conteneur.
+ * every three minutes and one last time when the session closes.
+ * It captures the working tree including what the student has not committed,
+ * without ever touching their repository or showing up in the container.
  *
- * `.git` est exclu par `info/exclude` : sans cela, `git add -A` verrait le
- * dépôt de l'étudiant dans `work/.git` et l'enregistrerait comme lien de
- * sous-module, ce qui ne capture rien.
+ * `.git` is excluded through `info/exclude`: without that, `git add -A` would
+ * see the student's repository in `work/.git` and record it as a submodule
+ * link, which captures nothing.
  *
- * ## La question des permissions, et ce qui est fait ici
+ * ## The permissions question, and what is done about it here
  *
- * Le volume est monté `:U` (analyse.md D6) : Podman rechown `work/` vers la
- * plage d'UID que `--userns=auto` a tirée pour ce conteneur, par exemple
- * 2147484647. Le portail tourne en uid 1000. **Mesuré sur ce poste** : les
- * modes sont conservés par le chown, l'umask du conteneur est 022, donc les
- * fichiers restent en 644 et les répertoires en 755 — uid 1000 les lit, et
- * l'instantané fonctionne.
+ * The volume is mounted `:U` (analyse.md D6): Podman rechowns `work/` to the
+ * UID range that `--userns=auto` drew for this container, for example
+ * 2147484647. The portal runs as uid 1000. **Measured on this machine**: the
+ * modes are preserved by the chown, the container's umask is 022, so files
+ * stay at 644 and directories at 755 — uid 1000 can read them, and the
+ * snapshot works.
  *
- * Ce qui ne fonctionne pas : un `chmod 600` de l'étudiant. Le fichier devient
- * illisible pour le portail, `git add -A` répond
- * `error: open("x"): Permission denied` et sort en 128. `--ignore-errors`
- * transforme l'échec total en instantané partiel, et c'est ce que fait ce
- * module, en journalisant chaque fichier perdu.
+ * What does not work: a `chmod 600` by the student. The file becomes
+ * unreadable for the portal, `git add -A` answers
+ * `error: open("x"): Permission denied` and exits with 128. `--ignore-errors`
+ * turns the total failure into a partial snapshot, and that is what this
+ * module does, logging every file lost.
  *
- * Ce n'est **pas** une solution, c'est une atténuation. La solution de
- * production, à instruire au jalon 1, est l'une des deux :
+ * This is **not** a solution, it is a mitigation. The production solution, to
+ * be worked out at milestone 1, is one of these two:
  *
- *  - `--uidmap` fixe par session au lieu de `--userns=auto` : le portail
- *    connaît alors l'UID hôte du conteneur et peut poser un ACL
- *    (`setfacl -R -m u:1000:rX`) hérité par défaut sur `work/` ;
- *  - un temporisateur systemd **root** sur l'hôte qui prend l'instantané, le
- *    portail ne faisant que lui signaler les volumes actifs.
+ *  - a per-session fixed `--uidmap` instead of `--userns=auto`: the portal then
+ *    knows the container's host UID and can set an ACL
+ *    (`setfacl -R -m u:1000:rX`) inherited by default on `work/`;
+ *  - a **root** systemd timer on the host that takes the snapshot, the portal
+ *    only telling it which volumes are active.
  *
- * Ce qu'il ne faut surtout pas faire, et qui n'est pas fait : retirer `:U`.
- * Sans lui l'étudiant n'écrit plus dans son propre volume.
+ * What must above all not be done, and is not done: removing `:U`. Without it
+ * the student can no longer write into their own volume.
  */
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -43,9 +43,9 @@ import { join } from "node:path";
 import { git, gitBare } from "../git/index.js";
 
 export interface ShadowResult {
-  /** Sha du commit créé, ou null si l'arbre n'avait pas bougé. */
+  /** Sha of the commit created, or null if the tree had not moved. */
   sha: string | null;
-  /** Chemins que le portail n'a pas pu lire (voir l'en-tête du module). */
+  /** Paths the portal could not read (see the module header). */
   unreadable: string[];
 }
 
@@ -56,7 +56,7 @@ const IDENTITY = {
   GIT_COMMITTER_EMAIL: "portal@codespace.local",
 } as const;
 
-/** `<vol>/shadow.git`, créé si besoin, avec son exclusion de `.git`. */
+/** `<vol>/shadow.git`, created if needed, with its `.git` exclusion. */
 export async function ensureShadowRepo(volumeDir: string): Promise<string> {
   const gitDir = join(volumeDir, "shadow.git");
   try {
@@ -66,8 +66,8 @@ export async function ensureShadowRepo(volumeDir: string): Promise<string> {
     await git(["init", "--bare", "--initial-branch=main", gitDir]);
   }
   await mkdir(join(gitDir, "info"), { recursive: true });
-  // Le dépôt de l'étudiant, et rien d'autre : l'instantané doit porter ses
-  // fichiers, pas une copie de son historique.
+  // The student's repository, and nothing else: the snapshot must carry their
+  // files, not a copy of their history.
   await writeFile(join(gitDir, "info", "exclude"), ".git\n", "utf8");
   return gitDir;
 }
@@ -84,8 +84,8 @@ function unreadablePaths(text: string): string[] {
 }
 
 /**
- * Un instantané. Idempotent : sans changement, rien n'est commité et `sha`
- * vaut null.
+ * One snapshot. Idempotent: with no change, nothing is committed and `sha` is
+ * null.
  */
 export async function snapshot(volumeDir: string): Promise<ShadowResult> {
   const gitDir = await ensureShadowRepo(volumeDir);
@@ -96,8 +96,8 @@ export async function snapshot(volumeDir: string): Promise<ShadowResult> {
   try {
     await git([...common, "add", "-A", "--ignore-errors"], { env: IDENTITY });
   } catch (err) {
-    // `--ignore-errors` indexe ce qu'il peut puis sort en 1 : l'instantané
-    // partiel est meilleur que pas d'instantané du tout.
+    // `--ignore-errors` indexes what it can then exits with 1: a partial
+    // snapshot is better than no snapshot at all.
     const message = String((err as Error).message ?? err);
     unreadable = unreadablePaths(message);
     if (unreadable.length === 0) throw err;
@@ -117,7 +117,7 @@ export async function snapshot(volumeDir: string): Promise<ShadowResult> {
   if (staged === "" && !hasHead && status.trim() === "") return { sha: null, unreadable };
 
   await git(
-    [...common, "commit", "--allow-empty", "-q", "-m", `instantané ${new Date().toISOString()}`],
+    [...common, "commit", "--allow-empty", "-q", "-m", `snapshot ${new Date().toISOString()}`],
     { env: IDENTITY },
   );
   const sha = (await gitBare(gitDir, ["rev-parse", "HEAD"])).trim();

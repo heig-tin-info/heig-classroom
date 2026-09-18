@@ -15,7 +15,7 @@ import {
 
 const INPUT: SebConfigInput = {
   startUrl: "https://codespace.heig-vd.ch/exam/a1/start",
-  quitUrl: "https://codespace.heig-vd.ch/exam/a1/fini",
+  quitUrl: "https://codespace.heig-vd.ch/exam/a1/done",
   examKeySalt: "QJAqvg89YMP6JagAshUm6QqpqpsrVS9ZWUYjdZhfEao=",
 };
 
@@ -24,15 +24,15 @@ function entry(root: SebValue, key: string): SebValue | undefined {
   return root.value.find(([k]) => k === key)?.[1];
 }
 
-describe("génération du .seb", () => {
-  it("le fichier est un plist XML non chiffré", () => {
+describe("generation of the .seb file", () => {
+  it("the file is an unencrypted XML plist", () => {
     const { xml } = renderSebFile(INPUT);
     expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
     expect(xml).toContain("<plist version=\"1.0\">");
     expect(() => parsePlist(xml)).not.toThrow();
   });
 
-  it("porte les réglages exigés par le jalon", () => {
+  it("carries the settings the milestone requires", () => {
     const config = buildSebConfig(INPUT);
     expect(entry(config, "startURL")).toEqual({ kind: "string", value: INPUT.startUrl });
     expect(entry(config, "quitURL")).toEqual({ kind: "string", value: INPUT.quitUrl });
@@ -43,75 +43,75 @@ describe("génération du .seb", () => {
     expect(entry(config, "examKeySalt")).toEqual({ kind: "data", value: INPUT.examKeySalt });
   });
 
-  it("n'autorise que le domaine du portail", () => {
+  it("allows the portal domain and nothing else", () => {
     const rules = entry(buildSebConfig(INPUT), "URLFilterRules");
     expect(rules?.kind).toBe("array");
-    if (rules?.kind !== "array") throw new Error("URLFilterRules doit être un tableau");
+    if (rules?.kind !== "array") throw new Error("URLFilterRules must be an array");
     const expressions = rules.value.map((rule) =>
       rule.kind === "dict" ? rule.value.find(([k]) => k === "expression")?.[1] : undefined,
     );
     expect(expressions).toEqual([{ kind: "string", value: "codespace.heig-vd.ch" }]);
   });
 
-  it("n'écrit jamais de Browser Exam Key dans le fichier remis à l'étudiant", () => {
-    // project.md § 9 : « Le BEK ne doit jamais être exposé côté client ».
+  it("never writes a Browser Exam Key into the file handed to the student", () => {
+    // project.md § 9: the BEK must never be exposed on the client side.
     const { xml } = renderSebFile(INPUT);
     expect(entry(buildSebConfig(INPUT), "browserExamKey")).toEqual({ kind: "string", value: "" });
     expect(xml).toContain("<key>browserExamKey</key>");
     expect(xml).toContain("<key>browserExamKey</key>\n  <string></string>");
   });
 
-  it("idempotence : recharger le fichier généré redonne la même Config Key", () => {
-    const { xml, configKey: cle } = renderSebFile(INPUT);
-    expect(configKeyOfSebFile(xml)).toBe(cle);
-    // Et un second aller-retour ne bouge pas non plus.
+  it("idempotence: reloading the generated file gives the same Config Key back", () => {
+    const { xml, configKey: key } = renderSebFile(INPUT);
+    expect(configKeyOfSebFile(xml)).toBe(key);
+    // And a second round trip does not move either.
     expect(configKeyOfSebFile(xml)).toBe(configKey(parsePlist(xml)));
   });
 
-  it("la génération est déterministe pour une même entrée", () => {
+  it("generation is deterministic for the same input", () => {
     expect(renderSebFile(INPUT)).toEqual(renderSebFile(INPUT));
   });
 
-  it("changer un seul réglage change la Config Key", () => {
-    const autre = renderSebFile({ ...INPUT, quitUrl: `${INPUT.quitUrl}/` });
-    expect(autre.configKey).not.toBe(renderSebFile(INPUT).configKey);
+  it("changing a single setting changes the Config Key", () => {
+    const other = renderSebFile({ ...INPUT, quitUrl: `${INPUT.quitUrl}/` });
+    expect(other.configKey).not.toBe(renderSebFile(INPUT).configKey);
   });
 
-  it("un hôte autorisé de plus change la Config Key", () => {
-    const avecMiroir = renderSebFile({ ...INPUT, extraAllowedHosts: ["docs.heig-vd.ch"] });
-    expect(avecMiroir.configKey).not.toBe(renderSebFile(INPUT).configKey);
-    expect(avecMiroir.xml).toContain("docs.heig-vd.ch");
+  it("one more allowed host changes the Config Key", () => {
+    const withMirror = renderSebFile({ ...INPUT, extraAllowedHosts: ["docs.heig-vd.ch"] });
+    expect(withMirror.configKey).not.toBe(renderSebFile(INPUT).configKey);
+    expect(withMirror.xml).toContain("docs.heig-vd.ch");
   });
 
-  it("deux sels différents donnent deux Config Keys différentes", () => {
+  it("two different salts give two different Config Keys", () => {
     const a = renderSebFile({ ...INPUT, examKeySalt: newExamKeySalt() });
     const b = renderSebFile({ ...INPUT, examKeySalt: newExamKeySalt() });
     expect(a.configKey).not.toBe(b.configKey);
   });
 
-  it("newExamKeySalt produit du base64 de 32 octets", () => {
+  it("newExamKeySalt produces base64 of 32 bytes", () => {
     const salt = newExamKeySalt();
     expect(Buffer.from(salt, "base64")).toHaveLength(32);
   });
 });
 
-describe("lien sebs://", () => {
-  it("https devient sebs, en gardant hôte et chemin", () => {
+describe("sebs:// link", () => {
+  it("https becomes sebs, keeping host and path", () => {
     expect(sebLink("https://codespace.heig-vd.ch", "a1")).toBe(
       "sebs://codespace.heig-vd.ch/exam/a1.seb",
     );
   });
 
-  it("http devient seb, comme link_generator::get_link()", () => {
+  it("http becomes seb, like link_generator::get_link()", () => {
     expect(sebLink("http://localhost:3000", "a1")).toBe("seb://localhost:3000/exam/a1.seb");
   });
 
-  it("le chemin du lien est celui de la route", () => {
+  it("the path of the link is the one of the route", () => {
     expect(sebLink("https://h", "a1").endsWith(sebFilePath("a1"))).toBe(true);
     expect(sebStartPath("a1")).toBe("/exam/a1/start");
   });
 
-  it("un identifiant de devoir est échappé", () => {
+  it("an assignment identifier is escaped", () => {
     expect(sebLink("https://h", "a/1")).toBe("sebs://h/exam/a%2F1.seb");
   });
 });

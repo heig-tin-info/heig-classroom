@@ -1,11 +1,10 @@
 /**
- * Le portail sans classroom en face.
+ * The portal without classroom in front of it.
  *
- * `CODESPACE_LAUNCH_SECRET` vide n'est pas un « mode dégradé » : le greffon
- * n'est pas enregistré du tout, les trois routes n'existent pas, et le portail
- * garde sa graine YAML, sa connexion OIDC et son bouton Démarrer. Ce test
- * monte un vrai portail (Fastify, base, greffons, moteur simulé) des deux
- * façons et compare.
+ * An empty `CODESPACE_LAUNCH_SECRET` is not a "degraded mode": the plugin is
+ * not registered at all, the three routes do not exist, and the portal keeps
+ * its YAML seed, its OIDC login and its Start button. This test builds a real
+ * portal (Fastify, database, plugins, fake engine) both ways and compares.
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -66,43 +65,43 @@ afterEach(async () => {
 const ROUTES = [
   { method: "PUT" as const, url: "/api/assignments/a1" },
   { method: "GET" as const, url: "/api/assignments/a1/sessions" },
-  { method: "GET" as const, url: "/launch?token=peu-importe" },
+  { method: "GET" as const, url: "/launch?token=whatever" },
 ];
 
-describe("intégration classroom désactivée", () => {
-  it("sans secret partagé, les trois routes n'existent pas", async () => {
+describe("classroom integration disabled", () => {
+  it("without a shared secret, the three routes do not exist", async () => {
     const p = await portalWith("");
     for (const route of ROUTES) {
       const reply = await p.app.inject({ method: route.method, url: route.url, payload: {} });
       expect(reply.statusCode, route.url).toBe(404);
     }
-    // Le portail autonome, lui, répond.
+    // The standalone portal, for its part, answers.
     expect((await p.app.inject({ url: "/healthz" })).statusCode).toBe(200);
   });
 
-  it("avec le secret, les trois routes existent et opposent leur propre refus", async () => {
-    const p = await portalWith("secret-de-lancement-de-test-0123456789");
+  it("with the secret, the three routes exist and oppose their own refusal", async () => {
+    const p = await portalWith("test-launch-secret-0123456789012345");
     const puts = await p.app.inject({ method: "PUT", url: "/api/assignments/a1", payload: {} });
     expect(puts.statusCode).toBe(401);
     const list = await p.app.inject({ url: "/api/assignments/a1/sessions" });
     expect(list.statusCode).toBe(401);
-    const launch = await p.app.inject({ url: "/launch?token=peu-importe" });
+    const launch = await p.app.inject({ url: "/launch?token=whatever" });
     expect(launch.statusCode).toBe(403);
   });
 
-  it("refuse un secret trop court plutôt que de l'accepter à moitié", () => {
-    expect(() => loadConfig({ CODESPACE_LAUNCH_SECRET: "trop-court" })).toThrow(
+  it("refuses a too-short secret rather than half-accepting it", () => {
+    expect(() => loadConfig({ CODESPACE_LAUNCH_SECRET: "too-short" })).toThrow(
       /CODESPACE_LAUNCH_SECRET/,
     );
   });
 
-  it("refuse un secret de développement en production", () => {
+  it("refuses a development secret in production", () => {
     expect(() =>
       loadConfig({
         NODE_ENV: "production",
-        OIDC_CLIENT_SECRET: "vrai",
-        COOKIE_SECRET: "un-vrai-secret-de-production",
-        EXAM_COOKIE_SECRET: "un-autre-vrai-secret-de-prod",
+        OIDC_CLIENT_SECRET: "real",
+        COOKIE_SECRET: "a-real-production-secret",
+        EXAM_COOKIE_SECRET: "another-real-prod-secret",
         SEB_VERIFIER: "real",
         SEB_PUBLIC_ORIGIN: "https://codespace.heig-vd.ch",
         CODESPACE_LAUNCH_SECRET: "dev-launch-secret-change-me-0123456789",

@@ -1,30 +1,30 @@
 /**
- * Le seul module du portail qui connaisse Podman (analyse.md D8).
+ * The only module of the portal that knows about Podman (analyse.md D8).
  *
- * Deux règles qui ne se négocient pas :
+ * Two rules that are not negotiable:
  *
- *  1. **Toujours `podman --remote --url unix:///run/podman/podman.sock`.**
- *     Sans `--remote`, le binaire bascule silencieusement en rootless local,
- *     crée ses conteneurs dans un espace réseau pasta et tout ce qu'on mesure
- *     ensuite est faux (docs/setup-poste.md, piège 2).
- *  2. **Les options de durcissement sont celles de
- *     `images/c-dev/run-hardened.sh`, reprises telles quelles** (invariant 3).
- *     `runArgs()` les rend explicitement pour qu'un test puisse les comparer
- *     au script.
+ *  1. **Always `podman --remote --url unix:///run/podman/podman.sock`.**
+ *     Without `--remote`, the binary silently falls back to local rootless,
+ *     creates its containers in a pasta network namespace and everything
+ *     measured afterwards is wrong (docs/setup-poste.md, pitfall 2).
+ *  2. **The hardening options are those of
+ *     `images/c-dev/run-hardened.sh`, taken as they are** (invariant 3).
+ *     `runArgs()` returns them explicitly so that a test can compare them
+ *     against the script.
  *
- * S'y ajoutent, pour V1 : `--network codespace --dns=none
- * --add-host portal.internal:<passerelle>` (invariant 2) et le label
- * `heig-codespace.session=<id>`, qui est **la** marque d'une session. Tout
- * conteneur sans ce label est ignoré par le moteur — au premier chef le
- * conteneur d'ancrage `codespace-anchor` (label `heig-codespace.role=anchor`),
- * qui maintient le pont `cs0` et ne doit jamais être touché.
+ * Added to those, for V1: `--network codespace --dns=none
+ * --add-host portal.internal:<gateway>` (invariant 2) and the label
+ * `heig-codespace.session=<id>`, which is **the** mark of a session. Any
+ * container without that label is ignored by the engine — first and foremost
+ * the anchor container `codespace-anchor` (label `heig-codespace.role=anchor`),
+ * which keeps the `cs0` bridge up and must never be touched.
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-/** Label qui marque un conteneur de session, et rien d'autre. */
+/** Label that marks a session container, and nothing else. */
 export const SESSION_LABEL = "heig-codespace.session";
 
 export interface EngineOptions {
@@ -36,25 +36,25 @@ export interface EngineOptions {
   memory: string;
   cpus: string;
   pidsLimit: number;
-  /** `crun` par défaut ; `runsc` (gVisor) reste un paramètre, cf. analyse.md D2. */
+  /** `crun` by default; `runsc` (gVisor) remains a parameter, cf. analyse.md D2. */
   runtime?: string;
   log?: { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
 }
 
 export interface RunRequest {
   sessionId: string;
-  /** Nom du conteneur ; déterministe pour que la réconciliation le retrouve. */
+  /** Container name; deterministic so that reconciliation can find it again. */
   name: string;
-  /** `<VOLUMES_ROOT>/<student>/<assignment>/work`, monté sur `/work`. */
+  /** `<VOLUMES_ROOT>/<student>/<assignment>/work`, mounted at `/work`. */
   workDir: string;
-  /** Écrase `EngineOptions.image` quand le devoir impose une autre image. */
+  /** Overrides `EngineOptions.image` when the assignment mandates another image. */
   image?: string;
   /**
-   * Variables d'environnement posées sur le conteneur, en plus de celles de
-   * l'image. **Invariant 1** : aucun secret n'y entre jamais. Le seul appelant
-   * est `sessions/manager.ts`, qui n'y met que les trois variables de
-   * `CONTAINER_ENV_KEYS` (échéance, URL de retour, titre du devoir) — un test
-   * unitaire l'affirme.
+   * Environment variables set on the container, in addition to those of the
+   * image. **Invariant 1**: no secret ever gets in. The only caller is
+   * `sessions/manager.ts`, which puts nothing there but the seven variables of
+   * `CONTAINER_ENV_KEYS` (three `CODESPACE_*`: deadline, return URL, assignment
+   * title; four `GIT_*`: the student's git identity) — a unit test asserts it.
    */
   env?: Record<string, string>;
 }
@@ -78,22 +78,22 @@ export class EngineError extends Error {
 }
 
 export interface Engine {
-  /** Crée et démarre le conteneur, renvoie son identifiant et son adresse. */
+  /** Creates and starts the container, returns its id and its address. */
   run(req: RunRequest): Promise<ContainerInfo>;
   inspect(idOrName: string): Promise<ContainerInfo | null>;
   stop(idOrName: string, timeoutSeconds?: number): Promise<void>;
   rm(idOrName: string): Promise<void>;
-  /** Uniquement les conteneurs portant le label de session. */
+  /** Only the containers carrying the session label. */
   listSessions(): Promise<ContainerInfo[]>;
-  /** Attend `GET http://<ip>:8080/healthz`. Renvoie le délai en ms. */
+  /** Waits for `GET http://<ip>:8080/healthz`. Returns the delay in ms. */
   waitHealthy(ip: string, timeoutMs: number): Promise<number>;
-  /** `podman exec` ; réservé aux tests et au script de bout en bout. */
+  /** `podman exec`; reserved for the tests and the end-to-end script. */
   exec(idOrName: string, argv: string[]): Promise<string>;
-  /** Les arguments exacts du `run`, pour qu'un test puisse les affirmer. */
+  /** The exact arguments of the `run`, so that a test can assert them. */
   runArgs(req: RunRequest): string[];
 }
 
-/** Forme minimale de ce que `podman inspect --format json` nous rend. */
+/** Minimal shape of what `podman inspect --format json` gives us back. */
 interface PodmanInspect {
   Id?: string;
   Name?: string;
@@ -117,7 +117,7 @@ export function createEngine(opts: EngineOptions): Engine {
     } catch (err) {
       const e = err as { stderr?: string; message?: string };
       throw new EngineError(
-        `podman ${args[0] ?? ""} a échoué : ${e.message ?? "erreur inconnue"}`,
+        `podman ${args[0] ?? ""} failed: ${e.message ?? "unknown error"}`,
         e.stderr ?? "",
       );
     }
@@ -142,13 +142,13 @@ export function createEngine(opts: EngineOptions): Engine {
       "-d",
       "--name",
       req.name,
-      // La marque d'une session. Le ramasse-miettes et la réconciliation ne
-      // regardent rien d'autre, donc l'ancrage leur est invisible.
+      // The mark of a session. The garbage collector and reconciliation look
+      // at nothing else, so the anchor is invisible to them.
       "--label",
       `${SESSION_LABEL}=${req.sessionId}`,
       "--label",
       "codespace.role=student",
-      // --- durcissement, copié de images/c-dev/run-hardened.sh -------------
+      // --- hardening, copied from images/c-dev/run-hardened.sh -------------
       "--userns=auto",
       "--cap-drop=ALL",
       "--security-opt",
@@ -169,21 +169,21 @@ export function createEngine(opts: EngineOptions): Engine {
       "--cpus",
       opts.cpus,
       ...(opts.runtime ? ["--runtime", opts.runtime] : []),
-      // --- réseau clos, invariant 2 ----------------------------------------
+      // --- closed network, invariant 2 -------------------------------------
       "--network",
       opts.network,
       "--dns=none",
       "--add-host",
       `portal.internal:${opts.gateway}`,
-      // --- environnement du conteneur, invariant 1 -------------------------
-      // Rien d'autre que ce que l'appelant a posé, et lui n'y met aucun
-      // secret. `-e CLE=valeur` plutôt que `--env-file` : la liste doit être
-      // lisible dans `podman inspect` et dans les arguments rendus ici.
+      // --- container environment, invariant 1 ------------------------------
+      // Nothing but what the caller set, and the caller puts no secret in it.
+      // `-e KEY=value` rather than `--env-file`: the list must stay readable in
+      // `podman inspect` and in the arguments returned here.
       ...Object.entries(req.env ?? {}).flatMap(([key, value]) => ["-e", `${key}=${value}`]),
       // --- volume, analyse.md D6 -------------------------------------------
-      // `:U` : avec --userns=auto l'UID mappé change à chaque démarrage, donc
-      // Podman rechown l'arborescence vers la plage du conteneur. Ne jamais
-      // retirer cette option pour simplifier un test.
+      // `:U`: with --userns=auto the mapped UID changes at every start, so
+      // Podman rechowns the tree to the container's range. Never remove this
+      // option in order to make a test simpler.
       "-v",
       `${req.workDir}:/work:U`,
       req.image ?? opts.image,
@@ -194,15 +194,15 @@ export function createEngine(opts: EngineOptions): Engine {
     runArgs,
 
     async run(req) {
-      // Un conteneur homonyme resté d'un démarrage précédent empêcherait le
-      // `run` ; la réconciliation l'a normalement déjà retiré.
+      // A same-named container left over from an earlier start would prevent
+      // the `run`; reconciliation has normally removed it already.
       await podman(["rm", "-f", req.name], 30_000).catch(() => "");
       await podman(runArgs(req), 180_000);
       const info = await this.inspect(req.name);
-      if (!info) throw new EngineError(`conteneur ${req.name} introuvable après run`, "");
+      if (!info) throw new EngineError(`container ${req.name} not found after run`, "");
       opts.log?.info(
         { sessionId: req.sessionId, container: info.id.slice(0, 12), ip: info.ip },
-        "conteneur de session démarré",
+        "session container started",
       );
       return info;
     },
@@ -250,8 +250,8 @@ export function createEngine(opts: EngineOptions): Engine {
       const infos: ContainerInfo[] = [];
       for (const row of rows) {
         const sessionId = row.Labels?.[SESSION_LABEL];
-        // `--filter label=` seul accepterait un conteneur au label vide ;
-        // ce qui définit une session, c'est une valeur.
+        // `--filter label=` alone would accept a container with an empty
+        // label; what defines a session is a value.
         if (!sessionId) continue;
         const detailed = await this.inspect(row.Id ?? row.Names?.[0] ?? "");
         infos.push(
@@ -286,7 +286,7 @@ export function createEngine(opts: EngineOptions): Engine {
         }
         await new Promise((r) => setTimeout(r, 50));
       }
-      throw new EngineError(`/healthz de ${ip} muet après ${timeoutMs} ms (${last})`, "");
+      throw new EngineError(`/healthz of ${ip} silent after ${timeoutMs} ms (${last})`, "");
     },
 
     async exec(idOrName, argv) {

@@ -23,18 +23,19 @@ export function redactSecrets(text: string): string {
 }
 
 /**
- * Le seul véhicule d'une autorisation jusqu'à `git`.
+ * The only vehicle carrying an authorization all the way to `git`.
  *
- * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` est la façon
- * documentée de poser `http.extraHeader` sans fichier de configuration
- * (git ≥ 2.31). Le jeton est alors lisible dans `/proc/<pid>/environ` (root ou
- * le même uid) mais **pas** dans `cmdline`, et rien n'est écrit sur disque :
- * les deux propriétés que jalon-0 P3 demande.
+ * `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_0` / `GIT_CONFIG_VALUE_0` is the
+ * documented way to set `http.extraHeader` without a configuration file
+ * (git ≥ 2.31). The token is then readable in `/proc/<pid>/environ` (root or
+ * the same uid) but **not** in `cmdline`, and nothing is written to disk: the
+ * two properties jalon-0 P3 asks for.
  *
- * Utilisé par le relais (push vers la forge) **et** par l'amorçage du dépôt de
- * transit (fetch du dépôt de l'étudiant en mode TP, du modèle en mode examen).
- * Le second manquait, et c'est ce qui a rendu l'espace de travail vide au
- * premier essai réel en production : le dépôt de l'étudiant est privé.
+ * Used by the relay (push to the forge) **and** by the seeding of the staging
+ * repository (fetch of the student's repository in lab mode, of the template
+ * in exam mode). The second one was missing, and that is what made the
+ * workspace empty on the first real attempt in production: the student's
+ * repository is private.
  */
 export function gitAuthEnv(authorization: string): NodeJS.ProcessEnv {
   return {

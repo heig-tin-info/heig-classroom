@@ -42,13 +42,13 @@ export function parseCgiHead(block: string): CgiHead {
   }
   for (const line of lines) {
     const colon = line.indexOf(":");
-    if (colon <= 0) throw new CgiParseError(`en-tête CGI illisible : ${line.slice(0, 80)}`);
+    if (colon <= 0) throw new CgiParseError(`unreadable CGI header: ${line.slice(0, 80)}`);
     const name = line.slice(0, colon).trim();
     const value = line.slice(colon + 1).trim();
     if (name.toLowerCase() === "status") {
       const code = Number.parseInt(value.slice(0, 3), 10);
       if (!Number.isInteger(code) || code < 100 || code > 599) {
-        throw new CgiParseError(`Status CGI invalide : ${value}`);
+        throw new CgiParseError(`invalid CGI Status: ${value}`);
       }
       head.statusCode = code;
       continue;
@@ -79,13 +79,13 @@ export class CgiHeadScanner {
   private done = false;
 
   push(chunk: Buffer): { head: CgiHead; rest: Buffer } | null {
-    if (this.done) throw new CgiParseError("scanner CGI déjà terminé");
+    if (this.done) throw new CgiParseError("CGI scanner already finished");
     this.buf = this.buf.length === 0 ? chunk : Buffer.concat([this.buf, chunk]);
     // A separator can straddle two chunks, so back up two bytes.
     const found = findSeparator(this.buf, this.scanned - 2);
     if (!found) {
       if (this.buf.length > MAX_HEAD_BYTES) {
-        throw new CgiParseError("bloc d'en-têtes CGI trop grand");
+        throw new CgiParseError("CGI header block too large");
       }
       this.scanned = this.buf.length;
       return null;

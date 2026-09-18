@@ -1,11 +1,11 @@
 /**
- * Le portail déployé **sans fournisseur d'identité**.
+ * The portal deployed **without an identity provider**.
  *
- * C'est l'état du déploiement de `docs/deploy.md` : Switch edu-ID n'est pas
- * encore déclaré, les étudiants arrivent tous par le jeton de lancement de
- * classroom. `OIDC_ISSUER` vide doit alors faire disparaître les routes de
- * connexion — et rien d'autre. En particulier, `/launch` reste entier, et
- * aucun autre chemin ne permet de devenir `request.user` (invariant 4).
+ * This is the state of the `docs/deploy.md` deployment: Switch edu-ID is not
+ * declared yet, the students all arrive through classroom's launch token. An
+ * empty `OIDC_ISSUER` must then make the login routes disappear — and nothing
+ * else. In particular, `/launch` stays whole, and no other path allows becoming
+ * `request.user` (invariant 4).
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -15,7 +15,7 @@ import { buildPortal, type Portal } from "../server.js";
 
 import { loadConfig } from "./config.js";
 
-const LAUNCH_SECRET = "secret-de-lancement-de-test-0123456789";
+const LAUNCH_SECRET = "test-launch-secret-0123456789012345";
 
 const fakeEngine: Engine = {
   runArgs: () => [],
@@ -69,8 +69,8 @@ afterEach(async () => {
 
 const HTML = { accept: "text/html" };
 
-describe("OIDC_ISSUER vide : connexion autonome désactivée", () => {
-  it("les routes de connexion n'existent pas", async () => {
+describe("empty OIDC_ISSUER: standalone login disabled", () => {
+  it("the login routes do not exist", async () => {
     const p = await portalWith("");
     for (const url of ["/auth/login", "/auth/callback", "/auth/logout"]) {
       const reply = await p.app.inject({ url, headers: HTML });
@@ -78,10 +78,10 @@ describe("OIDC_ISSUER vide : connexion autonome désactivée", () => {
     }
   });
 
-  it("une page qui exige un utilisateur répond 503 et nomme la cause", async () => {
+  it("a page that requires a user answers 503 and names the cause", async () => {
     const p = await portalWith("");
     const reply = await p.app.inject({ url: "/", headers: HTML });
-    // Surtout pas une redirection vers `/auth/login`, qui serait un 404.
+    // Certainly not a redirect to `/auth/login`, which would be a 404.
     expect(reply.statusCode).toBe(503);
     expect(reply.body).toContain("heig-classroom");
     const json = await p.app.inject({ url: "/teacher/sessions" });
@@ -89,19 +89,19 @@ describe("OIDC_ISSUER vide : connexion autonome désactivée", () => {
     expect(json.json()).toEqual({ error: "oidc_disabled" });
   });
 
-  it("/launch et /healthz restent entiers : c'est le chemin des étudiants", async () => {
+  it("/launch and /healthz stay whole: this is the students' path", async () => {
     const p = await portalWith("");
     expect((await p.app.inject({ url: "/healthz" })).statusCode).toBe(200);
-    // La route existe (pas 404) et oppose son propre refus au jeton bidon.
-    const launch = await p.app.inject({ url: "/launch?token=pas-un-jeton", headers: HTML });
+    // The route exists (not a 404) and opposes its own refusal to the bogus token.
+    const launch = await p.app.inject({ url: "/launch?token=not-a-token", headers: HTML });
     expect(launch.statusCode).toBe(403);
   });
 
-  it("avec un émetteur, les routes de connexion sont de nouveau là", async () => {
+  it("with an issuer, the login routes are back", async () => {
     const p = await portalWith("http://localhost:8080/realms/hgc-dev");
     expect(p.app.hasRoute({ method: "GET", url: "/auth/login" })).toBe(true);
     expect(p.app.hasRoute({ method: "GET", url: "/auth/callback" })).toBe(true);
-    // Et la garde redirige de nouveau au lieu de répondre 503.
+    // And the guard redirects again instead of answering 503.
     const reply = await p.app.inject({ url: "/", headers: HTML });
     expect(reply.statusCode).toBe(303);
     expect(reply.headers["location"]).toBe("/auth/login");

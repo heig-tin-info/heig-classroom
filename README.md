@@ -66,14 +66,7 @@ is documented in [deploy.md](deploy.md).
 | Path | Role |
 | --- | --- |
 | `packages/domain` | Pure business rules (GR-02 grade parsing, freezing...), framework-free |
-| `packages/contracts` | Zod schemas shared across front, back and CLI |
+| `packages/contracts` | Zod schemas shared between the front end and the back end |
 | `apps/server` | Fastify monolith: API, webhooks, SSE, jobs (pg-boss), `WORKER_MODE` |
 | `apps/codespace` | Supervised dev-environment portal (code-server, rootful Podman, SEB exam mode); separate deployment, see its `CLAUDE.md` and `docs/` |
 | `docs/` | Specifications (TeXSmith) and ADRs |
-
-## PDF documentation
-
-```bash
-python3 -m venv .venv && .venv/bin/pip install --group docs
-cd build && ../.venv/bin/texsmith ../docs/01-cahier-des-charges.md --build
-```

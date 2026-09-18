@@ -1,13 +1,12 @@
 /**
- * Client Drizzle partagé (SQLite, better-sqlite3).
+ * Shared Drizzle client (SQLite, better-sqlite3).
  *
- * Remplace `git/db.ts`, qui n'existait que le temps que P3 tourne seul : il y
- * a maintenant un seul endroit qui ouvre la base, et les migrations
- * drizzle-kit de `drizzle/` sont la seule source du schéma
- * physique.
+ * Replaces `git/db.ts`, which only existed for as long as P3 ran on its own:
+ * there is now a single place that opens the database, and the drizzle-kit
+ * migrations of `drizzle/` are the only source of the physical schema.
  *
- * `:memory:` est accepté pour les tests ; le fichier est créé avec son
- * répertoire sinon.
+ * `:memory:` is accepted for the tests; the file is created together with its
+ * directory otherwise.
  */
 import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -23,14 +22,14 @@ export type Db = BetterSQLite3Database<typeof schema>;
 
 export interface DbHandle {
   db: Db;
-  /** Ferme le fichier. Idempotent. */
+  /** Closes the file. Idempotent. */
   close(): void;
 }
 
 /**
- * `drizzle`, quel que soit le répertoire de lancement **et** que
- * l'on tourne depuis `src/` (tsx, vitest) ou depuis `dist/` (`pnpm start`) :
- * la profondeur n'est pas la même, donc le répertoire est cherché, pas compté.
+ * `drizzle`, whatever the working directory at launch **and** whether we run
+ * from `src/` (tsx, vitest) or from `dist/` (`pnpm start`): the depth is not
+ * the same, so the directory is searched for, not counted.
  */
 export function migrationsFolder(): string {
   let dir = dirname(fileURLToPath(import.meta.url));
@@ -41,11 +40,11 @@ export function migrationsFolder(): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("migrations drizzle introuvables");
+  throw new Error("drizzle migrations not found");
 }
 
 export interface OpenDbOptions {
-  /** Applique les migrations à l'ouverture. Vrai par défaut. */
+  /** Applies the migrations when opening. True by default. */
   migrate?: boolean;
   migrationsFolder?: string;
 }
@@ -53,12 +52,12 @@ export interface OpenDbOptions {
 export function openDb(path: string, options: OpenDbOptions = {}): DbHandle {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const sqlite = new Database(path);
-  // WAL : le relais, le ramasse-miettes et le chemin de requête écrivent en
-  // parallèle et ne doivent pas se bloquer.
+  // WAL: the relay, the garbage collector and the request path write in
+  // parallel and must not block each other.
   if (path !== ":memory:") sqlite.pragma("journal_mode = WAL");
   sqlite.pragma("foreign_keys = ON");
-  // Le ramasse-miettes et le proxy écrivent en même temps ; sans attente,
-  // better-sqlite3 lève SQLITE_BUSY au lieu de patienter.
+  // The garbage collector and the proxy write at the same time; without a
+  // wait, better-sqlite3 raises SQLITE_BUSY instead of being patient.
   sqlite.pragma("busy_timeout = 5000");
   const db = drizzle(sqlite, { schema });
   if (options.migrate !== false) {
@@ -76,9 +75,8 @@ export function openDb(path: string, options: OpenDbOptions = {}): DbHandle {
 }
 
 /**
- * Compatibilité avec les tests de `git/` écrits avant V1 : même signature que
- * l'ancien `openGitDb`, mais la base est celle du portail, migrations
- * comprises.
+ * Compatibility with the `git/` tests written before V1: same signature as the
+ * old `openGitDb`, but the database is the portal's, migrations included.
  */
 export function openGitDb(path: string): { db: Db; close: () => void } {
   const handle = openDb(path);

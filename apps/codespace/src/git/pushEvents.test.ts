@@ -29,30 +29,30 @@ function store(): { store: PushEventStore; close: () => void } {
 }
 
 describe("diffRefs", () => {
-  it("détecte création, mise à jour et suppression", () => {
+  it("detects creation, update and deletion", () => {
     const before = new Map([
       ["refs/heads/main", A],
-      ["refs/heads/vieille", A],
+      ["refs/heads/old", A],
     ]);
     const after = new Map([
       ["refs/heads/main", B],
-      ["refs/heads/nouvelle", B],
+      ["refs/heads/new", B],
     ]);
     expect(diffRefs(before, after)).toEqual([
       { ref: "refs/heads/main", oldSha: A, sha: B },
-      { ref: "refs/heads/nouvelle", oldSha: null, sha: B },
-      { ref: "refs/heads/vieille", oldSha: A, sha: NULL_OID },
+      { ref: "refs/heads/new", oldSha: null, sha: B },
+      { ref: "refs/heads/old", oldSha: A, sha: NULL_OID },
     ]);
   });
 
-  it("ne rapporte rien quand rien ne bouge (push sans effet)", () => {
+  it("reports nothing when nothing moves (push with no effect)", () => {
     const refs = new Map([["refs/heads/main", A]]);
     expect(diffRefs(refs, new Map(refs))).toEqual([]);
   });
 });
 
 describe("recordPush", () => {
-  it("écrit le PushEvent AVANT de prévenir le relais (invariant 7)", async () => {
+  it("writes the PushEvent BEFORE notifying the relay (invariant 7)", async () => {
     const { store: s, close } = store();
     const order: string[] = [];
     let seenByRelay: PushEventRow[] = [];
@@ -88,7 +88,7 @@ describe("recordPush", () => {
     close();
   });
 
-  it("n'appelle pas le relais quand aucune ref n'a changé", async () => {
+  it("does not call the relay when no ref has changed", async () => {
     const { store: s, close } = store();
     let called = 0;
     const rows = await recordPush({ store: s, relay: { schedule: () => void called++ } }, SESSION, []);
@@ -97,15 +97,15 @@ describe("recordPush", () => {
     close();
   });
 
-  it("enregistre une ligne par ref, en état pending", async () => {
+  it("records one row per ref, in the pending state", async () => {
     const { store: s, close } = store();
     await recordPush({ store: s }, SESSION, [
       { ref: "refs/heads/main", oldSha: A, sha: B },
-      { ref: "refs/tags/rendu", oldSha: null, sha: B },
+      { ref: "refs/tags/submission", oldSha: null, sha: B },
     ]);
     const rows = await s.bySession(SESSION.sessionId);
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.ref).sort()).toEqual(["refs/heads/main", "refs/tags/rendu"]);
+    expect(rows.map((r) => r.ref).sort()).toEqual(["refs/heads/main", "refs/tags/submission"]);
     expect(rows.every((r) => r.state === "pending")).toBe(true);
     expect(rows[0]?.student).toBe("e1234567");
     expect(rows[0]?.receivedAt).toBeInstanceOf(Date);
@@ -114,17 +114,17 @@ describe("recordPush", () => {
 });
 
 describe("PushEventStore", () => {
-  it("ne rend éligibles que les lignes pending dont le délai est écoulé", async () => {
+  it("makes eligible only the pending rows whose delay has elapsed", async () => {
     const { store: s, close } = store();
     const t0 = new Date("2026-09-17T10:00:00Z");
     const rows = await recordPush({ store: s, now: () => t0 }, SESSION, [
       { ref: "refs/heads/main", oldSha: null, sha: A },
-      { ref: "refs/heads/autre", oldSha: null, sha: B },
+      { ref: "refs/heads/other", oldSha: null, sha: B },
     ]);
     expect(await s.dueForRelay(t0, 10)).toHaveLength(2);
 
     const first = rows[0] as PushEventRow;
-    await s.markRetry([first.id], new Date(t0.getTime() + 5000), "forge injoignable");
+    await s.markRetry([first.id], new Date(t0.getTime() + 5000), "forge unreachable");
     expect((await s.dueForRelay(t0, 10)).map((r) => r.id)).not.toContain(first.id);
     expect((await s.dueForRelay(new Date(t0.getTime() + 5000), 10)).map((r) => r.id)).toContain(
       first.id,
@@ -137,20 +137,20 @@ describe("PushEventStore", () => {
     close();
   });
 
-  it("markRetry incrémente le compteur et garde l'état pending", async () => {
+  it("markRetry increments the counter and keeps the pending state", async () => {
     const { store: s, close } = store();
     const [row] = await recordPush({ store: s }, SESSION, [
       { ref: "refs/heads/main", oldSha: null, sha: A },
     ]);
     const id = (row as PushEventRow).id;
-    await s.markRetry([id], new Date(0), "erreur 1");
-    await s.markRetry([id], new Date(0), "erreur 2");
+    await s.markRetry([id], new Date(0), "error 1");
+    await s.markRetry([id], new Date(0), "error 2");
     const after = (await s.bySession(SESSION.sessionId))[0];
     expect(after?.attempts).toBe(2);
     expect(after?.state).toBe("pending");
-    expect(after?.lastError).toBe("erreur 2");
+    expect(after?.lastError).toBe("error 2");
 
-    await s.markFailed([id], "budget épuisé");
+    await s.markFailed([id], "budget exhausted");
     expect((await s.bySession(SESSION.sessionId))[0]?.state).toBe("failed");
     close();
   });

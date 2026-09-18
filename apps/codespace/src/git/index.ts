@@ -8,7 +8,7 @@
  * See README.md in this directory for the development commands.
  */
 export { CgiHeadScanner, parseCgiHead, httpMetaVariable, type CgiHead } from "./cgi.js";
-// `db.ts` a disparu en V1 : la base est celle du portail (`db/client.ts`).
+// `db.ts` is gone in V1: the database is the portal's own (`db/client.ts`).
 export {
   createForgejoForge,
   createGithubForge,

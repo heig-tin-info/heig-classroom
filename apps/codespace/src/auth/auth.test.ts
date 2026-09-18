@@ -6,9 +6,9 @@ import { loadConfig } from "./config.js";
 import { roleFromClaims, safeLogin } from "./oidc.js";
 import { AUTH_COOKIE, issueAuthCookie, verifyAuthCookie } from "./session.js";
 
-const SECRET = "un-secret-de-test-assez-long";
+const SECRET = "a-test-secret-long-enough";
 
-describe("cookie de session du portail", () => {
+describe("portal session cookie", () => {
   const claims = {
     userId: "u1",
     login: "student",
@@ -16,18 +16,18 @@ describe("cookie de session du portail", () => {
     expiresAt: Date.now() + 60_000,
   };
 
-  it("s'émet et se relit", () => {
+  it("is issued and read back", () => {
     const verdict = verifyAuthCookie(issueAuthCookie(claims, SECRET), SECRET);
     expect(verdict.ok).toBe(true);
     if (verdict.ok) expect(verdict.claims.login).toBe("student");
   });
 
-  it("refuse une signature d'un autre secret", () => {
-    const verdict = verifyAuthCookie(issueAuthCookie(claims, SECRET), `${SECRET}-autre`);
+  it("refuses a signature made with another secret", () => {
+    const verdict = verifyAuthCookie(issueAuthCookie(claims, SECRET), `${SECRET}-other`);
     expect(verdict).toEqual({ ok: false, reason: "bad-signature" });
   });
 
-  it("refuse une charge utile modifiée — le rôle n'est pas déclaratif", () => {
+  it("refuses a tampered payload — the role is not declarative", () => {
     const cookie = issueAuthCookie(claims, SECRET);
     const [payload, signature] = cookie.split(".");
     const tampered = JSON.parse(Buffer.from(payload as string, "base64url").toString("utf8")) as {
@@ -38,35 +38,35 @@ describe("cookie de session du portail", () => {
     expect(verifyAuthCookie(forged, SECRET)).toEqual({ ok: false, reason: "bad-signature" });
   });
 
-  it("refuse un cookie échu", () => {
+  it("refuses an expired cookie", () => {
     const old = issueAuthCookie({ ...claims, expiresAt: Date.now() - 1 }, SECRET);
     expect(verifyAuthCookie(old, SECRET)).toEqual({ ok: false, reason: "expired" });
   });
 
-  it("refuse l'absence de cookie", () => {
+  it("refuses a missing cookie", () => {
     expect(verifyAuthCookie(undefined, SECRET)).toEqual({ ok: false, reason: "missing" });
     expect(AUTH_COOKIE).toBe("cs_auth");
   });
 
-  it("refuse un secret trop court à l'émission plutôt qu'à la vérification", () => {
-    expect(() => issueAuthCookie(claims, "court")).toThrow();
+  it("refuses a too-short secret at issuance rather than at verification", () => {
+    expect(() => issueAuthCookie(claims, "short")).toThrow();
   });
 });
 
-describe("rôle déduit des revendications, jamais d'une variable d'environnement", () => {
-  it("lit la revendication du mappeur de realm", () => {
+describe("role derived from the claims, never from an environment variable", () => {
+  it("reads the realm mapper's claim", () => {
     expect(roleFromClaims({ codespace_roles: ["teacher"] }, "codespace_roles", "teacher")).toBe(
       "teacher",
     );
   });
 
-  it("accepte le repli sur realm_access.roles de Keycloak", () => {
+  it("accepts the fallback on Keycloak's realm_access.roles", () => {
     expect(
       roleFromClaims({ realm_access: { roles: ["offline_access", "teacher"] } }, "absent", "teacher"),
     ).toBe("teacher");
   });
 
-  it("rend student par défaut : le moins puissant", () => {
+  it("returns student by default: the least powerful role", () => {
     expect(roleFromClaims({}, "codespace_roles", "teacher")).toBe("student");
     expect(roleFromClaims({ codespace_roles: ["student"] }, "codespace_roles", "teacher")).toBe(
       "student",
@@ -74,49 +74,49 @@ describe("rôle déduit des revendications, jamais d'une variable d'environnemen
   });
 });
 
-describe("normalisation de l'identifiant institutionnel", () => {
-  it("garde un identifiant déjà propre", () => {
+describe("normalization of the institutional login", () => {
+  it("keeps an already clean login", () => {
     expect(safeLogin("student")).toBe("student");
   });
 
-  it("coupe une adresse et normalise la casse", () => {
+  it("cuts an address and normalizes the case", () => {
     expect(safeLogin("Sacha.Student@heig-vd.ch")).toBe("sacha.student");
   });
 
-  it("neutralise ce qui sortirait de VOLUMES_ROOT", () => {
-    // `git/staging.ts` refuserait ces valeurs ; on les rend inoffensives avant.
+  it("neutralizes what would escape VOLUMES_ROOT", () => {
+    // `git/staging.ts` would refuse these values; we make them harmless first.
     expect(safeLogin("../../etc")).toBe("etc");
     expect(safeLogin("a/b")).toBe("a-b");
   });
 
-  it("refuse plutôt que d'inventer un identifiant vide", () => {
+  it("refuses rather than inventing an empty login", () => {
     expect(() => safeLogin("@@@")).toThrow();
   });
 });
 
-describe("configuration : ce qui est interdit en production", () => {
+describe("configuration: what is forbidden in production", () => {
   const base = {
     NODE_ENV: "production",
-    OIDC_CLIENT_SECRET: "vrai-secret",
-    COOKIE_SECRET: "un-secret-de-production-long",
-    EXAM_COOKIE_SECRET: "un-autre-secret-de-production",
+    OIDC_CLIENT_SECRET: "real-secret",
+    COOKIE_SECRET: "a-long-production-secret",
+    EXAM_COOKIE_SECRET: "another-production-secret",
     SEB_VERIFIER: "real",
     SEB_PUBLIC_ORIGIN: "https://codespace.heig-vd.ch",
   };
 
-  it("accepte une configuration de production complète", () => {
+  it("accepts a complete production configuration", () => {
     expect(() => loadConfig(base)).not.toThrow();
   });
 
-  it("refuse le vérificateur SEB simulé (invariant 8, garde de configuration)", () => {
+  it("refuses the simulated SEB verifier (invariant 8, configuration guard)", () => {
     expect(() => loadConfig({ ...base, SEB_VERIFIER: "simulated" })).toThrow(/simulated/);
   });
 
-  it("refuse TRUST_PROXY, qui est un réglage de test", () => {
+  it("refuses TRUST_PROXY, which is a test setting", () => {
     expect(() => loadConfig({ ...base, TRUST_PROXY: "1" })).toThrow(/TRUST_PROXY/);
   });
 
-  it("refuse les secrets de développement", () => {
+  it("refuses development secrets", () => {
     expect(() =>
       loadConfig({ ...base, COOKIE_SECRET: "dev-cookie-secret-change-me" }),
     ).toThrow(/COOKIE_SECRET/);
@@ -125,14 +125,14 @@ describe("configuration : ce qui est interdit en production", () => {
     ).toThrow(/OIDC_CLIENT_SECRET/);
   });
 
-  it("exige SEB_PUBLIC_ORIGIN : rien du client n'entre dans le calcul (analyse.md 4.6)", () => {
+  it("requires SEB_PUBLIC_ORIGIN: nothing from the client enters the computation (analyse.md 4.6)", () => {
     expect(() => loadConfig({ ...base, SEB_PUBLIC_ORIGIN: "" })).toThrow(/SEB_PUBLIC_ORIGIN/);
   });
 
-  it("résout les chemins depuis la racine du dépôt, pas depuis le répertoire de lancement", () => {
+  it("resolves paths from the repository root, not from the launch directory", () => {
     const config = loadConfig({ SECCOMP_PROFILE: "./infra/seccomp/codespace.json" });
-    // La racine de l'application est le package.json le plus proche du module,
-    // quel que soit le nom du dépôt qui l'héberge (monorepo ou non).
+    // The application root is the package.json closest to the module, whatever
+    // the name of the repository that hosts it (monorepo or not).
     const appRoot = fileURLToPath(new URL("../../", import.meta.url));
     expect(config.seccompProfile).toBe(resolve(appRoot, "infra/seccomp/codespace.json"));
   });

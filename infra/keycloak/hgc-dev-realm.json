@@ -149,7 +149,7 @@
     "realm": [
       {
         "name": "student",
-        "description": "Étudiant (portail)"
+        "description": "Student (portal)"
       },
       {
         "name": "teacher",

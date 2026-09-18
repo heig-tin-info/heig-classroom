@@ -1,22 +1,22 @@
 /**
- * Connexion OIDC réelle (invariant 4 de CLAUDE.md) : code d'autorisation +
- * PKCE, `state`, `nonce`, validation du jeton d'identité par `openid-client`.
- * L'IdP est le Keycloak de `infra/compose.dev.yml` en développement, Switch
- * edu-ID en production ; le code est le même, comme dans heig-classroom.
+ * Real OIDC login (invariant 4 of CLAUDE.md): authorization code + PKCE,
+ * `state`, `nonce`, validation of the identity token by `openid-client`. The
+ * IdP is the Keycloak of `infra/compose.dev.yml` in development, Switch edu-ID
+ * in production; the code is the same, as in heig-classroom.
  *
- * Il n'existe aucune autre voie d'authentification : ni variable
- * d'environnement « utilisateur courant », ni en-tête de développement.
+ * There is no other authentication path: no "current user" environment
+ * variable, no development header.
  */
 import * as oidc from "openid-client";
 
 import type { AppConfig } from "./config.js";
 
-/** Rôle du portail. Le rôle par défaut est le moins puissant. */
+/** Portal role. The default role is the least powerful one. */
 export type Role = "student" | "teacher";
 
 export interface OidcClaims {
   sub: string;
-  /** `preferred_username` : l'identifiant institutionnel, qui nomme le volume. */
+  /** `preferred_username`: the institutional login, which names the volume. */
   login: string;
   email: string;
   displayName: string;
@@ -25,10 +25,10 @@ export interface OidcClaims {
 }
 
 /**
- * Le rôle vient du realm : le mappeur `codespace-roles` du realm dev place
- * les rôles de realm de l'utilisateur dans la revendication
- * `codespace_roles` du jeton d'identité. `realm_access.roles` sert de repli
- * pour un realm configuré autrement (portée `roles` standard de Keycloak).
+ * The role comes from the realm: the `codespace-roles` mapper of the dev realm
+ * puts the user's realm roles into the `codespace_roles` claim of the identity
+ * token. `realm_access.roles` serves as a fallback for a realm configured
+ * otherwise (Keycloak's standard `roles` scope).
  */
 export function roleFromClaims(
   claims: Record<string, unknown>,
@@ -49,15 +49,15 @@ export function roleFromClaims(
 }
 
 /**
- * `preferred_username` nomme un répertoire de volume et un chemin de dépôt de
- * transit : il doit passer le `SAFE_ID` de `git/staging.ts`. Un IdP qui
- * renvoie autre chose (une adresse complète, par exemple) est normalisé ici
- * plutôt que de faire échouer la session au premier `mkdir`.
+ * `preferred_username` names a volume directory and a staging repository path:
+ * it has to pass the `SAFE_ID` of `git/staging.ts`. An IdP that returns
+ * something else (a full address, for instance) is normalized here rather than
+ * making the session fail at the first `mkdir`.
  */
 export function safeLogin(raw: string): string {
   const base = raw.trim().toLowerCase().split("@")[0] ?? "";
   const cleaned = base.replace(/[^a-z0-9._-]/g, "-").replace(/^[^a-z0-9]+/, "");
-  if (cleaned.length === 0) throw new Error(`Identifiant utilisateur inutilisable : ${raw}`);
+  if (cleaned.length === 0) throw new Error(`Unusable user login: ${raw}`);
   return cleaned.slice(0, 64);
 }
 
@@ -69,12 +69,12 @@ export class OidcProvider {
     private readonly log?: { warn: (obj: unknown, msg: string) => void },
   ) {}
 
-  /** Découverte paresseuse : un IdP injoignable au démarrage ne doit pas
-   *  empêcher le portail (et `/healthz`) de démarrer. */
+  /** Lazy discovery: an IdP unreachable at startup must not prevent the
+   *  portal (and `/healthz`) from starting. */
   private async configuration(): Promise<oidc.Configuration> {
     if (this.config) return this.config;
-    // Keycloak de développement est en clair ; en production l'émetteur est
-    // en HTTPS et cette dérogation n'est pas posée.
+    // The development Keycloak is served in the clear; in production the
+    // issuer is over HTTPS and this exemption is not granted.
     const execute = this.app.NODE_ENV === "production" ? [] : [oidc.allowInsecureRequests];
     this.config = await oidc.discovery(
       new URL(this.app.OIDC_ISSUER),
@@ -123,9 +123,9 @@ export class OidcProvider {
       expectedNonce: stash.nonce,
     });
     const idClaims = tokens.claims();
-    if (!idClaims) throw new Error("Jeton d'identité sans revendications");
-    // `userinfo` complète, sans jamais pouvoir refuser une session que le
-    // jeton d'identité suffit à établir.
+    if (!idClaims) throw new Error("Identity token without claims");
+    // `userinfo` completes, without ever being able to refuse a session that
+    // the identity token is enough to establish.
     let userinfo: Record<string, unknown> = {};
     try {
       userinfo = (await oidc.fetchUserInfo(
@@ -134,9 +134,9 @@ export class OidcProvider {
         idClaims.sub,
       )) as unknown as Record<string, unknown>;
     } catch (err) {
-      this.log?.warn({ err }, "userinfo OIDC indisponible, on s'en tient au jeton d'identité");
+      this.log?.warn({ err }, "OIDC userinfo unavailable, sticking to the identity token");
     }
-    // Le jeton d'identité l'emporte : il est signé et lié au `nonce`.
+    // The identity token wins: it is signed and bound to the `nonce`.
     const claims: Record<string, unknown> = { ...userinfo, ...idClaims };
     const preferred =
       typeof claims["preferred_username"] === "string"

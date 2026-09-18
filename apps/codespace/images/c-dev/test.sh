@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Test d'acceptation de la tache P1 (docs/jalon-0.md).
-# Lance l'image par run-hardened.sh et execute toutes les assertions de P1.
-# Sort en code non nul a la premiere qui echoue, avec un message clair.
+# Acceptance test for task P1 (docs/jalon-0.md).
+# Runs the image through run-hardened.sh and executes every P1 assertion.
+# Exits non-zero on the first one that fails, with a clear message.
 #
 #   ./images/c-dev/test.sh
 #
-# Prerequis : Podman rootful joignable sur unix:///run/podman/podman.sock,
-# image codespace/c-dev:4.137.0 construite, python3 sur l'hote (fabrication
-# du .vsix factice). Aucun sudo.
+# Prerequisites: rootful Podman reachable on unix:///run/podman/podman.sock,
+# image codespace/c-dev:4.137.0 built, python3 on the host (to build the fake
+# .vsix). No sudo.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,12 +22,12 @@ CTR_BOMB=cdev-p1-bomb
 VOL_BASE="$(mktemp -d /tmp/codespace-p1-XXXXXX)"
 
 podman_remote() { podman --remote --url "$PODMAN_URL" "$@"; }
-# Execute une commande bash dans le conteneur A, en tant que student.
+# Runs a bash command inside container A, as the student user.
 cexec() { podman_remote exec "$CTR_A" bash -lc "$1"; }
 
 NTEST=0
 ok()   { NTEST=$((NTEST+1)); printf '  ok   %s\n' "$1"; }
-fail() { printf '\nECHEC : %s\n' "$1" >&2; [ $# -gt 1 ] && printf '  --- contexte ---\n%s\n' "$2" >&2; cleanup; exit 1; }
+fail() { printf '\nFAIL: %s\n' "$1" >&2; [ $# -gt 1 ] && printf '  --- context ---\n%s\n' "$2" >&2; cleanup; exit 1; }
 head2() { printf '\n== %s\n' "$1"; }
 
 cleanup() {
@@ -37,21 +37,21 @@ cleanup() {
 trap 'cleanup' EXIT
 
 # --------------------------------------------------------------------------
-# Preparation : un .vsix *valide* depose dans le repertoire de travail avant le
-# demarrage. Valide, pour que l'echec d'installation soit imputable a la racine
-# en lecture seule et non a une archive corrompue. Il est ecrit avant le
-# `podman run` parce que le montage `:U` rechaine le repertoire sur l'UID du
-# conteneur et le rend ensuite inaccessible en ecriture depuis l'hote.
+# Preparation: a *valid* .vsix dropped into the work directory before start-up.
+# Valid, so that the installation failure is attributable to the read-only root
+# and not to a corrupt archive. It is written before the `podman run` because
+# the `:U` mount rechowns the directory onto the container's UID and then makes
+# it unwritable from the host.
 # --------------------------------------------------------------------------
 mkdir -p "${VOL_BASE}/a/work" "${VOL_BASE}/b/work" "${VOL_BASE}/bomb/work"
-python3 - "${VOL_BASE}/a/work/fake-extension.vsix" <<'PY' >/dev/null || { echo "python3 requis" >&2; exit 1; }
+python3 - "${VOL_BASE}/a/work/fake-extension.vsix" <<'PY' >/dev/null || { echo "python3 required" >&2; exit 1; }
 import zipfile, json, sys
 pkg = {"name": "fake", "displayName": "Fake", "publisher": "attacker",
        "version": "1.0.0", "engines": {"vscode": "^1.60.0"}, "contributes": {}}
 manifest = '''<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
 <Metadata><Identity Language="en-US" Id="fake" Version="1.0.0" Publisher="attacker"/>
-<DisplayName>Fake</DisplayName><Description>faux paquet d extension</Description></Metadata>
+<DisplayName>Fake</DisplayName><Description>fake extension package</Description></Metadata>
 <Installation><InstallationTarget Id="Microsoft.VisualStudio.Code"/></Installation>
 <Assets><Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true"/></Assets>
 </PackageManifest>'''
@@ -71,26 +71,26 @@ cat > "${VOL_BASE}/a/work/hello.c" <<'EOF'
 int main(void) { printf("&main=%p\n", (void *)main); return 0; }
 EOF
 
-echo "P1 : image etudiante durcie, gdb fonctionnel"
+echo "P1: hardened student image, working gdb"
 echo "image   : ${IMAGE}"
 echo "seccomp : ${REPO_ROOT}/infra/seccomp/codespace.json"
 
 # --------------------------------------------------------------------------
-head2 "0. demarrage sous run-hardened.sh et mesure jusqu'a /healthz"
+head2 "0. start under run-hardened.sh, and time to /healthz"
 # --------------------------------------------------------------------------
-# Les sept variables que le portail pose au `podman run` (sessions/manager.ts,
-# CONTAINER_ENV_KEYS) : trois CODESPACE_ pour l'extension de barre d'etat,
-# quatre GIT_ pour l'identite de l'etudiant. Le conteneur A les porte, le
-# conteneur B non : la section 9 compare les deux environnements et exige
-# exactement sept lignes d'ecart. Aucun secret n'y entre, invariant 1.
+# The seven variables the portal sets on `podman run` (sessions/manager.ts,
+# CONTAINER_ENV_KEYS): three CODESPACE_ for the status-bar extension, four GIT_
+# for the student's identity. Container A carries them, container B does not:
+# section 9 compares the two environments and requires exactly seven lines of
+# difference. No secret goes in there, invariant 1.
 ENV_DEADLINE=2026-10-01T12:00:00.000Z
 ENV_RETURN_URL=https://classroom.chevallier.io/
-# Sans espace : run-hardened.sh decoupe EXTRA_ARGS par le shell. Le portail,
-# lui, passe la valeur telle quelle a execFile (aucun shell), donc un titre
-# avec des espaces lui convient ; c'est ce script qui est contraint.
+# No spaces: run-hardened.sh splits EXTRA_ARGS with the shell. The portal
+# itself passes the value as is to execFile (no shell), so a title with spaces
+# suits it; it is this script that is constrained.
 ENV_ASSIGNMENT_NAME=TP3-pointeurs
-# Identite git de l'etudiant (users.display_name, users.email). Meme contrainte
-# d'absence d'espace : c'est EXTRA_ARGS qui la pose, pas le portail.
+# The student's git identity (users.display_name, users.email). Same no-space
+# constraint: it comes from EXTRA_ARGS, not from the portal.
 ENV_GIT_NAME=Pierre-Bressy
 ENV_GIT_EMAIL=pierre.bressy@heig-vd.ch
 PORTAL_ENV="-e CODESPACE_DEADLINE=${ENV_DEADLINE} -e CODESPACE_RETURN_URL=${ENV_RETURN_URL} -e CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}"
@@ -100,7 +100,7 @@ PORTAL_ENV="${PORTAL_ENV} -e GIT_COMMITTER_NAME=${ENV_GIT_NAME} -e GIT_COMMITTER
 T0=$(date +%s.%N)
 CTR_NAME="$CTR_A" VOL_DIR="${VOL_BASE}/a" IMAGE="$IMAGE" EXTRA_ARGS="$PORTAL_ENV" \
   "${HERE}/run-hardened.sh" >/dev/null \
-  || fail "run-hardened.sh n'a pas demarre le conteneur A"
+  || fail "run-hardened.sh did not start container A"
 
 HEALTH=""
 for _ in $(seq 1 300); do
@@ -111,51 +111,51 @@ for _ in $(seq 1 300); do
 done
 T1=$(date +%s.%N)
 BOOT=$(python3 -c "print(round(${T1}-${T0}, 2))")
-[ -n "$HEALTH" ] || fail "/healthz n'a pas repondu 200 en 30 s" "$(podman_remote logs "$CTR_A" 2>&1 | tail -30)"
-ok "podman run -> /healthz 200 en ${BOOT} s : ${HEALTH}"
+[ -n "$HEALTH" ] || fail "/healthz did not answer 200 within 30 s" "$(podman_remote logs "$CTR_A" 2>&1 | tail -30)"
+ok "podman run -> /healthz 200 in ${BOOT} s: ${HEALTH}"
 echo "MESURE_DEMARRAGE_SECONDES=${BOOT}"
 
 # --------------------------------------------------------------------------
-head2 "1. gdb : ptrace autorise, pas d'Operation not permitted"
+head2 "1. gdb: ptrace allowed, no Operation not permitted"
 # --------------------------------------------------------------------------
-cexec 'cd /work && gcc -g -O0 -o a.out hello.c' >/dev/null 2>&1 || fail "gcc -g -O0 hello.c a echoue" "$(cexec 'cd /work && gcc -g -O0 -o a.out hello.c' 2>&1)"
-# gdb sort en 1 sur « No stack. » (le programme est deja termine quand bt
-# s'execute) : c'est la commande litterale de jalon-0, on n'en juge que la sortie.
+cexec 'cd /work && gcc -g -O0 -o a.out hello.c' >/dev/null 2>&1 || fail "gcc -g -O0 hello.c failed" "$(cexec 'cd /work && gcc -g -O0 -o a.out hello.c' 2>&1)"
+# gdb exits 1 on "No stack." (the program is already finished when bt runs):
+# it is the literal command from jalon-0, and we judge only its output.
 OUT=$(cexec 'cd /work && gdb -batch -ex run -ex bt ./a.out' 2>&1)
 case "$OUT" in
-  *"Operation not permitted"*) fail "gdb a rencontre « Operation not permitted »" "$OUT" ;;
+  *"Operation not permitted"*) fail "gdb ran into Operation not permitted" "$OUT" ;;
 esac
 case "$OUT" in
   *"&main=0x"*) : ;;
-  *) fail "le programme n'a pas affiche l'adresse de main sous gdb" "$OUT" ;;
+  *) fail "the program did not print the address of main under gdb" "$OUT" ;;
 esac
-ok "gcc -g -O0 hello.c puis gdb -batch -ex run -ex bt : sans Operation not permitted"
+ok "gcc -g -O0 hello.c then gdb -batch -ex run -ex bt: no Operation not permitted"
 
 OUT=$(cexec 'cd /work && gdb -batch -ex "break main" -ex run -ex bt ./a.out' 2>&1) \
-  || fail "gdb avec point d'arret a echoue" "$OUT"
+  || fail "gdb with a breakpoint failed" "$OUT"
 case "$OUT" in
   *"#0"*main*) : ;;
-  *) fail "bt n'a pas produit de pile avec main" "$OUT" ;;
+  *) fail "bt did not produce a stack containing main" "$OUT" ;;
 esac
-ok "bt sur un point d'arret dans main produit une pile"
+ok "bt on a breakpoint in main produces a stack"
 
 # --------------------------------------------------------------------------
-head2 "2. ASLR desactivable : personality(ADDR_NO_RANDOMIZE) passe le profil seccomp"
+head2 "2. ASLR can be disabled: personality(ADDR_NO_RANDOMIZE) passes the seccomp profile"
 # --------------------------------------------------------------------------
 OUT=$(cexec 'gdb -batch -ex "show disable-randomization"' 2>&1)
 case "$OUT" in
-  *"is on."*) ok "gdb -batch -ex 'show disable-randomization' repond on" ;;
-  *) fail "disable-randomization n'est pas a on" "$OUT" ;;
+  *"is on."*) ok "gdb -batch -ex 'show disable-randomization' answers on" ;;
+  *) fail "disable-randomization is not on" "$OUT" ;;
 esac
 
 A1=$(cexec 'cd /work && gdb -batch -ex run ./a.out 2>/dev/null | sed -n "s/^&main=//p"')
 A2=$(cexec 'cd /work && gdb -batch -ex run ./a.out 2>/dev/null | sed -n "s/^&main=//p"')
-[ -n "$A1" ] || fail "premiere execution sous gdb : adresse de main non lue"
-[ "$A1" = "$A2" ] || fail "l'adresse de main change entre deux executions sous gdb ($A1 vs $A2) : ADDR_NO_RANDOMIZE refuse par le profil seccomp"
-ok "deux executions sous gdb donnent la meme adresse de main ($A1)"
+[ -n "$A1" ] || fail "first run under gdb: address of main not read"
+[ "$A1" = "$A2" ] || fail "the address of main changes between two runs under gdb ($A1 vs $A2): ADDR_NO_RANDOMIZE refused by the seccomp profile"
+ok "two runs under gdb give the same address of main ($A1)"
 
-# Temoin : avec le profil par defaut de containers-common, l'adresse doit varier.
-# C'est ce qui prouve que la seule entree ajoutee au profil est bien celle qui agit.
+# Control: with the default containers-common profile, the address must vary.
+# That is what proves the one entry added to the profile is what acts.
 if [ -r "$SECCOMP_DEFAULT" ]; then
   CTRL=$(podman_remote run --rm --userns=auto --cap-drop=ALL \
       --security-opt no-new-privileges --security-opt "seccomp=${SECCOMP_DEFAULT}" \
@@ -171,133 +171,133 @@ EOF
         for i in 1 2 3; do gdb -batch -ex run ./h 2>/dev/null | sed -n "s/^&main=//p"; done' 2>/dev/null \
       | sort -u | wc -l)
   if [ "$CTRL" -gt 1 ]; then
-    ok "temoin : avec le profil par defaut l'adresse varie ($CTRL valeurs sur 3) — l'ajout personality(0x40000) est bien la cause"
+    ok "control: with the default profile the address varies ($CTRL values out of 3) — the personality(0x40000) addition is indeed the cause"
   else
-    fail "temoin invalide : le profil par defaut donne deja une adresse stable, le test 2 ne prouve rien"
+    fail "invalid control: the default profile already gives a stable address, test 2 proves nothing"
   fi
 else
-  echo "  note profil par defaut introuvable ($SECCOMP_DEFAULT), temoin non joue"
+  echo "  note default profile not found ($SECCOMP_DEFAULT), control not run"
 fi
 
 # --------------------------------------------------------------------------
-head2 "3. aucune extension installable"
+head2 "3. no extension can be installed"
 # --------------------------------------------------------------------------
 cexec 'test -f /work/fake-extension.vsix' >/dev/null 2>&1 \
-  || fail "le .vsix factice n'est pas visible dans /work"
+  || fail "the fake .vsix is not visible in /work"
 
 OUT=$(cexec 'cp /work/fake-extension.vsix /tmp/x.vsix && code-server --install-extension /tmp/x.vsix --force' 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "code-server --install-extension /tmp/x.vsix a reussi" "$OUT"
-ok "code-server --install-extension /tmp/x.vsix echoue (rc=$RC)"
+[ "$RC" -ne 0 ] || fail "code-server --install-extension /tmp/x.vsix succeeded" "$OUT"
+ok "code-server --install-extension /tmp/x.vsix fails (rc=$RC)"
 
 OUT=$(cexec 'code-server --install-extension /work/fake-extension.vsix --force' 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "un .vsix ecrit dans /work s'installe" "$OUT"
-ok ".vsix factice depuis /work : refuse (rc=$RC)"
+[ "$RC" -ne 0 ] || fail "a .vsix written into /work installs" "$OUT"
+ok "fake .vsix from /work: refused (rc=$RC)"
 
-# Variante d'un etudiant qui contourne l'erreur de fichier de configuration :
-# le repertoire d'extensions par defaut reste sur la racine en lecture seule.
+# Variant of a student working around the configuration file error: the
+# default extensions directory stays on the read-only root.
 OUT=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --install-extension /tmp/x.vsix --force' 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "install-extension reussit des que XDG_CONFIG_HOME est inscriptible" "$OUT"
+[ "$RC" -ne 0 ] || fail "install-extension succeeds as soon as XDG_CONFIG_HOME is writable" "$OUT"
 case "$OUT" in
   *EROFS*|*"read-only"*|*"extensions.json"*) : ;;
-  *) fail "l'echec n'est pas attribuable a la racine en lecture seule" "$OUT" ;;
+  *) fail "the failure is not attributable to the read-only root" "$OUT" ;;
 esac
-ok "avec un XDG_CONFIG_HOME inscriptible, l'echec vient bien de la racine en lecture seule"
+ok "with a writable XDG_CONFIG_HOME, the failure really comes from the read-only root"
 
 OUT=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/ud --install-extension /tmp/x.vsix --force' 2>&1)
 RC=$?
-[ "$RC" -ne 0 ] || fail "install-extension directement dans /opt/code-server/extensions a reussi" "$OUT"
-ok "install-extension vise sur /opt/code-server/extensions : refuse (rc=$RC)"
+[ "$RC" -ne 0 ] || fail "install-extension straight into /opt/code-server/extensions succeeded" "$OUT"
+ok "install-extension aimed at /opt/code-server/extensions: refused (rc=$RC)"
 
 LIST=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/ud --list-extensions' 2>/dev/null | sort | tr '\n' ' ')
 case "$LIST" in
   "heig.codespace-statusbar llvm-vs-code-extensions.vscode-clangd webfreak.debug "*) : ;;
-  *) fail "la liste des extensions du serveur n'est pas exactement les trois attendues : [$LIST]" ;;
+  *) fail "the server's extension list is not exactly the three expected ones: [$LIST]" ;;
 esac
-ok "le serveur ne connait que les trois extensions preinstallees : $LIST"
+ok "the server knows only the three preinstalled extensions: $LIST"
 
-# L'extension de barre d'etat est cuite dans l'image, comme les deux autres :
-# elle apparait dans `--list-extensions` et dans le manifeste d'extensions.
+# The status-bar extension is baked into the image like the other two: it shows
+# up in `--list-extensions` and in the extensions manifest.
 VERS=$(cexec 'XDG_CONFIG_HOME=/tmp/cfg code-server --extensions-dir /opt/code-server/extensions --user-data-dir /tmp/ud --list-extensions --show-versions' 2>/dev/null | tr -d '\r')
 case "$VERS" in
   *"heig.codespace-statusbar@0.1.0"*) : ;;
-  *) fail "heig.codespace-statusbar@0.1.0 absent de --list-extensions --show-versions" "$VERS" ;;
+  *) fail "heig.codespace-statusbar@0.1.0 missing from --list-extensions --show-versions" "$VERS" ;;
 esac
-ok "heig.codespace-statusbar@0.1.0 installee et listee par code-server"
+ok "heig.codespace-statusbar@0.1.0 installed and listed by code-server"
 
 cexec 'grep -qF "heig.codespace-statusbar" /etc/code-server/extensions.lock' >/dev/null 2>&1 \
-  || fail "heig.codespace-statusbar absent de /etc/code-server/extensions.lock"
+  || fail "heig.codespace-statusbar missing from /etc/code-server/extensions.lock"
 cexec 'test -f /opt/code-server/extensions/heig.codespace-statusbar-0.1.0/extension.js' >/dev/null 2>&1 \
-  || fail "le code de l'extension de barre d'etat n'est pas dans le repertoire d'extensions"
+  || fail "the status-bar extension code is not in the extensions directory"
 if cexec 'touch /opt/code-server/extensions/heig.codespace-statusbar-0.1.0/extension.js' >/dev/null 2>&1; then
-  fail "l'extension de barre d'etat est modifiable a l'execution"
+  fail "the status-bar extension can be modified at run time"
 fi
-ok "extension de barre d'etat inscrite dans extensions.lock et en lecture seule"
+ok "status-bar extension recorded in extensions.lock and read-only"
 
 # --------------------------------------------------------------------------
-head2 "4. racine en lecture seule, aucune capacite"
+head2 "4. read-only root, no capability"
 # --------------------------------------------------------------------------
-if cexec 'touch /usr/bin/x' >/dev/null 2>&1; then fail "touch /usr/bin/x a reussi"; fi
-ok "touch /usr/bin/x echoue"
+if cexec 'touch /usr/bin/x' >/dev/null 2>&1; then fail "touch /usr/bin/x succeeded"; fi
+ok "touch /usr/bin/x fails"
 for p in /etc/passwd /opt/code-server/extensions/x /usr/lib/code-server/x; do
-  if cexec "touch $p" >/dev/null 2>&1; then fail "touch $p a reussi"; fi
+  if cexec "touch $p" >/dev/null 2>&1; then fail "touch $p succeeded"; fi
 done
-ok "/etc, /opt/code-server/extensions et /usr/lib/code-server sont en lecture seule"
+ok "/etc, /opt/code-server/extensions and /usr/lib/code-server are read-only"
 
 CAP=$(cexec 'grep CapEff /proc/self/status' | awk '{print $2}')
-[ "$CAP" = "0000000000000000" ] || fail "CapEff vaut $CAP au lieu de 0000000000000000"
+[ "$CAP" = "0000000000000000" ] || fail "CapEff is $CAP instead of 0000000000000000"
 ok "CapEff = 0000000000000000"
 
 NNP=$(cexec 'grep NoNewPrivs /proc/self/status' | awk '{print $2}')
-[ "$NNP" = "1" ] || fail "NoNewPrivs vaut $NNP au lieu de 1"
+[ "$NNP" = "1" ] || fail "NoNewPrivs is $NNP instead of 1"
 ok "NoNewPrivs = 1"
 
 SEC=$(cexec 'grep Seccomp: /proc/self/status' | awk '{print $2}')
-[ "$SEC" = "2" ] || fail "Seccomp vaut $SEC au lieu de 2 (mode filtre)"
-ok "Seccomp = 2 (filtre charge)"
+[ "$SEC" = "2" ] || fail "Seccomp is $SEC instead of 2 (filter mode)"
+ok "Seccomp = 2 (filter loaded)"
 
 # --------------------------------------------------------------------------
-head2 "5. espace d'utilisateurs : uid 1000 dedans, UID hote hors 0-65535"
+head2 "5. user namespace: uid 1000 inside, host UID outside 0-65535"
 # --------------------------------------------------------------------------
 UID_IN=$(cexec 'id -u')
-[ "$UID_IN" = "1000" ] || fail "id -u vaut $UID_IN au lieu de 1000"
-ok "id -u = 1000 dans le conteneur"
+[ "$UID_IN" = "1000" ] || fail "id -u is $UID_IN instead of 1000"
+ok "id -u = 1000 inside the container"
 
 HUSER_A=$(podman_remote top "$CTR_A" huser | sed -n '2p' | tr -d '[:space:]')
 case "$HUSER_A" in
-  ''|*[!0-9]*) fail "podman top huser n'a pas renvoye un UID numerique : [$HUSER_A]" ;;
+  ''|*[!0-9]*) fail "podman top huser did not return a numeric UID: [$HUSER_A]" ;;
 esac
-[ "$HUSER_A" -gt 65535 ] || fail "l'UID hote $HUSER_A est dans la plage 0-65535 : --userns=auto n'a pas pris"
-ok "UID hote du conteneur A = $HUSER_A (hors 0-65535)"
+[ "$HUSER_A" -gt 65535 ] || fail "host UID $HUSER_A is inside the 0-65535 range: --userns=auto did not take"
+ok "host UID of container A = $HUSER_A (outside 0-65535)"
 
 CTR_NAME="$CTR_B" VOL_DIR="${VOL_BASE}/b" IMAGE="$IMAGE" "${HERE}/run-hardened.sh" >/dev/null \
-  || fail "run-hardened.sh n'a pas demarre le conteneur B"
+  || fail "run-hardened.sh did not start container B"
 for _ in $(seq 1 100); do
   HUSER_B=$(podman_remote top "$CTR_B" huser 2>/dev/null | sed -n '2p' | tr -d '[:space:]')
   [ -n "${HUSER_B:-}" ] && break
   sleep 0.2
 done
 case "${HUSER_B:-}" in
-  ''|*[!0-9]*) fail "podman top huser (B) n'a pas renvoye un UID numerique : [${HUSER_B:-}]" ;;
+  ''|*[!0-9]*) fail "podman top huser (B) did not return a numeric UID: [${HUSER_B:-}]" ;;
 esac
-[ "$HUSER_B" -gt 65535 ] || fail "l'UID hote de B ($HUSER_B) est dans la plage 0-65535"
-[ "$HUSER_A" != "$HUSER_B" ] || fail "les deux conteneurs partagent le meme UID hote ($HUSER_A)"
-ok "deux conteneurs cote a cote : UID hotes distincts ($HUSER_A et $HUSER_B)"
+[ "$HUSER_B" -gt 65535 ] || fail "host UID of B ($HUSER_B) is inside the 0-65535 range"
+[ "$HUSER_A" != "$HUSER_B" ] || fail "the two containers share the same host UID ($HUSER_A)"
+ok "two containers side by side: distinct host UIDs ($HUSER_A and $HUSER_B)"
 
 # --------------------------------------------------------------------------
-head2 "6. bombe a fork : contenue par --pids-limit 256, hote intact"
+head2 "6. fork bomb: contained by --pids-limit 256, host untouched"
 # --------------------------------------------------------------------------
 PIDS_MAX=$(cexec 'cat /sys/fs/cgroup/pids.max')
-[ "$PIDS_MAX" = "256" ] || fail "pids.max vaut $PIDS_MAX au lieu de 256"
-ok "pids.max du cgroup = 256"
+[ "$PIDS_MAX" = "256" ] || fail "pids.max is $PIDS_MAX instead of 256"
+ok "cgroup pids.max = 256"
 
 HOST_PROCS_BEFORE=$(ps -e --no-headers | wc -l)
 CTR_NAME="$CTR_BOMB" VOL_DIR="${VOL_BASE}/bomb" IMAGE="$IMAGE" "${HERE}/run-hardened.sh" >/dev/null \
-  || fail "run-hardened.sh n'a pas demarre le conteneur de la bombe"
+  || fail "run-hardened.sh did not start the bomb container"
 BOMB_CG=$(podman_remote inspect "$CTR_BOMB" --format '{{.State.CgroupPath}}')
-[ -r "/sys/fs/cgroup${BOMB_CG}/pids.current" ] || fail "cgroup de la bombe illisible : /sys/fs/cgroup${BOMB_CG}"
+[ -r "/sys/fs/cgroup${BOMB_CG}/pids.current" ] || fail "bomb cgroup unreadable: /sys/fs/cgroup${BOMB_CG}"
 
 podman_remote exec "$CTR_BOMB" bash -c ':(){ :|:& };:' >/dev/null 2>&1 &
 BOMB_PID=$!
@@ -315,29 +315,29 @@ HOST_OK_ELAPSED=$(python3 -c "print(round($(date +%s.%N)-${HOST_OK_START}, 2))")
 kill "$BOMB_PID" >/dev/null 2>&1
 podman_remote rm -f "$CTR_BOMB" >/dev/null 2>&1
 
-[ "$MAXSEEN" -le 256 ] || fail "le cgroup de la bombe a depasse 256 processus ($MAXSEEN)"
-[ "$MAXSEEN" -ge 200 ] || fail "la bombe n'a pas atteint la limite ($MAXSEEN processus) : le test ne prouve rien"
-ok "la bombe plafonne a $MAXSEEN processus, jamais au-dessus de 256"
+[ "$MAXSEEN" -le 256 ] || fail "the bomb cgroup went past 256 processes ($MAXSEEN)"
+[ "$MAXSEEN" -ge 200 ] || fail "the bomb did not reach the limit ($MAXSEEN processes): the test proves nothing"
+ok "the bomb tops out at $MAXSEEN processes, never above 256"
 
 DELTA=$((HOST_PROCS_AFTER - HOST_PROCS_BEFORE))
-[ "$DELTA" -lt 100 ] || fail "le nombre de processus de l'hote a bondi de $DELTA pendant la bombe"
-ok "hote : $HOST_PROCS_BEFORE -> $HOST_PROCS_AFTER processus (delta $DELTA), ps repond en ${HOST_OK_ELAPSED}s"
+[ "$DELTA" -lt 100 ] || fail "the host process count jumped by $DELTA during the bomb"
+ok "host: $HOST_PROCS_BEFORE -> $HOST_PROCS_AFTER processes (delta $DELTA), ps answers in ${HOST_OK_ELAPSED}s"
 
 OUT=$(podman_remote exec "$CTR_A" curl -sS -m 3 -o /dev/null -w '%{http_code}' http://localhost:8080/healthz 2>&1)
-[ "$OUT" = "200" ] || fail "le conteneur A ne repond plus apres la bombe (http $OUT)"
-ok "le conteneur voisin A repond toujours sur /healthz apres la bombe"
+[ "$OUT" = "200" ] || fail "container A no longer answers after the bomb (http $OUT)"
+ok "neighbour container A still answers on /healthz after the bomb"
 
 # --------------------------------------------------------------------------
-head2 "7. code-server : /healthz, reglages machine, galerie neutralisee"
+head2 "7. code-server: /healthz, machine settings, neutralised gallery"
 # --------------------------------------------------------------------------
 OUT=$(cexec 'curl -sS -m 3 http://localhost:8080/healthz')
 case "$OUT" in
-  *'"status"'*) ok "curl http://localhost:8080/healthz depuis le conteneur : $OUT" ;;
-  *) fail "/healthz n'a pas repondu le JSON attendu" "$OUT" ;;
+  *'"status"'*) ok "curl http://localhost:8080/healthz from the container: $OUT" ;;
+  *) fail "/healthz did not answer the expected JSON" "$OUT" ;;
 esac
 
 for f in /run/code-server/User/settings.json /run/code-server/Machine/settings.json; do
-  cexec "test -f $f" >/dev/null 2>&1 || fail "reglages machine non copies dans $f"
+  cexec "test -f $f" >/dev/null 2>&1 || fail "machine settings not copied into $f"
   for k in '"files.autoSave": "afterDelay"' '"files.autoSaveDelay": 1000' \
            '"extensions.autoUpdate": false' '"update.mode": "none"' \
            '"telemetry.telemetryLevel": "off"' '"chat.disableAIFeatures": true' \
@@ -345,114 +345,114 @@ for f in /run/code-server/User/settings.json /run/code-server/Machine/settings.j
            '"keyboard.dispatch": "keyCode"' \
            '"terminal.integrated.stickyScroll.enabled": false' \
            '"terminal.integrated.fontLigatures.enabled": false'; do
-    cexec "grep -qF '$k' $f" >/dev/null 2>&1 || fail "reglage absent de $f : $k"
+    cexec "grep -qF '$k' $f" >/dev/null 2>&1 || fail "setting missing from $f: $k"
   done
 done
-ok "reglages machine copies dans le user-data-dir tmpfs (User et Machine)"
+ok "machine settings copied into the tmpfs user-data-dir (User and Machine)"
 
 cexec "grep -qF '\"extensions.allowed\"' /run/code-server/User/settings.json" >/dev/null 2>&1 \
-  || fail "extensions.allowed absent des reglages"
+  || fail "extensions.allowed missing from the settings"
 cexec "grep -qF '\"heig.codespace-statusbar\": true' /run/code-server/User/settings.json" >/dev/null 2>&1 \
-  || fail "heig.codespace-statusbar absent de extensions.allowed"
-ok "extensions.allowed present et restreint aux trois extensions"
+  || fail "heig.codespace-statusbar missing from extensions.allowed"
+ok "extensions.allowed present and restricted to the three extensions"
 
-# Les deux reglages ajoutes le 2026-09-18 doivent exister **dans le paquet VS
-# Code embarque**, pas seulement dans notre fichier : un nom inexistant serait
-# ignore en silence. Recherche litterale dans le bundle du workbench.
+# The two settings added on 2026-09-18 must exist **in the bundled VS Code
+# package**, not only in our own file: a name that does not exist would be
+# silently ignored. Literal search in the workbench bundle.
 WB=/usr/lib/code-server/lib/vscode/out/vs/workbench/workbench.web.main.internal.js
 cexec "grep -q 'workbench.secondarySideBar.defaultVisibility' $WB" >/dev/null 2>&1 \
-  || fail "workbench.secondarySideBar.defaultVisibility inconnu du paquet VS Code embarque"
+  || fail "workbench.secondarySideBar.defaultVisibility unknown to the bundled VS Code package"
 cexec "grep -q 'keyboard.dispatch' $WB" >/dev/null 2>&1 \
-  || fail "keyboard.dispatch inconnu du paquet VS Code embarque"
-# La valeur posee doit etre dans l'enumeration declaree, sinon VS Code la rejette.
+  || fail "keyboard.dispatch unknown to the bundled VS Code package"
+# The value set must be in the declared enum, otherwise VS Code rejects it.
 cexec "grep -qF '\"workbench.secondarySideBar.defaultVisibility\":{type:\"string\",enum:[\"hidden\"' $WB" >/dev/null 2>&1 \
-  || fail "« hidden » n'est pas la premiere valeur de l'enumeration de workbench.secondarySideBar.defaultVisibility"
+  || fail "hidden is not the first value of the workbench.secondarySideBar.defaultVisibility enum"
 cexec "grep -qF '\"keyboard.dispatch\":{scope:1,type:\"string\",enum:[\"code\",\"keyCode\"]' $WB" >/dev/null 2>&1 \
-  || fail "« keyCode » n'est pas une valeur declaree de keyboard.dispatch"
-ok "les deux reglages existent dans VS Code 1.137.0 embarque, avec les valeurs posees dans leur enumeration"
+  || fail "keyCode is not a declared value of keyboard.dispatch"
+ok "both settings exist in the bundled VS Code 1.137.0, with the values set present in their enum"
 
-# Invite « Use the fonts on your computer » : la chaine de cause, relevee dans
-# le paquet embarque (voir README). Le defilement colle du terminal charge
-# l'addon de ligatures **sans condition**, et cet addon appelle
-# queryLocalFonts(). C'est stickyScroll.enabled (defaut true) qui gouverne.
+# "Use the fonts on your computer" prompt: the causal chain, traced in the
+# bundled package (see README). The terminal's sticky scroll loads the
+# ligatures addon **unconditionally**, and that addon calls
+# queryLocalFonts(). It is stickyScroll.enabled (default true) that governs.
 cexec "grep -qF '\"terminal.integrated.stickyScroll.enabled\":{markdownDescription:' $WB" >/dev/null 2>&1 \
-  || fail "terminal.integrated.stickyScroll.enabled inconnu du paquet VS Code embarque"
+  || fail "terminal.integrated.stickyScroll.enabled unknown to the bundled VS Code package"
 cexec "grep -aqE '\"terminal.integrated.stickyScroll.enabled\":[{][^}]{0,300}default:!0' $WB" >/dev/null 2>&1 \
-  || fail "le defaut amont de terminal.integrated.stickyScroll.enabled n'est plus true : la preuve est perimee"
+  || fail "the upstream default of terminal.integrated.stickyScroll.enabled is no longer true: the proof is stale"
 cexec "grep -qF 'importAddon(\"ligatures\").then' $WB" >/dev/null 2>&1 \
-  || fail "le defilement colle ne charge plus l'addon de ligatures : la preuve est perimee"
+  || fail "sticky scroll no longer loads the ligatures addon: the proof is stale"
 cexec "grep -aqE 'stickyScroll.enabled.{0,200}hasRichCommandDetection' $WB" >/dev/null 2>&1 \
-  || fail "_shouldBeEnabled ne lit plus terminal.integrated.stickyScroll.enabled"
+  || fail "_shouldBeEnabled no longer reads terminal.integrated.stickyScroll.enabled"
 cexec "grep -q 'queryLocalFonts' /usr/lib/code-server/lib/vscode/node_modules/@xterm/addon-ligatures/lib/addon-ligatures.js" >/dev/null 2>&1 \
-  || fail "addon-ligatures n'appelle plus queryLocalFonts : la preuve est perimee"
+  || fail "addon-ligatures no longer calls queryLocalFonts: the proof is stale"
 cexec "grep -aqE '\"terminal.integrated.fontLigatures.enabled\":[{][^}]{0,300}default:!1' $WB" >/dev/null 2>&1 \
-  || fail "le defaut amont de terminal.integrated.fontLigatures.enabled n'est plus false"
-ok "invite des polices : chaine stickyScroll -> addon-ligatures -> queryLocalFonts relevee dans le paquet embarque"
+  || fail "the upstream default of terminal.integrated.fontLigatures.enabled is no longer false"
+ok "fonts prompt: chain stickyScroll -> addon-ligatures -> queryLocalFonts traced in the bundled package"
 
-# Les seuls appelants de queryLocalFonts dans ce qui est servi au navigateur :
-# l'addon de ligatures, et le paquet du workbench (suggestions de polices des
-# reglages, gardees par isElectron, faux en web). Toute autre famille de
-# fichiers serait un appelant nouveau, donc une invite possible.
+# The only callers of queryLocalFonts in what is served to the browser: the
+# ligatures addon, and the workbench bundle (font suggestions in the settings,
+# guarded by isElectron, false on the web). Any other family of files would be
+# a new caller, hence a possible prompt.
 FONT_CALLERS=$(cexec "grep -rl queryLocalFonts /usr/lib/code-server/lib/vscode/out /usr/lib/code-server/lib/vscode/node_modules 2>/dev/null | sort" | tr -d '\r')
-[ -n "$FONT_CALLERS" ] || fail "aucun appelant de queryLocalFonts trouve : la recherche ne prouve rien"
+[ -n "$FONT_CALLERS" ] || fail "no caller of queryLocalFonts found: the search proves nothing"
 STRAY=$(printf '%s\n' "$FONT_CALLERS" | grep -v 'addon-ligatures' | grep -v 'workbench')
-[ -z "$STRAY" ] || fail "appelant inattendu de queryLocalFonts dans le paquet" "$STRAY"
-# Le garde du second appelant : Vhe=Ogo, ou Ogo est isElectron dans le module
-# de plate-forme minifie (voir README). Faux dans un navigateur.
+[ -z "$STRAY" ] || fail "unexpected caller of queryLocalFonts in the package" "$STRAY"
+# The second caller's guard: Vhe=Ogo, where Ogo is isElectron in the minified
+# platform module (see README). False in a browser.
 cexec "grep -qF 'Vhe=Ogo' $WB" >/dev/null 2>&1 \
-  || echo "  note le garde isElectron du second appelant n'a pas ete retrouve tel quel (minification changee)"
-ok "queryLocalFonts n'est appele que par l'addon de ligatures et par un chemin garde par isElectron"
+  || echo "  note the second caller's isElectron guard was not found as such (minification changed)"
+ok "queryLocalFonts is called only by the ligatures addon and by a path guarded by isElectron"
 
 podman_remote logs "$CTR_A" 2>&1 | grep -q 'Using custom extensions gallery' \
-  || fail "code-server n'a pas pris EXTENSIONS_GALLERY (galerie par defaut active)"
-ok "EXTENSIONS_GALLERY pris en compte : « Using custom extensions gallery »"
+  || fail "code-server did not take EXTENSIONS_GALLERY (default gallery active)"
+ok "EXTENSIONS_GALLERY taken into account: 'Using custom extensions gallery'"
 
 ERRS=$(podman_remote logs "$CTR_A" 2>&1 | grep -c 'Uncaught exception')
-[ "$ERRS" = "0" ] || fail "code-server a journalise $ERRS exception(s) non rattrapee(s)" "$(podman_remote logs "$CTR_A" 2>&1 | tail -20)"
-ok "aucune exception non rattrapee au demarrage de code-server"
+[ "$ERRS" = "0" ] || fail "code-server logged $ERRS uncaught exception(s)" "$(podman_remote logs "$CTR_A" 2>&1 | tail -20)"
+ok "no uncaught exception at code-server start-up"
 
 cexec 'test -x /usr/bin/clangd && test -x /usr/bin/gdb && test -x /usr/bin/gcc && test -x /usr/bin/make && test -x /usr/bin/git' >/dev/null 2>&1 \
-  || fail "un des binaires attendus manque (clangd, gdb, gcc, make, git)"
-ok "gcc, gdb, make, git, clangd presents"
+  || fail "one of the expected binaries is missing (clangd, gdb, gcc, make, git)"
+ok "gcc, gdb, make, git, clangd present"
 
 cexec 'test -r /home/student/.config/clangd/config.yaml && test -r /run/code-server/xdg-config/clangd/config.yaml' >/dev/null 2>&1 \
-  || fail "la configuration clangd n'est pas aux deux chemins attendus"
-ok "configuration clangd presente dans ~/.config et dans le XDG_CONFIG_HOME du serveur"
+  || fail "the clangd configuration is not at both expected paths"
+ok "clangd configuration present in ~/.config and in the server's XDG_CONFIG_HOME"
 
 cexec 'man 2 ptrace 2>/dev/null | head -1 | grep -q .' >/dev/null 2>&1 \
-  || fail "les pages de manuel de developpement ne sont pas installees (man 2 ptrace)"
-ok "pages de manuel de developpement disponibles (man 2 ptrace)"
+  || fail "the development manual pages are not installed (man 2 ptrace)"
+ok "development manual pages available (man 2 ptrace)"
 
 
 # --------------------------------------------------------------------------
-head2 "8. resolveur : aucun nameserver, echec rapide"
+head2 "8. resolver: no nameserver, fast failure"
 RESOLV=$(cexec 'cat /etc/resolv.conf' 2>&1)
 case "$RESOLV" in
-  *nameserver*) fail "/etc/resolv.conf contient un nameserver" "$RESOLV" ;;
+  *nameserver*) fail "/etc/resolv.conf contains a nameserver" "$RESOLV" ;;
 esac
 case "$RESOLV" in
   *"options timeout:1 attempts:1"*) : ;;
-  *) fail "/etc/resolv.conf de l'image a ete ecrase par Podman" "$RESOLV" ;;
+  *) fail "the image's /etc/resolv.conf was overwritten by Podman" "$RESOLV" ;;
 esac
-ok "/etc/resolv.conf vient de l'image : aucun nameserver, options timeout:1 attempts:1"
+ok "/etc/resolv.conf comes from the image: no nameserver, options timeout:1 attempts:1"
 
 R0=$(date +%s.%N)
 if cexec 'getent hosts example.invalid' >/dev/null 2>&1; then
-  fail "getent hosts example.invalid a reussi : il y a un resolveur"
+  fail "getent hosts example.invalid succeeded: there is a resolver"
 fi
 RES_ELAPSED=$(python3 -c "print(round($(date +%s.%N)-${R0}, 2))")
 python3 -c "import sys; sys.exit(0 if ${RES_ELAPSED} < 2 else 1)" \
-  || fail "getent hosts example.invalid a mis ${RES_ELAPSED}s, au-dela des 2 s exigees"
-ok "getent hosts example.invalid echoue en ${RES_ELAPSED}s (< 2 s)"
+  || fail "getent hosts example.invalid took ${RES_ELAPSED}s, beyond the 2 s required"
+ok "getent hosts example.invalid fails in ${RES_ELAPSED}s (< 2 s)"
 
 # --------------------------------------------------------------------------
-head2 "9. environnement du conteneur : les sept variables du portail, et rien d'autre"
+head2 "9. container environment: the portal's seven variables, and nothing else"
 # --------------------------------------------------------------------------
-# Ce que le portail pose au `podman run` (sessions/manager.ts,
-# CONTAINER_ENV_KEYS) : l'echeance, l'URL de retour, le titre du devoir, puis
-# l'identite git de l'etudiant. L'extension `heig.codespace-statusbar` lit les
-# trois premieres dans `process.env` ; git honore les quatre autres sans
-# aucun fichier de configuration.
+# What the portal sets on `podman run` (sessions/manager.ts,
+# CONTAINER_ENV_KEYS): the deadline, the return URL, the assignment title, then
+# the student's git identity. The `heig.codespace-statusbar` extension reads the
+# first three from `process.env`; git honours the other four without any
+# configuration file at all.
 
 for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" \
           "CODESPACE_RETURN_URL=${ENV_RETURN_URL}" \
@@ -462,32 +462,32 @@ for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" \
           "GIT_COMMITTER_NAME=${ENV_GIT_NAME}" \
           "GIT_COMMITTER_EMAIL=${ENV_GIT_EMAIL}"; do
   cexec "tr '\\0' '\\n' < /proc/1/environ | grep -qxF '$kv'" >/dev/null 2>&1 \
-    || fail "variable absente de l'environnement de code-server (pid 1) : $kv" \
+    || fail "variable missing from code-server's environment (pid 1): $kv" \
             "$(cexec "tr '\\0' '\\n' < /proc/1/environ" 2>&1)"
 done
-ok "les sept variables du portail sont dans l'environnement de code-server (pid 1)"
+ok "the portal's seven variables are in code-server's environment (pid 1)"
 
-# Exactement trois lignes d'ecart avec un conteneur lance sans EXTRA_ARGS : le
-# portail n'ajoute rien d'autre a l'image, aucun secret au premier chef.
+# Exactly seven lines of difference with a container started without EXTRA_ARGS:
+# the portal adds nothing else to the image, and no secret whatsoever.
 ENV_A=$(podman_remote exec "$CTR_A" env | sort)
 ENV_B=$(podman_remote exec "$CTR_B" env | sort)
 EXTRA=$(comm -23 <(printf '%s\n' "$ENV_A") <(printf '%s\n' "$ENV_B") | grep -v '^HOSTNAME=' | grep -v '^container=')
 EXTRA_COUNT=$(printf '%s\n' "$EXTRA" | grep -c .)
 [ "$EXTRA_COUNT" = "7" ] \
-  || fail "le conteneur du portail porte $EXTRA_COUNT variable(s) de plus que l'image, attendu 7" "$EXTRA"
+  || fail "the portal container carries $EXTRA_COUNT variable(s) more than the image, expected 7" "$EXTRA"
 printf '%s\n' "$EXTRA" | grep -qvE '^(CODESPACE|GIT)_' \
-  && fail "une variable hors CODESPACE_*/GIT_* est posee sur le conteneur" "$EXTRA"
-ok "exactement sept variables en plus de celles de l'image, toutes en CODESPACE_ ou GIT_ : $(printf '%s' "$EXTRA" | tr '\n' ' ')"
+  && fail "a variable outside CODESPACE_*/GIT_* is set on the container" "$EXTRA"
+ok "exactly seven variables beyond the image's own, all CODESPACE_ or GIT_: $(printf '%s' "$EXTRA" | tr '\n' ' ')"
 
-# L'identite git, a l'usage : un commit reellement fait dans le conteneur porte
-# le nom et l'adresse de l'etudiant, sans qu'aucun fichier de configuration
-# n'ait ete ecrit. C'est le retour de production du 2026-09-18.
+# The git identity in use: a commit really made inside the container carries the
+# student's name and address, without any configuration file having been
+# written. This is the production feedback of 2026-09-18.
 IDENT=$(cexec 'git -C /work var GIT_AUTHOR_IDENT' 2>&1)
 case "$IDENT" in
   "${ENV_GIT_NAME} <${ENV_GIT_EMAIL}>"*) : ;;
-  *) fail "git -C /work var GIT_AUTHOR_IDENT ne porte pas l'identite posee par le portail" "$IDENT" ;;
+  *) fail "git -C /work var GIT_AUTHOR_IDENT does not carry the identity set by the portal" "$IDENT" ;;
 esac
-ok "git -C /work var GIT_AUTHOR_IDENT : $IDENT"
+ok "git -C /work var GIT_AUTHOR_IDENT: $IDENT"
 
 COMMIT=$(cexec '
   set -e
@@ -499,45 +499,45 @@ COMMIT=$(cexec '
   git --no-pager log -1 --pretty=format:"%an|%ae|%cn|%ce"' 2>&1)
 case "$COMMIT" in
   "${ENV_GIT_NAME}|${ENV_GIT_EMAIL}|${ENV_GIT_NAME}|${ENV_GIT_EMAIL}") : ;;
-  *) fail "git commit sans fichier de configuration n'a pas produit le bon auteur" "$COMMIT" ;;
+  *) fail "git commit without a configuration file did not produce the right author" "$COMMIT" ;;
 esac
-ok "git commit dans le conteneur : auteur et committer = ${ENV_GIT_NAME} <${ENV_GIT_EMAIL}>"
+ok "git commit inside the container: author and committer = ${ENV_GIT_NAME} <${ENV_GIT_EMAIL}>"
 
-# Et aucune configuration n'a ete ecrite pour cela : ce sont bien les variables.
+# And no configuration was written for that: it really is the variables.
 CFG=$(cexec 'git -C /tmp/idtest config --local --get user.name || true' 2>&1 | tr -d "[:space:]")
-[ -z "$CFG" ] || fail "une identite a ete ecrite dans la configuration locale : $CFG"
-ok "aucun user.name local : les quatre variables suffisent a git"
+[ -z "$CFG" ] || fail "an identity was written into the local configuration: $CFG"
+ok "no local user.name: the four variables are enough for git"
 
-# L'hote d'extensions herite de cet environnement en deux temps. Premier
-# temps, mesure : code-server (pid 1) engendre le serveur VS Code, qui porte
-# bien les trois variables.
+# The extension host inherits this environment in two steps. First step,
+# measured: code-server (pid 1) spawns the VS Code server, which does carry
+# the three variables.
 SRV_PID=$(cexec "pgrep -f 'code-server/out/node/entry' | head -1" 2>/dev/null | tr -d '[:space:]')
 case "$SRV_PID" in
-  ''|*[!0-9]*) fail "processus serveur VS Code (out/node/entry) introuvable dans le conteneur" "$(cexec 'ps -eo pid,args --no-headers' 2>&1)" ;;
+  ''|*[!0-9]*) fail "VS Code server process (out/node/entry) not found in the container" "$(cexec 'ps -eo pid,args --no-headers' 2>&1)" ;;
 esac
 for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" "CODESPACE_RETURN_URL=${ENV_RETURN_URL}"; do
   cexec "tr '\\0' '\\n' < /proc/${SRV_PID}/environ | grep -qxF '$kv'" >/dev/null 2>&1 \
-    || fail "le serveur VS Code (pid ${SRV_PID}) n'a pas herite de $kv"
+    || fail "the VS Code server (pid ${SRV_PID}) did not inherit $kv"
 done
-ok "le serveur VS Code (pid ${SRV_PID}, engendre par code-server) a herite des trois variables"
+ok "the VS Code server (pid ${SRV_PID}, spawned by code-server) inherited the three variables"
 
-# Second temps : c'est ce serveur qui fork l'hote d'extensions, et il construit
-# son environnement a partir du sien. Verifie dans le paquet embarque, pas de
-# memoire — l'hote d'extensions lui-meme n'existe qu'une fois qu'un navigateur
-# s'est connecte, ce que ce test ne fait pas (voir README, TODO(verify)).
+# Second step: it is that server which forks the extension host, and it builds
+# its environment from its own. Checked in the bundled package, not from
+# memory — the extension host itself only exists once a browser has connected,
+# which this test does not do (see README, TODO(verify)).
 cexec "grep -qF 'ExtensionHostConnection#buildUserEnvironment' /usr/lib/code-server/lib/vscode/out/server-main.js" >/dev/null 2>&1 \
-  || fail "buildUserEnvironment introuvable dans le serveur VS Code embarque"
+  || fail "buildUserEnvironment not found in the bundled VS Code server"
 cexec "grep -aqE 'buildUserEnvironment.{0,400}[{][.][.][.]process[.]env' /usr/lib/code-server/lib/vscode/out/server-main.js" >/dev/null 2>&1 \
-  || fail "buildUserEnvironment ne construit pas l'environnement de l'hote d'extensions a partir de process.env"
-ok "buildUserEnvironment fork l'hote d'extensions avec {...process.env} : l'heritage est complet"
+  || fail "buildUserEnvironment does not build the extension host environment from process.env"
+ok "buildUserEnvironment forks the extension host with {...process.env}: inheritance is complete"
 
-# L'extension, une fois activee, depose un temoin dans /tmp. Il n'existe pas
-# tant qu'aucun navigateur n'a ouvert l'editeur : on verifie seulement qu'il
-# n'est pas la par accident (il serait alors dans l'image).
+# Once activated, the extension drops a witness in /tmp. It does not exist as
+# long as no browser has opened the editor: we only check that it is not there
+# by accident (it would then come from the image).
 if cexec 'test -e /tmp/codespace-statusbar.json' >/dev/null 2>&1; then
-  fail "le temoin d'activation existe avant toute connexion : il vient de l'image"
+  fail "the activation witness exists before any connection: it comes from the image"
 fi
-ok "aucun temoin d'activation dans l'image (il n'apparait qu'a l'ouverture de l'editeur)"
+ok "no activation witness in the image (it only appears when the editor is opened)"
 
-printf '\n%d assertions, toutes vertes.\n' "$NTEST"
+printf '\n%d assertions, all green.\n' "$NTEST"
 printf 'MESURE_DEMARRAGE_SECONDES=%s\n' "$BOOT"

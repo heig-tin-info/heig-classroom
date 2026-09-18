@@ -1,400 +1,402 @@
-# Portail d'environnements de développement supervisés
+# Portal for supervised development environments
 
-Dossier de cadrage · 2026-09-17
+Historical framing document (translated). Where it contradicts docs/analyse.md, analyse.md prevails; sections 3 and 4 prevail over everything.
 
-## 1. Objet du document
+Framing document · 2026-09-17
 
-Ce document décrit un projet à construire. Il sert de base d'analyse, pas de spécification figée : les arbitrages restants figurent en section 10, et les hypothèses sont signalées comme telles.
+## 1. Purpose of the document
 
-Ce qui est attendu d'une analyse fondée sur ce document : une critique de l'architecture proposée, l'identification des angles morts, une contestation argumentée des choix techniques là où une meilleure option existe, et un découpage de développement réaliste. Les sections 7, 9 et 10 sont les plus utiles à challenger ; les sections 3 et 4 définissent le contrat et ne devraient pas être réinterprétées.
+This document describes a project to be built. It is a basis for analysis, not a frozen specification: the remaining trade-offs are listed in section 10, and assumptions are flagged as such.
 
-Contexte de production : une classe de vingt étudiants, une équipe technique réduite, aucune plateforme Kubernetes existante, budget d'infrastructure de l'ordre d'une machine virtuelle unique. Toute proposition qui suppose une équipe plateforme dédiée est hors sujet.
+What is expected from an analysis based on this document: a critique of the proposed architecture, the identification of blind spots, a reasoned challenge of the technical choices wherever a better option exists, and a realistic development breakdown. Sections 7, 9 and 10 are the most useful to challenge; sections 3 and 4 define the contract and should not be reinterpreted.
 
-## 2. Contexte et besoin
+Production context: a class of twenty students, a small technical team, no existing Kubernetes platform, an infrastructure budget on the order of a single virtual machine. Any proposal that assumes a dedicated platform team is off topic.
 
-Enseignement de la programmation système en C, avec compilation, débogage sous gdb et rendu par dépôt Git. Deux problèmes récurrents motivent le projet.
+## 2. Context and need
 
-Le premier est l'hétérogénéité des postes. Chaque rentrée consomme des heures à faire installer une chaîne d'outils sur Windows, macOS et Linux, avec des différences de comportement qui polluent l'enseignement. Un environnement identique pour tous, accessible au navigateur, supprime ce coût.
+Teaching systems programming in C, with compilation, debugging under gdb and submission through a Git repository. Two recurring problems motivate the project.
 
-Le second est l'évaluation. Depuis la généralisation des assistants de code, un travail pratique rendu à domicile ne mesure plus grand-chose. Il faut pouvoir organiser un travail noté en salle, surveillé, dans un environnement où l'assistance automatisée est absente et où la documentation autorisée est explicitement définie par l'enseignant.
+The first is the heterogeneity of the workstations. Every start of the academic year burns hours getting a toolchain installed on Windows, macOS and Linux, with behavioural differences that pollute the teaching. An identical environment for everyone, reachable from the browser, removes that cost.
 
-### Les deux modes d'usage
+The second is assessment. Since code assistants became widespread, a lab assignment handed in from home no longer measures much. It must be possible to organise a graded assignment in a room, supervised, in an environment where automated assistance is absent and where the authorised documentation is explicitly defined by the teacher.
 
-Le système doit servir deux régimes qui partagent la même infrastructure mais pas les mêmes contraintes.
+### The two usage modes
 
-Mode travaux pratiques. Accès depuis n'importe quel navigateur, à n'importe quelle heure. Confort avant tout. Le verrouillage réseau du conteneur reste actif, car il garantit la reproductibilité de l'environnement, mais l'étudiant navigue librement dans son propre navigateur. Aucune prétention de contrôle.
+The system must serve two regimes that share the same infrastructure but not the same constraints.
 
-Mode examen. Accès uniquement depuis Safe Exam Browser, sur poste de salle, sous surveillance humaine. La surface de navigation de l'étudiant est définie par l'enseignant. Le portail refuse toute session qui n'est pas authentifiée comme provenant d'une instance SEB correctement configurée.
+Lab mode. Access from any browser, at any hour. Comfort above all. The container's network lockdown stays active, because it guarantees the reproducibility of the environment, but the student browses freely in their own browser. No claim of control.
 
-Le mode est un attribut du devoir, pas une instance séparée. Cette distinction structure une grande partie des exigences qui suivent : plusieurs d'entre elles n'ont de sens qu'en mode examen, et les traiter uniformément conduirait à un système inutilement pénible en mode travaux pratiques.
+Exam mode. Access only from Safe Exam Browser, on a workstation in the room, under human supervision. The student's browsing surface is defined by the teacher. The portal refuses any session that is not authenticated as coming from a correctly configured SEB instance.
 
-## 3. Exigences
+The mode is an attribute of the assignment, not a separate instance. That distinction shapes a large part of the requirements that follow: several of them only make sense in exam mode, and treating them uniformly would lead to a needlessly painful system in lab mode.
 
-Chaque exigence porte un niveau (obligatoire, souhaitable, optionnel) et un point d'application, c'est-à-dire la couche technique qui la fait respecter. Le point d'application importe autant que l'exigence : plusieurs exigences apparemment simples se révèlent inapplicables à la couche où on les place spontanément.
+## 3. Requirements
 
-| # | Exigence | Niveau | Point d'application |
+Every requirement carries a level (mandatory, desirable, optional) and an enforcement point, that is, the technical layer that makes it hold. The enforcement point matters as much as the requirement: several apparently simple requirements turn out to be unenforceable at the layer where one spontaneously places them.
+
+| # | Requirement | Level | Enforcement point |
 | --- | --- | --- | --- |
-| E1 | L'étudiant accède au service par une URL unique, sans installation préalable hors SEB | Obligatoire | Portail web |
-| E2 | Authentification par identité institutionnelle OpenID Connect | Obligatoire | Portail, fournisseur d'identité |
-| E3 | Rattachement du compte institutionnel à un compte GitHub, en un clic, avec récupération du login et de l'adresse | Obligatoire | Portail, GitHub App |
-| E4 | Un VS Code fonctionnel se charge dans le navigateur, avec coloration, complétion et navigation de code C | Obligatoire | code-server dans le conteneur |
-| E5 | L'étudiant ne peut installer aucune extension hors de la liste définie par l'enseignant | Obligatoire | Image, product.json, extensions.allowed, réseau |
-| E6 | Aucun assistant de code n'est disponible dans l'environnement | Obligatoire | Image, réseau sortant |
-| E7 | Terminal disponible, avec gcc, gdb, make, git, pages de manuel | Obligatoire | Image du conteneur |
-| E8 | L'étudiant crée et modifie des fichiers, qui survivent à la fin de la session | Obligatoire | Volume persistant |
-| E9 | L'étudiant peut pousser son travail vers un dépôt GitHub désigné | Obligatoire | Proxy Git du portail |
-| E10 | Le conteneur n'atteint aucune destination réseau hors de celles explicitement autorisées | Obligatoire | nftables sur l'hôte |
-| E11 | En mode examen, la surface de navigation de l'étudiant est limitée à une liste définie par l'enseignant | Obligatoire | Filtre d'URL de SEB |
-| E12 | En mode examen, le portail refuse toute session hors SEB correctement configuré | Obligatoire | Vérification BEK et Config Key côté serveur |
-| E13 | L'enseignant crée un devoir depuis une interface, sans intervention technique | Obligatoire | Portail |
-| E14 | La session démarre en quelques secondes du point de vue de l'étudiant | Souhaitable | Pool de conteneurs préchauffés |
-| E15 | Le travail n'est jamais perdu, y compris sur coupure réseau ou fermeture brutale | Obligatoire | Volume nommé, sauvegarde automatique périodique |
-| E16 | Le conteneur est détruit après une période d'inactivité configurable | Souhaitable | Ramasse-miettes du portail |
-| E17 | L'enseignant dispose d'une trace horodatée des rendus et des sessions | Souhaitable | Journal du proxy Git |
-| E18 | Documentation de référence consultable pendant l'examen | Souhaitable | Miroirs locaux servis par le portail |
+| E1 | The student reaches the service through a single URL, with no prior installation other than SEB | Mandatory | Web portal |
+| E2 | Authentication through the institutional OpenID Connect identity | Mandatory | Portal, identity provider |
+| E3 | Linking the institutional account to a GitHub account, in one click, retrieving the login and the address | Mandatory | Portal, GitHub App |
+| E4 | A working VS Code loads in the browser, with syntax highlighting, completion and C code navigation | Mandatory | code-server inside the container |
+| E5 | The student cannot install any extension outside the list defined by the teacher | Mandatory | Image, product.json, extensions.allowed, network |
+| E6 | No code assistant is available in the environment | Mandatory | Image, outbound network |
+| E7 | A terminal is available, with gcc, gdb, make, git, manual pages | Mandatory | Container image |
+| E8 | The student creates and modifies files, which survive the end of the session | Mandatory | Persistent volume |
+| E9 | The student can push their work to a designated GitHub repository | Mandatory | The portal's Git proxy |
+| E10 | The container reaches no network destination other than those explicitly allowed | Mandatory | nftables on the host |
+| E11 | In exam mode, the student's browsing surface is limited to a list defined by the teacher | Mandatory | SEB's URL filter |
+| E12 | In exam mode, the portal refuses any session outside a correctly configured SEB | Mandatory | Server-side BEK and Config Key verification |
+| E13 | The teacher creates an assignment from an interface, without technical intervention | Mandatory | Portal |
+| E14 | The session starts in a few seconds from the student's point of view | Desirable | Pool of pre-warmed containers |
+| E15 | Work is never lost, including on a network outage or an abrupt shutdown | Mandatory | Named volume, periodic automatic saving |
+| E16 | The container is destroyed after a configurable period of inactivity | Desirable | The portal's garbage collector |
+| E17 | The teacher has a timestamped trace of submissions and sessions | Desirable | Git proxy log |
+| E18 | Reference documentation available during the exam | Desirable | Local mirrors served by the portal |
 
-### Points d'attention sur les exigences
+### Points of attention on the requirements
 
-E5 repose sur trois couches superposées, aucune n'étant suffisante seule. Extensions cuites dans l'image, retrait du champ de galerie d'extensions dans le product.json de la build, et réglage extensions.allowed au niveau machine. Le comportement exact de ce réglage dans les builds dérivées de VS Code doit être vérifié empiriquement, il n'est pas garanti identique à celui du VS Code de bureau.
+E5 rests on three superposed layers, none of which is sufficient on its own. Extensions baked into the image, removal of the extension gallery field from the build's product.json, and the extensions.allowed setting at machine level. The exact behaviour of that setting in builds derived from VS Code must be verified empirically; it is not guaranteed to be identical to that of desktop VS Code.
 
-E9 et E10 sont en tension. L'approche naïve consiste à poser une clé SSH dans le conteneur et à ouvrir le réseau vers GitHub ; elle réintroduit un secret exfiltrable et une destination large. L'approche retenue est décrite en section 7.
+E9 and E10 are in tension. The naive approach consists in placing an SSH key in the container and opening the network towards GitHub; it reintroduces an exfiltrable secret and a broad destination. The chosen approach is described in section 7.
 
-E11 ne contrôle que ce que l'étudiant lit dans son navigateur. E10 ne contrôle que ce que les outils du conteneur atteignent. Ce sont deux listes distinctes, avec deux moteurs distincts et deux sémantiques distinctes. Les confondre dans l'interface enseignant est l'erreur de conception la plus probable de ce projet.
+E11 controls only what the student reads in their browser. E10 controls only what the container's tools reach. These are two distinct lists, with two distinct engines and two distinct semantics. Conflating them in the teacher interface is the most likely design error of this project.
 
-E12 est la clé de voûte du mode examen. Sans vérification côté serveur des clés transmises par SEB, l'étudiant ouvre simplement le portail dans un navigateur ordinaire et l'ensemble du dispositif de surveillance devient décoratif.
+E12 is the keystone of exam mode. Without server-side verification of the keys transmitted by SEB, the student simply opens the portal in an ordinary browser and the whole supervision apparatus becomes decorative.
 
-## 4. Non-objectifs et limites assumées
+## 4. Non-goals and accepted limits
 
-Ces points sont explicitement hors périmètre. Les rouvrir sans nécessité fera dériver le projet.
+These points are explicitly out of scope. Reopening them without necessity will make the project drift.
 
-Ce n'est pas une plateforme multi-établissements, ni multi-classes à grande échelle. La cible est vingt étudiants simultanés, avec une marge raisonnable jusqu'à cent. Toute optimisation pensée pour mille utilisateurs est prématurée.
+This is not a multi-institution platform, nor a large-scale multi-class one. The target is twenty simultaneous students, with a reasonable margin up to a hundred. Any optimisation designed for a thousand users is premature.
 
-Ce n'est pas un système anti-triche complet. Le téléphone posé sur les genoux, le voisin, la montre connectée relèvent de la surveillance humaine. Le dispositif technique réduit une surface, il ne la supprime pas ; le prétendre serait malhonnête vis-à-vis des enseignants.
+This is not a complete anti-cheating system. The phone on the lap, the neighbour, the smartwatch are matters for human supervision. The technical apparatus reduces a surface, it does not remove it; pretending otherwise would be dishonest towards the teachers.
 
-Ce n'est pas un système de notation ni un LMS. Pas d'énoncés, pas de barèmes, pas de correction automatique. Le portail livre un environnement et un canal de rendu ; ce qui se passe ensuite appartient aux outils existants.
+This is not a grading system nor an LMS. No assignment texts, no grading scales, no automatic correction. The portal delivers an environment and a submission channel; what happens next belongs to the existing tools.
 
-Ce n'est pas une plateforme multilingue au sens des langages. Le premier périmètre est la chaîne C, avec gcc, gdb et clangd. L'extension à d'autres langages doit rester possible par simple changement d'image, sans refonte, mais n'est pas à traiter maintenant.
+This is not a multilingual platform in the sense of programming languages. The first scope is the C toolchain, with gcc, gdb and clangd. Extension to other languages must remain possible by simply changing the image, without a redesign, but is not to be addressed now.
 
-La navigation de l'étudiant n'est contrôlée qu'en mode examen. En mode travaux pratiques, il dispose de son navigateur complet et de tout l'internet. C'est assumé et souhaitable.
+The student's browsing is controlled only in exam mode. In lab mode, they have their full browser and the whole internet. That is accepted and desirable.
 
-L'isolation visée est celle du conteneur durci, pas celle d'un hyperviseur. Le passage à gVisor ou à une micro-machine virtuelle est une option envisagée en section 10, pas une exigence initiale.
+The isolation aimed at is that of a hardened container, not that of a hypervisor. Moving to gVisor or to a micro virtual machine is an option considered in section 10, not an initial requirement.
 
-## 5. Acteurs et parcours
+## 5. Actors and journeys
 
-### Enseignant
+### Teacher
 
-Il se connecte au portail par son identité institutionnelle et crée un devoir. Le formulaire comporte : un intitulé, une image de conteneur choisie dans une liste courte, la liste blanche d'extensions VS Code, le dépôt GitHub cible ou le modèle dont il dérive, le mode (travaux pratiques ou examen), la fenêtre d'ouverture, la liste de documentation autorisée en mode examen, et la liste des destinations réseau autorisées pour le conteneur, vide par défaut.
+They log into the portal with their institutional identity and create an assignment. The form contains: a title, a container image chosen from a short list, the allow list of VS Code extensions, the target GitHub repository or the template it derives from, the mode (lab or exam), the opening window, the list of documentation allowed in exam mode, and the list of network destinations allowed for the container, empty by default.
 
-À la validation, le portail produit les artefacts dérivés : en mode examen, un fichier de configuration SEB chiffré dont il conserve la Config Key, et le lien de lancement correspondant. L'enseignant récupère ce lien et le distribue.
+On validation, the portal produces the derived artefacts: in exam mode, an encrypted SEB configuration file whose Config Key it keeps, and the corresponding launch link. The teacher collects that link and distributes it.
 
-Pendant la séance, il consulte un tableau des sessions actives, avec état, dernier battement et horodatage du dernier rendu. Il peut forcer la fermeture d'une session.
+During the session, they consult a dashboard of active sessions, with state, last heartbeat and timestamp of the last submission. They can force a session to close.
 
-### Étudiant, mode travaux pratiques
+### Student, lab mode
 
-Il ouvre le portail dans son navigateur habituel, s'authentifie, voit la liste de ses devoirs ouverts, clique sur Démarrer. Le portail alloue un conteneur, monte son volume, et le redirige vers son VS Code. Il travaille, commit, pousse. À la fermeture de l'onglet, le battement cesse ; après le délai de grâce puis le délai de rétention, le conteneur est détruit et le volume conservé.
+They open the portal in their usual browser, authenticate, see the list of their open assignments, click Start. The portal allocates a container, mounts their volume, and redirects them to their VS Code. They work, commit, push. When the tab is closed, the heartbeat stops; after the grace period and then the retention period, the container is destroyed and the volume kept.
 
-### Étudiant, mode examen
+### Student, exam mode
 
-Il lance Safe Exam Browser par le lien fourni. SEB télécharge la configuration, se verrouille en mode kiosque et ouvre l'URL de démarrage du portail. Le portail vérifie les clés transmises, refuse si elles ne correspondent pas au devoir, puis présente l'authentification institutionnelle. Le reste du parcours est identique, à ceci près que la surface de navigation est réduite à ce que l'enseignant a autorisé, et que les onglets de documentation sont servis depuis le portail.
+They launch Safe Exam Browser from the link provided. SEB downloads the configuration, locks itself into kiosk mode and opens the portal's start URL. The portal verifies the transmitted keys, refuses if they do not match the assignment, then presents the institutional authentication. The rest of the journey is identical, except that the browsing surface is reduced to what the teacher has allowed, and that the documentation tabs are served from the portal.
 
-### Administrateur
+### Administrator
 
-Il construit et publie les images, gère la liste des images disponibles aux enseignants, surveille la machine hôte et restaure un volume au besoin. Ce rôle n'a pas d'interface dédiée dans la première version ; il travaille en ligne de commande sur l'hôte.
+They build and publish the images, manage the list of images available to teachers, monitor the host machine and restore a volume when needed. That role has no dedicated interface in the first version; they work on the command line on the host.
 
-### Parcours dégradés à traiter explicitement
+### Degraded journeys to be treated explicitly
 
-Ces cas ne sont pas des détails. Ils constituent la moitié du travail réel et doivent figurer dans le découpage.
+These cases are not details. They constitute half of the real work and must appear in the breakdown.
 
-Le réseau de l'étudiant tombe pendant l'examen puis revient. La session doit se rétablir sans perte et sans nouvelle authentification complète.
+The student's network goes down during the exam and then comes back. The session must recover without loss and without a full re-authentication.
 
-Le conteneur meurt, par dépassement mémoire ou plantage. Le portail doit le redémarrer sur le même volume, sans que l'étudiant ait à comprendre ce qui s'est passé.
+The container dies, through memory exhaustion or a crash. The portal must restart it on the same volume, without the student having to understand what happened.
 
-L'étudiant n'a pas rattaché de compte GitHub au moment de démarrer. Le portail doit le lui proposer sans perdre le contexte du devoir.
+The student has not linked a GitHub account at the moment of starting. The portal must offer it to them without losing the context of the assignment.
 
-Un étudiant arrive en retard, ou avec un poste sur lequel SEB refuse de démarrer. Il faut une procédure de secours documentée, décidée avant la séance et non pendant.
+A student arrives late, or with a workstation on which SEB refuses to start. A documented fallback procedure is needed, decided before the session and not during it.
 
-Deux sessions simultanées sur le même devoir, par exemple un second onglet. Le comportement attendu doit être choisi : refus, reprise de la session existante, ou partage.
+Two simultaneous sessions on the same assignment, for instance a second tab. The expected behaviour must be chosen: refusal, resumption of the existing session, or sharing.
 
-## 6. État de l'art et position retenue
+## 6. State of the art and chosen position
 
-### Ce qui a été écarté, et pourquoi
+### What was ruled out, and why
 
-GitHub Codespaces avec GitHub Classroom couvre l'authentification, l'IDE navigateur, la persistance et le rendu Git sans une ligne de code. Il échoue sur E10 de façon structurelle : la documentation GitHub indique qu'il n'existe pas de moyen de restreindre l'accès d'un codespace à l'internet public, les codespaces étant autorisés à ouvrir des connexions sortantes. Le mode examen est donc hors d'atteinte. GitHub Classroom reste intéressant pour la seule création des dépôts étudiants depuis un modèle, à évaluer en section 10.
+GitHub Codespaces with GitHub Classroom covers authentication, the browser IDE, persistence and Git submission without a line of code. It fails on E10 structurally: the GitHub documentation states that there is no way to restrict a codespace's access to the public internet, codespaces being allowed to open outbound connections. Exam mode is therefore out of reach. GitHub Classroom remains of interest for the creation of student repositories from a template alone, to be evaluated in section 10.
 
-Coder, la plateforme auto-hébergée de développement à distance, est la candidate sérieuse. L'édition communautaire apporte le SSO OpenID Connect, des workspaces définis en Terraform sur Docker ou Kubernetes, le proxy web authentifié vers l'IDE et l'extinction automatique sur inactivité. Elle est écartée comme socle initial pour une raison de forme, pas de qualité : le portail décrit ici porte une logique pédagogique, des devoirs, des listes d'extensions et un filtrage SEB, qui ne s'expriment pas naturellement en variables de template Terraform. Sur vingt postes, l'indirection coûte plus qu'elle ne rapporte. Elle redeviendra pertinente le jour où il faudra plusieurs hôtes, des quotas par groupe et un audit.
+Coder, the self-hosted remote development platform, is the serious candidate. The community edition brings OpenID Connect SSO, workspaces defined in Terraform on Docker or Kubernetes, the authenticated web proxy to the IDE and automatic shutdown on inactivity. It is ruled out as an initial foundation for a reason of form, not of quality: the portal described here carries a pedagogical logic, assignments, extension lists and SEB filtering, which do not express themselves naturally as Terraform template variables. On twenty workstations, the indirection costs more than it returns. It will become relevant again the day several hosts, per-group quotas and an audit trail are needed.
 
-Eclipse Che répond au besoin en Kubernetes natif et gère le verrouillage d'extensions par ConfigMap, ce qui est exactement E5. Le coût d'exploitation d'un cluster pour vingt étudiants est disproportionné.
+Eclipse Che answers the need natively in Kubernetes and handles extension locking through a ConfigMap, which is exactly E5. The operating cost of a cluster for twenty students is disproportionate.
 
-JupyterHub avec DockerSpawner et code-server est une base éprouvée en contexte pédagogique, avec authentification OIDC, cycle de vie par utilisateur et arrêt des sessions inactives. Le modèle mental reste centré notebook et l'extension vers la logique de devoir décrite ici demande autant de travail que le développement direct.
+JupyterHub with DockerSpawner and code-server is a proven basis in a teaching context, with OIDC authentication, a per-user lifecycle and shutdown of idle sessions. The mental model remains notebook-centred and extending it towards the assignment logic described here takes as much work as direct development.
 
-Gitpod n'a plus d'offre auto-hébergée communautaire. Kasm Workspaces réserve l'authentification unique aux éditions payantes.
+Gitpod no longer has a community self-hosted offering. Kasm Workspaces reserves single sign-on for the paid editions.
 
-### Ce qui est réutilisé
+### What is reused
 
-Safe Exam Browser, projet ouvert de l'EPF de Zurich, fournit le navigateur kiosque, le filtrage d'URL par configuration et surtout le mécanisme de preuve, Browser Exam Key et Config Key, que le portail doit vérifier. Il n'existe pas de version officielle pour Linux ; seules Windows, macOS et iOS sont publiées, ce qui contraint le parc de la salle d'examen.
+Safe Exam Browser, an open project of ETH Zurich, provides the kiosk browser, URL filtering by configuration and above all the proof mechanism, Browser Exam Key and Config Key, that the portal must verify. There is no official version for Linux; only Windows, macOS and iOS are published, which constrains the fleet of the exam room.
 
-SEB Server, composant officiel du même projet, centralise la configuration des clients pour un examen et permet la surveillance en temps réel des clients connectés. Il couvre une partie du volet enseignant et mérite une évaluation avant d'écrire cette partie du portail.
+SEB Server, an official component of the same project, centralises the configuration of the clients for an exam and allows real-time monitoring of the connected clients. It covers part of the teacher-facing work and deserves an evaluation before writing that part of the portal.
 
-code-server ou openvscode-server fournissent le VS Code navigateur, construits sur la base ouverte de VS Code, donc dépourvus des composants propriétaires d'assistance au code.
+code-server or openvscode-server provide the browser VS Code, built on the open base of VS Code, and therefore free of the proprietary code assistance components.
 
 ### Position
 
-Développement maison d'un portail mince, au-dessus de briques existantes, orchestrant directement des conteneurs. Le portail n'invente ni l'IDE, ni le navigateur d'examen, ni le moteur de conteneurs. Il apporte trois choses que rien ne fournit assemblées : la logique de devoir, la vérification SEB côté serveur, et un canal Git sans secret dans le conteneur.
+In-house development of a thin portal, on top of existing building blocks, orchestrating containers directly. The portal invents neither the IDE, nor the exam browser, nor the container engine. It brings three things that nothing provides assembled: the assignment logic, the server-side SEB verification, and a Git channel with no secret inside the container.
 
-## 7. Architecture cible
+## 7. Target architecture
 
-### Vue d'ensemble
+### Overview
 
-Une machine virtuelle unique porte l'ensemble. Huit cœurs, trente-deux gigaoctets de mémoire vive et deux cents gigaoctets de stockage rapide absorbent vingt sessions de compilation C avec une marge confortable.
+A single virtual machine carries the whole. Eight cores, thirty-two gigabytes of RAM and two hundred gigabytes of fast storage absorb twenty C compilation sessions with a comfortable margin.
 
-Sur cet hôte, cinq composants. Un frontal TLS, un service portail, un moteur de conteneurs, un jeu de volumes persistants, et un ensemble de miroirs de documentation servis en local. Le service portail est le seul code écrit pour ce projet.
+On that host, five components. A TLS front end, a portal service, a container engine, a set of persistent volumes, and a set of documentation mirrors served locally. The portal service is the only code written for this project.
 
-### Le service portail
+### The portal service
 
-Il expose quatre surfaces distinctes, et cette séparation doit apparaître dans le code car les règles d'accès diffèrent.
+It exposes four distinct surfaces, and that separation must appear in the code because the access rules differ.
 
-Une interface étudiant et une interface enseignant, authentifiées par OpenID Connect.
+A student interface and a teacher interface, authenticated by OpenID Connect.
 
-Un proxy vers les conteneurs, qui relaie les requêtes HTTP et les websockets vers le code-server de la session, après vérification du jeton de session et, en mode examen, de la provenance SEB.
+A proxy to the containers, which relays HTTP requests and websockets to the session's code-server, after verifying the session token and, in exam mode, the SEB provenance.
 
-Un proxy Git, qui parle le protocole Git HTTP intelligent, authentifie par le jeton de session et relaie vers GitHub avec son propre jeton d'application. C'est la pièce non triviale de l'architecture, décrite plus bas.
+A Git proxy, which speaks the smart Git HTTP protocol, authenticates by the session token and relays to GitHub with its own application token. This is the non-trivial piece of the architecture, described further down.
 
-Un orchestrateur, qui alloue, surveille et détruit les conteneurs, maintient un pool de conteneurs préchauffés et exécute le ramasse-miettes.
+An orchestrator, which allocates, monitors and destroys the containers, maintains a pool of pre-warmed containers and runs the garbage collector.
 
-### Identité
+### Identity
 
-Authentification par OpenID Connect contre le fournisseur institutionnel. Le portail conserve un identifiant stable et une adresse électronique, rien d'autre.
+Authentication by OpenID Connect against the institutional provider. The portal keeps a stable identifier and an e-mail address, nothing else.
 
-Rattachement GitHub par une application GitHub installée sur l'organisation, et non par une application OAuth simple. Cela donne d'une part l'identité de l'étudiant par le flux OAuth de cette même application, d'autre part des jetons d'installation à portée réduite et à durée de vie d'une heure, que le portail utilise pour parler aux dépôts sans jamais détenir de secret longue durée pour le compte de l'étudiant.
+GitHub linking through a GitHub application installed on the organisation, and not through a plain OAuth application. That gives, on the one hand, the student's identity through the OAuth flow of that same application, and on the other hand installation tokens with a reduced scope and a lifetime of one hour, which the portal uses to talk to the repositories without ever holding a long-lived secret on the student's behalf.
 
-### Le canal Git, sans secret dans le conteneur
+### The Git channel, without a secret in the container
 
-Le conteneur reçoit un dépôt déjà cloné, avec un remote pointant sur le portail, de la forme portail.acme.com/git/identifiant-de-session. Il ne détient ni clé SSH, ni jeton, ni credential helper persistant. L'authentification repose sur le jeton de session, injecté au démarrage dans la configuration Git du conteneur et révoqué à sa destruction.
+The container receives an already cloned repository, with a remote pointing at the portal, of the form portal.acme.com/git/session-identifier. It holds neither an SSH key, nor a token, nor a persistent credential helper. Authentication rests on the session token, injected at start-up into the container's Git configuration and revoked when it is destroyed. [superseded: see analyse.md § 3.1 / CLAUDE.md invariant 1 — no secret enters the container; the Git channel authenticates by the container's source IP address on the `codespace` bridge]
 
-Le portail implémente le protocole Git HTTP intelligent. Il autorise receive-pack, c'est-à-dire la poussée, et refuse upload-pack, c'est-à-dire le clonage et la récupération. Ce refus n'est pas une précaution cosmétique : il ferme la voie par laquelle un étudiant introduirait un fichier d'extension dans son environnement depuis l'extérieur.
+The portal implements the smart Git HTTP protocol. It allows receive-pack, that is, pushing, and refuses upload-pack, that is, cloning and fetching. That refusal is not a cosmetic precaution: it closes the path by which a student would introduce an extension file into their environment from the outside. [superseded: see analyse.md § 3.2 — `upload-pack` is allowed on the staging repository in both modes; the E5 barrier is the read-only extensions directory in the image]
 
-Les bénéfices se cumulent. La liste blanche réseau du conteneur se réduit à une seule destination interne. Aucun secret n'est exfiltrable. Chaque poussée est journalisée avec horodatage, empreinte de commit et session, ce qui règle les litiges de rendu sans discussion.
+The benefits accumulate. The container's network allow list boils down to a single internal destination. No secret is exfiltrable. Every push is logged with a timestamp, a commit fingerprint and a session, which settles submission disputes without discussion.
 
-### Conteneurisation et durcissement
+### Containerisation and hardening
 
-Le choix entre Docker et Podman n'est pas tranché ; il figure en section 10. Dans les deux cas, le durcissement visé est le même.
+The choice between Docker and Podman is not settled; it appears in section 10. In both cases, the hardening aimed at is the same.
 
-Un espace de noms utilisateur distinct par conteneur, de sorte qu'une évasion atterrisse sur un identifiant sans privilège. Toutes les capacités retirées, à l'exception de CAP_SYS_PTRACE. Un profil seccomp dérivé du profil par défaut, autorisant l'appel système personality, faute de quoi gdb échouera à désactiver la randomisation d'espace d'adressage. Système de fichiers racine en lecture seule, tmpfs sur les répertoires temporaires, interdiction d'élévation de privilèges. Limite de processus à deux cent cinquante-six, limite mémoire à deux gigaoctets, limite processeur à un cœur.
+A distinct user namespace per container, so that an escape lands on an unprivileged identifier. All capabilities dropped, except CAP_SYS_PTRACE. A seccomp profile derived from the default profile, allowing the personality system call, failing which gdb will fail to disable address space layout randomisation. Read-only root filesystem, tmpfs on the temporary directories, no privilege escalation allowed. Process limit of two hundred and fifty-six, memory limit of two gigabytes, CPU limit of one core.
 
-Un seul réseau ponté dédié aux conteneurs, avec une politique nftables par défaut de rejet en sortie et deux autorisations : le port du proxy Git du portail, et le résolveur DNS interne à vues restreintes. Rien d'autre.
+A single bridged network dedicated to the containers, with a default nftables policy of rejecting outbound traffic and two exceptions: the port of the portal's Git proxy, and the internal split-view DNS resolver. Nothing else.
 
-### Persistance
+### Persistence
 
-Un volume nommé par couple étudiant et devoir, indépendant du cycle de vie du conteneur. Le conteneur est du bétail, le travail ne l'est pas.
+One named volume per (student, assignment) pair, independent of the container's lifecycle. The container is cattle, the work is not.
 
-Une sauvegarde automatique périodique, de l'ordre de deux à trois minutes, sous forme de commit sur une branche de travail dédiée, distincte de la branche de rendu. Sans ce filet, la première séance d'examen produira un incident de perte de travail, et ce sera le seul dont l'établissement se souviendra.
+A periodic automatic save, on the order of two to three minutes, in the form of a commit on a dedicated working branch, distinct from the submission branch. Without that safety net, the first exam session will produce a work-loss incident, and it will be the only one the institution remembers.
 
-### Le volet examen
+### The exam side
 
-Le portail génère, pour chaque devoir en mode examen, un fichier de configuration SEB chiffré contenant les règles de filtrage d'URL, l'URL de démarrage pointant sur la session, les réglages de kiosque, et la politique de téléchargement et de presse-papiers. Il conserve la Config Key associée ainsi que le Browser Exam Key de la version de SEB déployée.
+For every assignment in exam mode, the portal generates an encrypted SEB configuration file containing the URL filtering rules, the start URL pointing at the session, the kiosk settings, and the download and clipboard policy. It keeps the associated Config Key as well as the Browser Exam Key of the deployed SEB version.
 
-Le lancement se fait par un lien de schéma sebs, que SEB reconnaît, ce qui lui fait récupérer la configuration et démarrer sans manipulation de fichier par l'étudiant.
+Launching is done through a link with the sebs scheme, which SEB recognises, which makes it fetch the configuration and start without any file handling by the student.
 
-La vérification côté serveur porte sur trois surfaces, et non sur la seule page d'accueil : la page de démarrage de session, l'appel qui crée le conteneur, et le proxy vers code-server. Vérifier uniquement la première laisse ouverte la copie de l'URL de session vers un navigateur ordinaire. En pratique, vérification stricte à l'ouverture, émission d'un cookie de session lié à cette vérification, et refus de toute requête du proxy dépourvue de ce cookie.
+The server-side verification covers three surfaces, and not only the home page: the session start page, the call that creates the container, and the proxy to code-server. Verifying only the first leaves open the copying of the session URL into an ordinary browser. In practice: strict verification on opening, issuing a session cookie bound to that verification, and refusal of any proxy request lacking that cookie.
 
-### Documentation hors ligne
+### Offline documentation
 
-Plutôt que d'autoriser des sites réels dans le filtre SEB, le portail sert des miroirs locaux sous ses propres chemins : une archive Kiwix pour l'encyclopédie, une instance DevDocs, une copie de la référence C et C++, les pages de manuel. La liste de filtrage SEB se réduit alors à une règle de domaine unique, ce qui supprime la question des réseaux de diffusion tiers et des domaines annexes que traîne tout site réel. Le contenu est identique pour tous et reproductible d'une session à l'autre.
+Rather than allowing real sites in the SEB filter, the portal serves local mirrors under its own paths: a Kiwix archive for the encyclopaedia, a DevDocs instance, a copy of the C and C++ reference, the manual pages. The SEB filtering list then boils down to a single domain rule, which removes the question of third-party content delivery networks and of the ancillary domains that every real site drags along. The content is identical for everyone and reproducible from one session to the next.
 
-## 8. Modèle de données
+## 8. Data model
 
-Quatre entités suffisent. Toute cinquième entité ajoutée dans la première version doit être justifiée.
+Four entities are enough. Any fifth entity added in the first version must be justified.
 
-User. Identifiant institutionnel, adresse électronique, rôle, login GitHub, identifiant numérique GitHub, date de rattachement.
+User. Institutional identifier, e-mail address, role, GitHub login, GitHub numeric identifier, linking date.
 
-Assignment. Intitulé, enseignant propriétaire, image de conteneur, liste blanche d'extensions, mode, fenêtre d'ouverture, modèle de dépôt ou convention de nommage, liste des destinations réseau autorisées pour le conteneur, liste de documentation autorisée pour SEB, blob de configuration SEB, Config Key, Browser Exam Key de référence.
+Assignment. Title, owning teacher, container image, extension allow list, mode, opening window, repository template or naming convention, list of network destinations allowed for the container, list of documentation allowed for SEB, SEB configuration blob, Config Key, reference Browser Exam Key.
 
-Session. Étudiant, devoir, identifiant de conteneur, identifiant de volume, état, horodatage de création, dernier battement, jeton de session, indicateur de vérification SEB.
+Session. Student, assignment, container identifier, volume identifier, state, creation timestamp, last heartbeat, session token, SEB verification flag.
 
-PushEvent. Session, horodatage, référence Git, empreinte de commit, résultat. Cette table est la seule preuve du rendu ; elle doit être écrite avant que le relais vers GitHub soit tenté, et complétée ensuite.
+PushEvent. Session, timestamp, Git reference, commit fingerprint, result. That table is the only proof of submission; it must be written before the relay to GitHub is attempted, and completed afterwards.
 
-Une base relationnelle légère convient largement à cette échelle. Le choix du moteur est sans enjeu ; la seule contrainte réelle est que les états de session supportent une reprise après redémarrage du portail, c'est-à-dire que l'orchestrateur sache reconstruire son état à partir de la base et de l'inventaire des conteneurs vivants.
+A lightweight relational database is amply sufficient at that scale. The choice of engine is of no consequence; the only real constraint is that the session states support recovery after a restart of the portal, that is, that the orchestrator be able to rebuild its state from the database and from the inventory of live containers.
 
-## 9. Modèle de menace
+## 9. Threat model
 
-L'adversaire est un étudiant motivé, techniquement compétent, disposant de temps de préparation avant l'examen mais d'un temps limité pendant. Il n'est pas supposé disposer d'exploits sur des composants à jour. Il est supposé partager ses trouvailles avec sa promotion, donc toute faille découverte une fois est réputée connue de tous à la session suivante.
+The adversary is a motivated, technically competent student, with preparation time before the exam but limited time during it. They are not assumed to have exploits against up-to-date components. They are assumed to share their findings with their cohort, so any flaw discovered once is deemed known to everyone at the next session.
 
-| Vecteur | Effet | Contre-mesure |
+| Vector | Effect | Counter-measure |
 | --- | --- | --- |
-| Ouvrir le portail hors SEB | Contournement total du mode examen | Vérification BEK et Config Key sur les trois surfaces, cookie lié à la vérification |
-| Forger l'en-tête de preuve SEB | Idem | Le BEK ne doit jamais être exposé côté client ni transmis à l'étudiant |
-| Modifier le fichier de configuration SEB | Filtre d'URL désactivé | Config Key dérivée des réglages, donc invalidée par toute modification ; chiffrement du fichier |
-| Lire un secret Git dans le conteneur | Poussée depuis l'extérieur, exfiltration | Aucun secret dans le conteneur, jeton de session révoqué à la destruction |
-| Récupérer un fichier d'extension par git pull | Contournement de la liste blanche d'extensions | upload-pack refusé par le proxy Git, clonage effectué au provisionnement |
-| Installer une extension depuis la galerie | Idem | Champ de galerie retiré du product.json, réglage extensions.allowed, marketplace injoignable |
-| Utiliser un navigateur interne à VS Code | Navigation hors filtre apparent | Les requêtes partent du navigateur, donc soumises au filtre SEB ; vérifier que les vues web sont servies sur l'origine du portail et non sur un réseau de diffusion tiers |
-| Exfiltration par requêtes DNS | Canal de sortie déguisé | Résolveur interne à vues restreintes, pas de résolveur public accessible |
-| Évasion de conteneur | Accès à l'hôte et aux autres sessions | Espace de noms utilisateur, capacités minimales, seccomp, racine en lecture seule ; option gVisor en mode examen |
-| Épuisement de ressources, bombe à fork | Déni de service sur la classe entière | Limites de processus, de mémoire et de processeur par conteneur ; quota disque par volume |
-| Second appareil, téléphone, voisin | Assistance externe | Hors périmètre technique, relève de la surveillance humaine |
+| Opening the portal outside SEB | Total bypass of exam mode | BEK and Config Key verification on the three surfaces, cookie bound to the verification |
+| Forging the SEB proof header | Idem | The BEK must never be exposed client-side nor transmitted to the student |
+| Modifying the SEB configuration file | URL filter disabled | Config Key derived from the settings, therefore invalidated by any modification; file encryption |
+| Reading a Git secret in the container | Push from the outside, exfiltration | No secret in the container, session token revoked on destruction |
+| Fetching an extension file through git pull | Bypass of the extension allow list | upload-pack refused by the Git proxy, cloning done at provisioning time |
+| Installing an extension from the gallery | Idem | Gallery field removed from product.json, extensions.allowed setting, marketplace unreachable |
+| Using a browser internal to VS Code | Browsing outside the apparent filter | The requests come from the browser, therefore subject to the SEB filter; check that web views are served from the portal's origin and not from a third-party content delivery network |
+| Exfiltration through DNS requests | Disguised outbound channel | Internal split-view resolver, no reachable public resolver |
+| Container escape | Access to the host and to the other sessions | User namespace, minimal capabilities, seccomp, read-only root; gVisor option in exam mode |
+| Resource exhaustion, fork bomb | Denial of service on the whole class | Process, memory and CPU limits per container; disk quota per volume |
+| Second device, phone, neighbour | External assistance | Out of technical scope, a matter for human supervision |
 
-### Les trois faiblesses structurelles à accepter
+### The three structural weaknesses to accept
 
-La vérification SEB repose sur un secret partagé entre le portail et le binaire SEB. Un étudiant qui obtient le Browser Exam Key peut forger les en-têtes depuis un navigateur ordinaire. La rotation de ce secret à chaque session d'examen, et sa non-exposition dans l'interface enseignant, sont donc des exigences opérationnelles et non des détails.
+The SEB verification rests on a secret shared between the portal and the SEB binary. A student who obtains the Browser Exam Key can forge the headers from an ordinary browser. Rotating that secret at every exam session, and not exposing it in the teacher interface, are therefore operational requirements and not details.
 
-Le filtre d'URL de SEB n'existe que sur les plateformes où SEB existe, c'est-à-dire pas Linux en version officielle. Un parc de salle hétérogène affaiblit mécaniquement le dispositif.
+SEB's URL filter exists only on the platforms where SEB exists, that is, not Linux in an official version. A heterogeneous room fleet mechanically weakens the apparatus.
 
-Le terminal donne un interpréteur de commandes complet dans un conteneur. C'est le point d'entrée de toute évasion éventuelle, et il est irréductible puisque c'est précisément la fonctionnalité demandée. Le durcissement réduit la probabilité, il ne l'annule pas.
+The terminal gives a full command shell inside a container. It is the entry point of any possible escape, and it is irreducible since it is precisely the feature asked for. Hardening reduces the probability, it does not cancel it.
 
-## 10. Décisions ouvertes
+## 10. Open decisions
 
-Ces arbitrages ne sont pas tranchés. Ce sont les points sur lesquels une analyse externe apporte le plus de valeur.
+These trade-offs are not settled. They are the points on which an external analysis brings the most value.
 
-### D1. Docker ou Podman
+### D1. Docker or Podman
 
-Le mode sans privilège de Podman est le bon réflexe pour exécuter du code non fiable, mais il déplace la pile réseau en espace utilisateur, via pasta ou slirp4netns, ce qui invalide l'application des règles nftables telles qu'elles sont décrites en section 7. Le filtrage devient possible ailleurs, mais autrement.
+Podman's unprivileged mode is the right reflex for running untrusted code, but it moves the network stack into user space, through pasta or slirp4netns, which invalidates the application of the nftables rules as described in section 7. Filtering becomes possible elsewhere, but differently.
 
-Le compromis pressenti est un moteur avec privilèges, Docker ou Podman indifféremment, doté d'espaces de noms utilisateur automatiques, conservant une interface virtuelle classique et donc un filtrage nftables en amont sur le pont. Ce compromis doit être vérifié expérimentalement avant d'être retenu, car il conditionne E10.
+The foreseen compromise is a privileged engine, Docker or Podman indifferently, with automatic user namespaces, keeping a classic virtual interface and therefore nftables filtering upstream on the bridge. That compromise must be verified experimentally before being adopted, because it conditions E10.
 
-Critère d'arbitrage : la capacité à démontrer, par test, qu'un processus dans le conteneur ne joint aucune destination hors liste blanche.
+Arbitration criterion: the ability to demonstrate, by test, that a process inside the container reaches no destination outside the allow list.
 
-### D2. Isolation renforcée en mode examen
+### D2. Reinforced isolation in exam mode
 
-Faut-il basculer les conteneurs d'examen sur gVisor, voire sur une micro-machine virtuelle de type Firecracker, en conservant les conteneurs ordinaires pour les travaux pratiques ? Le surcoût est marginal à cette échelle et l'argument est solide face à un service juridique. La réserve porte sur gdb : la couverture de ptrace par gVisor est correcte mais pas identique, et doit être éprouvée avant engagement.
+Should exam containers be switched to gVisor, or even to a Firecracker-style micro virtual machine, keeping ordinary containers for lab work? The extra cost is marginal at that scale and the argument is solid in front of a legal department. The reservation concerns gdb: gVisor's coverage of ptrace is correct but not identical, and must be proven before committing.
 
-### D3. Provisionnement des dépôts
+### D3. Repository provisioning
 
-GitHub Classroom crée déjà les dépôts étudiants depuis un modèle et gère la correspondance entre identité étudiante et dépôt. Consommer cette correspondance plutôt que la réimplémenter économise une semaine de développement, au prix d'un couplage supplémentaire et d'une double interface pour l'enseignant. À arbitrer selon les usages existants de l'établissement.
+GitHub Classroom already creates student repositories from a template and manages the mapping between student identity and repository. Consuming that mapping rather than reimplementing it saves a week of development, at the price of an additional coupling and of a double interface for the teacher. To be decided according to the existing practices of the institution.
 
-### D4. Étendue de SEB Server
+### D4. Extent of SEB Server
 
-SEB Server couvre la configuration centralisée des clients et la surveillance en temps réel. Trois positions possibles : l'ignorer et tout faire dans le portail, l'utiliser comme générateur et distributeur de configurations en gardant le portail comme point d'entrée, ou en faire le point d'entrée de l'examen et réduire le portail à l'environnement de travail. La deuxième position semble la meilleure mais demande une évaluation de son interface programmatique.
+SEB Server covers the centralised configuration of the clients and real-time monitoring. Three possible positions: ignore it and do everything in the portal, use it as a generator and distributor of configurations while keeping the portal as the entry point, or make it the entry point of the exam and reduce the portal to the working environment. The second position seems the best but requires an evaluation of its programmatic interface.
 
-### D5. Sémantique de la session simultanée
+### D5. Semantics of the simultaneous session
 
-Que se passe-t-il si un étudiant ouvre un second onglet sur le même devoir ? Refuser est le plus simple et le plus sûr en examen. Reprendre la session existante est le plus confortable en travaux pratiques. Le comportement pourrait dépendre du mode, au prix d'une incohérence apparente.
+What happens if a student opens a second tab on the same assignment? Refusing is the simplest and safest in an exam. Resuming the existing session is the most comfortable in lab work. The behaviour could depend on the mode, at the price of an apparent inconsistency.
 
-### D6. Granularité du volume
+### D6. Volume granularity
 
-Un volume par couple étudiant et devoir isole bien mais multiplie les objets et complique la sauvegarde. Un volume par étudiant, avec un répertoire par devoir, simplifie l'exploitation mais permet à l'étudiant de consulter pendant un examen le travail d'un autre devoir, ce qui peut être souhaitable ou non selon la pédagogie.
+One volume per (student, assignment) pair isolates well but multiplies the objects and complicates backup. One volume per student, with one directory per assignment, simplifies operations but lets the student consult during an exam the work of another assignment, which may or may not be desirable depending on the pedagogy.
 
-### D7. Ce que fait exactement la liste réseau de l'enseignant
+### D7. What exactly the teacher's network list does
 
-Si la documentation est servie en miroir local, la liste des destinations réseau autorisées pour le conteneur n'a plus grand usage et pourrait disparaître de l'interface enseignant, remplacée par un simple choix d'image. Supprimer un réglage inutile vaut mieux que l'exposer et laisser croire qu'il protège quelque chose.
+If the documentation is served as a local mirror, the list of network destinations allowed for the container no longer has much use and could disappear from the teacher interface, replaced by a simple choice of image. Removing a useless setting is better than exposing it and letting people believe it protects something.
 
-### D8. Langage et pile du portail
+### D8. Language and stack of the portal
 
-Aucune contrainte forte. Les seuls besoins particuliers sont un proxy websocket robuste, une implémentation ou une délégation du protocole Git HTTP intelligent, et un client du moteur de conteneurs. Ces trois besoins sont mieux servis par certaines piles que d'autres, ce qui devrait guider le choix davantage que les préférences d'équipe.
+No strong constraint. The only particular needs are a robust websocket proxy, an implementation of or a delegation to the smart Git HTTP protocol, and a container engine client. Those three needs are better served by some stacks than others, which should guide the choice more than team preferences.
 
-## 11. Stratégie de développement
+## 11. Development strategy
 
-### Principe directeur
+### Guiding principle
 
-Les risques de ce projet ne sont pas dans l'interface, ils sont dans trois hypothèses techniques non vérifiées. Tant qu'elles ne sont pas levées, tout développement d'interface est du travail potentiellement jeté. L'ordre des jalons découle entièrement de ce constat.
+The risks of this project are not in the interface, they are in three unverified technical assumptions. As long as they are not lifted, any interface development is potentially thrown-away work. The order of the milestones follows entirely from that observation.
 
-### Jalon 0 : lever les trois inconnues
+### Milestone 0: lift the three unknowns
 
-Trois preuves, sans interface, en script et en ligne de commande.
+Three proofs, with no interface, in scripts and on the command line.
 
-Preuve A. code-server rendu correctement dans le navigateur embarqué de SEB, sur la plateforme de la salle, avec websockets, ouvriers de service et stockage local fonctionnels. Un échec ici invalide le choix d'IDE, pas le projet.
+Proof A. code-server rendered correctly in SEB's embedded browser, on the platform of the room, with working websockets, service workers and local storage. A failure here invalidates the IDE choice, not the project.
 
-Preuve B. Vérification du Browser Exam Key et de la Config Key opérationnelle sur une route protégée, testée en tentant l'accès depuis un navigateur ordinaire, qui doit échouer.
+Proof B. Browser Exam Key and Config Key verification working on a protected route, tested by attempting access from an ordinary browser, which must fail.
 
-Preuve C. Un conteneur qui pousse vers GitHub à travers le proxy Git, sans aucun secret en son sein, avec upload-pack refusé et le filtrage réseau actif.
+Proof C. A container that pushes to GitHub through the Git proxy, with no secret inside it, with upload-pack refused and network filtering active.
 
-Sans ces trois preuves, il n'y a pas de projet. Avec elles, le reste est de l'assemblage.
+Without those three proofs, there is no project. With them, the rest is assembly.
 
-### Jalon 1 : squelette local complet
+### Milestone 1: complete local skeleton
 
-Le portail de bout en bout sur poste de développement, avec authentification simulée, un devoir codé en dur, un conteneur, un volume, le proxy IDE et le proxy Git. Pas d'interface enseignant, pas de mode examen, pas de pool. Objectif : un étudiant fictif démarre, écrit du code, compile, pousse.
+The portal end to end on a development workstation, with simulated authentication, a hard-coded assignment, a container, a volume, the IDE proxy and the Git proxy. No teacher interface, no exam mode, no pool. Goal: a fictional student starts, writes code, compiles, pushes.
 
-### Jalon 2 : identité réelle
+### Milestone 2: real identity
 
-Branchement du fournisseur OpenID Connect institutionnel et de l'application GitHub. Remplacement du simulateur par les vrais flux, sans que le reste du code s'en aperçoive. Si ce remplacement demande de toucher autre chose que la couche d'authentification, c'est que le jalon 1 a mal isolé cette couche.
+Connecting the institutional OpenID Connect provider and the GitHub application. Replacing the simulator with the real flows, without the rest of the code noticing. If that replacement requires touching anything other than the authentication layer, then milestone 1 isolated that layer badly.
 
-### Jalon 3 : mode examen
+### Milestone 3: exam mode
 
-Génération des configurations SEB, gestion des clés, vérification sur les trois surfaces, filtrage d'URL, miroirs de documentation. C'est le jalon le plus risqué en exploitation et il doit être éprouvé en conditions réelles de salle, pas seulement en développement.
+Generation of the SEB configurations, key management, verification on the three surfaces, URL filtering, documentation mirrors. It is the riskiest milestone in operations and it must be proven under real room conditions, not only in development.
 
-### Jalon 4 : interface enseignant
+### Milestone 4: teacher interface
 
-Création de devoirs, listes d'extensions, tableau des sessions actives. Volontairement tardif : tant que les enseignants ne sont pas dans la boucle, un fichier de configuration suffit, et les besoins réels de l'interface ne se révèlent qu'après une première séance vécue.
+Assignment creation, extension lists, dashboard of active sessions. Deliberately late: as long as teachers are not in the loop, a configuration file is enough, and the real needs of the interface reveal themselves only after a first lived session.
 
-### Jalon 5 : exploitation
+### Milestone 5: operations
 
-Pool de conteneurs préchauffés, ramasse-miettes, sauvegardes, supervision, procédures de secours. C'est ce qui transforme une démonstration en service.
+Pool of pre-warmed containers, garbage collector, backups, monitoring, fallback procedures. That is what turns a demonstration into a service.
 
-### Séquencement et effort
+### Sequencing and effort
 
-Le jalon 0 se mesure en jours, pas en semaines, et conditionne tout le reste. Les jalons 1 et 2 forment le cœur technique. Les jalons 3 à 5 représentent environ la moitié de l'effort total, ce qui surprend systématiquement dans ce type de projet : les cas dégradés et l'exploitation pèsent autant que la fonctionnalité nominale.
+Milestone 0 is measured in days, not weeks, and conditions everything else. Milestones 1 and 2 form the technical core. Milestones 3 to 5 represent about half of the total effort, which is systematically surprising in this kind of project: degraded cases and operations weigh as much as the nominal functionality.
 
-Un pilote réaliste consiste à faire tourner une séance de travaux pratiques ordinaire avec un petit groupe volontaire après le jalon 2, bien avant tout usage en examen. L'examen doit être le dernier usage mis en production, jamais le premier.
+A realistic pilot consists in running an ordinary lab session with a small volunteer group after milestone 2, well before any use in an exam. The exam must be the last use put into production, never the first.
 
-## 12. Environnement de développement local
+## 12. Local development environment
 
-### Objectif
+### Goal
 
-L'ensemble doit tourner sur un poste de développement, sans dépendance à une infrastructure institutionnelle, sans compte GitHub réel obligatoire, et sans SEB pour le développement courant. C'est la condition pour que le cycle de travail reste rapide et que plusieurs personnes puissent contribuer.
+The whole thing must run on a development workstation, without any dependency on institutional infrastructure, without a mandatory real GitHub account, and without SEB for day-to-day development. That is the condition for the work cycle to stay fast and for several people to be able to contribute.
 
-### Ce qui est simulé
+### What is simulated
 
-L'authentification institutionnelle. Un fournisseur OpenID Connect factice, soit un serveur de test conforme au protocole, soit un adaptateur local qui émet les mêmes jetons. Le point essentiel est que le portail parle le vrai protocole même en local, avec découverte, échange de code et validation de jeton. Un raccourci du type variable d'environnement contenant un identifiant d'utilisateur donnerait un jalon 2 douloureux, parce que la couche d'authentification n'aurait jamais été exercée.
+Institutional authentication. A fake OpenID Connect provider, either a protocol-conformant test server or a local adapter that issues the same tokens. The essential point is that the portal speaks the real protocol even locally, with discovery, code exchange and token validation. A shortcut such as an environment variable containing a user identifier would make milestone 2 painful, because the authentication layer would never have been exercised.
 
-Un sélecteur d'utilisateur en développement permet de basculer entre un étudiant et un enseignant sans quitter le navigateur.
+A user selector in development makes it possible to switch between a student and a teacher without leaving the browser.
 
-La destination Git. Une forge locale, Gitea ou Forgejo en conteneur, remplace GitHub. Le proxy Git relaie vers elle. Cela permet de tester le refus de upload-pack, la journalisation des poussées et la gestion des erreurs sans dépendre d'un réseau ni d'un quota d'interface programmatique.
+The Git destination. A local forge, Gitea or Forgejo in a container, replaces GitHub. The Git proxy relays to it. That makes it possible to test the refusal of upload-pack, the logging of pushes and error handling without depending on a network or on a programmatic interface quota.
 
-### Ce qui ne doit surtout pas être simulé
+### What must absolutely not be simulated
 
-Le filtrage réseau. Il doit être actif dès le premier jour, sur le poste de développement, faute de quoi le projet découvrira en préproduction que la configuration de conteneur retenue le rend inapplicable. C'est l'inconnue D1, et le seul moyen de la lever est de la vivre en continu.
+Network filtering. It must be active from day one, on the development workstation, failing which the project will discover in pre-production that the chosen container configuration makes it inapplicable. That is unknown D1, and the only way to lift it is to live with it continuously.
 
-Le durcissement du conteneur. Les capacités, seccomp, les limites et la racine en lecture seule doivent être posés dès le jalon 1. Les ajouter ensuite revient à découvrir tardivement que gdb ne fonctionne plus, ou que le serveur de langage manque de mémoire.
+Container hardening. Capabilities, seccomp, the limits and the read-only root must be in place from milestone 1 on. Adding them afterwards amounts to discovering late that gdb no longer works, or that the language server is short of memory.
 
-Le proxy Git. Il porte une exigence de sécurité centrale ; un raccourci local qui poserait une clé dans le conteneur pour aller plus vite créerait une architecture parallèle qu'il faudrait défaire.
+The Git proxy. It carries a central security requirement; a local shortcut that placed a key in the container to go faster would create a parallel architecture that would have to be undone.
 
-Le protocole d'authentification, comme indiqué plus haut.
+The authentication protocol, as stated above.
 
-### Forme attendue
+### Expected form
 
-Un fichier de composition pour l'environnement de développement, portant le portail, le fournisseur d'identité factice, la forge locale et les miroirs de documentation. Le moteur de conteneurs de l'hôte est utilisé directement par le portail pour les conteneurs étudiants, qui ne font pas partie de la composition puisqu'ils sont créés dynamiquement.
+A composition file for the development environment, carrying the portal, the fake identity provider, the local forge and the documentation mirrors. The host's container engine is used directly by the portal for the student containers, which are not part of the composition since they are created dynamically.
 
-Un jeu de données d'amorçage : deux étudiants, un enseignant, un devoir en mode travaux pratiques, un devoir en mode examen, un dépôt de départ dans la forge locale.
+A seed data set: two students, one teacher, one assignment in lab mode, one assignment in exam mode, a starting repository in the local forge.
 
-### Traitement du mode examen en local
+### Handling exam mode locally
 
-SEB ne sera pas installé sur chaque poste de développement. La vérification doit néanmoins être développée et testée. La forme retenue est une double implémentation de la vérification, l'une réelle et l'une simulée, sélectionnée par configuration, avec un jeu de tests automatisés qui couvre les deux et surtout les cas de refus. Le test manuel avec un vrai SEB reste obligatoire avant le jalon 3, sur une machine dédiée, mais ne conditionne pas le développement quotidien.
+SEB will not be installed on every development workstation. The verification must nonetheless be developed and tested. The chosen form is a double implementation of the verification, one real and one simulated, selected by configuration, with an automated test set that covers both and above all the refusal cases. The manual test with a real SEB remains mandatory before milestone 3, on a dedicated machine, but does not condition day-to-day development.
 
-## 13. Risques, succès, questions pour l'analyse
+## 13. Risks, success, questions for the analysis
 
-### Risques principaux
+### Main risks
 
-Incompatibilité de code-server avec le navigateur embarqué de SEB. Probabilité moyenne, impact élevé : impose de changer d'IDE navigateur. Traité par le jalon 0.
+Incompatibility of code-server with SEB's embedded browser. Medium probability, high impact: forces a change of browser IDE. Handled by milestone 0.
 
-Filtrage réseau inapplicable dans la configuration de conteneur retenue. Probabilité moyenne, impact élevé : remet en cause D1 et potentiellement le choix de moteur. Traité par le jalon 0 et par l'interdiction de simuler cette couche en local.
+Network filtering inapplicable in the chosen container configuration. Medium probability, high impact: calls D1 and potentially the choice of engine into question. Handled by milestone 0 and by the ban on simulating that layer locally.
 
-Absence de SEB officiel sous Linux contraignant le parc de salle. Probabilité certaine, impact variable selon l'établissement. À instruire avant tout engagement sur le mode examen.
+Absence of an official SEB on Linux constraining the room fleet. Certain probability, impact varying with the institution. To be investigated before any commitment to exam mode.
 
-Perte de travail d'un étudiant pendant un examen. Probabilité faible si le filet de sauvegarde est en place, impact institutionnel majeur. C'est le risque qui justifie à lui seul la sauvegarde automatique périodique et le volume découplé du conteneur.
+Loss of a student's work during an exam. Low probability if the safety net is in place, major institutional impact. That is the risk that on its own justifies periodic automatic saving and the volume decoupled from the container.
 
-Mise à jour de VS Code cassant le verrouillage d'extensions ou la modification du product.json. Probabilité élevée sur la durée. Traité par le gel de la version d'image et une recette avant chaque période d'examen.
+A VS Code update breaking the extension locking or the product.json modification. High probability over time. Handled by freezing the image version and by a check before every exam period.
 
-Dérive de périmètre vers un système de gestion de cours. Probabilité élevée dès que les enseignants découvrent l'outil. Traité par la section 4.
+Scope creep towards a course management system. High probability as soon as teachers discover the tool. Handled by section 4.
 
-### Critères de succès
+### Success criteria
 
-Une séance de travaux pratiques de deux heures avec vingt étudiants sans intervention technique.
+A two-hour lab session with twenty students and no technical intervention.
 
-Temps entre le clic de démarrage et un éditeur utilisable inférieur à dix secondes en perception.
+Time between the Start click and a usable editor under ten seconds as perceived.
 
-Aucune perte de travail sur une session complète, y compris en simulant des coupures.
+No work lost over a full session, including when simulating outages.
 
-Une tentative documentée d'accès hors SEB qui échoue.
+One documented attempt at access outside SEB that fails.
 
-Un enseignant crée un devoir de bout en bout sans assistance.
+A teacher creates an assignment end to end without assistance.
 
-### Questions adressées à l'analyse
+### Questions addressed to the analysis
 
-L'architecture du canal Git sans secret est-elle la bonne réponse à la tension entre E9 et E10, ou existe-t-il une approche plus simple offrant les mêmes garanties ?
+Is the architecture of the Git channel without a secret the right answer to the tension between E9 and E10, or is there a simpler approach offering the same guarantees?
 
-Le refus de upload-pack est-il tenable en pratique pédagogique, sachant qu'il empêche l'étudiant de récupérer une correction ou une mise à jour d'énoncé en cours de séance ? Quelle alternative préserverait la garantie ?
+Is refusing upload-pack tenable in teaching practice, given that it prevents the student from fetching a correction or an update of the assignment text during the session? What alternative would preserve the guarantee?
 
-Le choix de ne pas partir de Coder est-il justifié à cette échelle, ou le coût de l'orchestration maison est-il sous-estimé ?
+Is the choice not to start from Coder justified at that scale, or is the cost of in-house orchestration underestimated?
 
-Le découpage en jalons place l'interface enseignant en position tardive. Est-ce soutenable du point de vue de l'adhésion des utilisateurs, ou faut-il une maquette non fonctionnelle plus tôt ?
+The milestone breakdown puts the teacher interface late. Is that sustainable from the point of view of user adoption, or is a non-functional mock-up needed earlier?
 
-Quels angles morts ne figurent pas dans ce document ? Les candidats attendus concernent l'accessibilité, la conformité au traitement des données personnelles des étudiants, la conservation des traces de session et sa durée, et les obligations en matière d'aménagements d'examen.
+What blind spots are missing from this document? The expected candidates concern accessibility, compliance with the processing of students' personal data, the retention of session traces and its duration, and the obligations regarding exam accommodations.

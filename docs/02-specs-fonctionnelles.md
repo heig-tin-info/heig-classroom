@@ -1,5 +1,5 @@
 ---
-title: Spécifications fonctionnelles
+title: Functional specifications
 subtitle: HEIG GitHub Classroom — Phase 2
 authors:
   - Yves Chevallier — HEIG-VD
@@ -7,117 +7,117 @@ date: 2026-07-03
 press:
   template: article
   paper: a4
-  language: french
+  language: english
 ---
-> Projet : HEIG GitHub Classroom.
-> Cadre : `01-cahier-des-charges.md` (US-xx, NFR-xx, C-xx) ;
-> analyse : `00-analyse-besoins.md`.
-> Conventions : exigences numérotées par domaine — `AU-xx` (auth, onboarding, API),
-> `GH-xx` (intégration GitHub), `GR-xx` (grading et métriques), `CLI-xx` (CLI),
-> `NT-xx` (notifications). MUST = obligatoire, SHOULD = recommandé. Les identifiants
-> sont stables et uniques.
+> Project: HEIG GitHub Classroom.
+> Frame: `01-cahier-des-charges.md` (US-xx, NFR-xx, C-xx);
+> analysis: `00-analyse-besoins.md`.
+> Conventions: requirements numbered by domain — `AU-xx` (auth, onboarding, API),
+> `GH-xx` (GitHub integration), `GR-xx` (grading and metrics), `CLI-xx` (CLI),
+> `NT-xx` (notifications). MUST = mandatory, SHOULD = recommended. The identifiers
+> are stable and unique.
 
-# Authentification et onboarding (AU)
+# Authentication and onboarding (AU)
 
-## Login plateforme — Switch edu-ID (OIDC)
+## Platform login — Switch edu-ID (OIDC)
 
-Switch edu-ID est l'unique fournisseur d'identité pour la session web. Aucun mot de
-passe local (NFR-01).
+Switch edu-ID is the sole identity provider for the web session. No local
+password (NFR-01).
 
-- **AU-01** — La plateforme MUST authentifier les utilisateurs via OpenID Connect avec
-  Switch edu-ID, flux *Authorization Code + PKCE*, avec `state` et `nonce` vérifiés.
-- **AU-02** — Scopes demandés : `openid profile email`. Claims attendus dans l'ID
-  token / userinfo :
+- **AU-01** — The platform MUST authenticate the users through OpenID Connect with
+  Switch edu-ID, *Authorization Code + PKCE* flow, with `state` and `nonce` verified.
+- **AU-02** — Requested scopes: `openid profile email`. Claims expected in the ID
+  token / userinfo:
 
-| Claim | Usage | Obligatoire |
+| Claim | Use | Mandatory |
 | --- | --- | --- |
-| `sub` | Identifiant stable du compte local (clé de rattachement) | Oui |
-| `email` | Matching roster, affichage | Oui |
-| `email_verified` | Le claim de roster exige `true` | Oui |
-| `given_name` | Prénom | Oui |
-| `family_name` | Nom | Oui |
-| `swissEduPersonUniqueID` | Identifiant académique, stocké si présent (déduplication) | Non |
+| `sub` | Stable identifier of the local account (attachment key) | Yes |
+| `email` | Roster matching, display | Yes |
+| `email_verified` | The roster claim requires `true` | Yes |
+| `given_name` | First name | Yes |
+| `family_name` | Last name | Yes |
+| `swissEduPersonUniqueID` | Academic identifier, stored if present (deduplication) | No |
 
-- **AU-02b** — (GH-11) Face à Switch edu-ID, le scope `https://eduid.ch/scope/userinfo.read`
-  MUST être demandé en plus : c'est derrière lui que vivent les adresses des affiliations
-  institutionnelles (`swissEduIDLinkedAffiliationMail`) et les affiliations elles-mêmes,
-  sans lesquelles un étudiant inscrit avec une adresse privée reste introuvable dans le
-  roster. Le scope n'est ajouté que pour un issuer edu-ID — un IdP qui ne le connaît pas
-  répondrait `invalid_scope`. edu-ID ne libère ces claims **par défaut que sur le endpoint
-  userinfo** : celui-ci MUST donc être interrogé à chaque connexion, et un échec de cet
-  appel MUST rester sans effet sur la session tant que l'ID token suffit. Ce que edu-ID
-  libère réellement dépend de la configuration du client dans la Resource Registry.
-- **AU-02c** — (GH-11) L'ensemble des claims libérés MUST être persisté à chaque connexion
-  (`user_idp_claims`, une ligne par compte, écrasée). Dérogation assumée à la minimisation :
-  un incident d'authentification coûte cher à diagnostiquer après coup. En contrepartie, la
-  table MUST rester confinée au serveur — jamais jointe à une vue utilisateur, jamais
-  affichée, jamais exposée par l'API.
-- **AU-02d** — (GH-11) Un compte est identifié par un **ensemble d'adresses** :
-  l'adresse de login (`email`) et les adresses institutionnelles portées par
-  `swissEduIDLinkedAffiliationMail`. Elles sont enregistrées dans `user_emails` à
-  chaque connexion et ne sont jamais retirées — une affiliation qui se termine ne doit
-  pas détacher un étudiant en cours de semestre. Tout rattachement (roster, sièges
-  staff, teacher grants, rôle) MUST se faire sur cet ensemble, jamais sur la seule
-  adresse de login. Seules les adresses vérifiées comptent : celle du login porte le
-  `email_verified` de l'IdP, celles affirmées par l'organisation sont vérifiées par
+- **AU-02b** — (GH-11) Facing Switch edu-ID, the `https://eduid.ch/scope/userinfo.read` scope
+  MUST additionally be requested: it is behind it that the addresses of the institutional
+  affiliations (`swissEduIDLinkedAffiliationMail`) and the affiliations themselves live,
+  without which a student registered with a private address remains untraceable in the
+  roster. The scope is added only for an edu-ID issuer — an IdP that does not know it
+  would answer `invalid_scope`. edu-ID releases these claims **by default only on the
+  userinfo endpoint**: it MUST therefore be queried at each login, and a failure of that
+  call MUST remain without effect on the session as long as the ID token is enough. What edu-ID
+  actually releases depends on the configuration of the client in the Resource Registry.
+- **AU-02c** — (GH-11) The whole set of released claims MUST be persisted at each login
+  (`user_idp_claims`, one row per account, overwritten). Assumed derogation from minimization:
+  an authentication incident is expensive to diagnose after the fact. In return, the
+  table MUST stay confined to the server — never joined to a user view, never
+  displayed, never exposed by the API.
+- **AU-02d** — (GH-11) An account is identified by a **set of addresses**:
+  the login address (`email`) and the institutional addresses carried by
+  `swissEduIDLinkedAffiliationMail`. They are recorded in `user_emails` at
+  each login and are never removed — an affiliation that ends must not
+  detach a student in the middle of a semester. Every attachment (roster, staff
+  seats, teacher grants, role) MUST be done on this set, never on the login
+  address alone. Only the verified addresses count: the login one carries the
+  `email_verified` of the IdP, those asserted by the organization are verified by
   construction.
-- **AU-02e** — (GH-11) Un rattachement ambigu MUST être signalé, jamais deviné. Trois
-  cas : l'adresse d'une ligne de roster est détenue par deux comptes ; plusieurs lignes
-  d'une même classroom correspondent au même compte ; le compte détient déjà une ligne
-  dans cette classroom. Les trois lèvent `conflict_flag` (AU-21) et n'écrivent aucun
-  rattachement. Un siège staff ambigu reste non réclamé.
-- **AU-02f** — (GH-11) Le rôle `teacher` est accordé, en plus des `teacher_grants` et des
-  sièges staff (GH-9), à un compte dont les affiliations edu-ID contiennent `staff` sans
-  `student`. Un·e assistant·e étudiant·e porte les deux et reste `student`. Les gardes de
-  classroom sont inchangées : ce rôle ne donne accès à aucune classroom d'autrui.
-- **AU-03** — À la première connexion réussie, le backend MUST créer un compte local :
+- **AU-02e** — (GH-11) An ambiguous attachment MUST be reported, never guessed. Three
+  cases: the address of a roster row is held by two accounts; several rows
+  of the same classroom match the same account; the account already holds a row
+  in this classroom. All three raise `conflict_flag` (AU-21) and write no
+  attachment. An ambiguous staff seat stays unclaimed.
+- **AU-02f** — (GH-11) The `teacher` role is granted, in addition to the `teacher_grants` and the
+  staff seats (GH-9), to an account whose edu-ID affiliations contain `staff` without
+  `student`. A student assistant carries both and stays `student`. The classroom
+  guards are unchanged: this role gives access to no one else's classroom.
+- **AU-03** — At the first successful login, the backend MUST create a local account:
   `{ oidc_sub, email, email_verified, given_name, family_name, role, created_at }`.
-  Le compte est identifié par `oidc_sub`, jamais par l'e-mail (l'e-mail edu-ID peut
-  changer).
-- **AU-04** — À chaque connexion, les champs profil (`email`, noms) MUST être
-  resynchronisés depuis les claims.
-- **AU-05** — Si `email_verified` est absent ou `false`, la connexion est acceptée
-  mais le claim de roster (§1.4) MUST être bloqué avec un message explicite.
-- **AU-06** — Session web : cookie de session `HttpOnly`, `Secure`, `SameSite=Lax`,
-  durée max 12 h, invalidable côté serveur. Aucun token OIDC n'est exposé au frontend.
-- **AU-07** — Le rôle par défaut d'un nouveau compte est `student`. Le rôle `teacher`
-  MUST être attribué exclusivement via une **liste d'e-mails/`sub` autorisés en
-  configuration serveur** (rechargée sans redéploiement), gérée par l'exploitant de la
-  plateforme. Il n'existe pas de rôle admin applicatif en v1 (hypothèse H2 du cahier
-  des charges) ; aucune auto-promotion n'est possible.
+  The account is identified by `oidc_sub`, never by the e-mail (the edu-ID e-mail may
+  change).
+- **AU-04** — At each login, the profile fields (`email`, names) MUST be
+  resynchronized from the claims.
+- **AU-05** — If `email_verified` is absent or `false`, the login is accepted
+  but the roster claim (§1.4) MUST be blocked with an explicit message.
+- **AU-06** — Web session: session cookie `HttpOnly`, `Secure`, `SameSite=Lax`,
+  max duration 12 h, invalidable server-side. No OIDC token is exposed to the frontend.
+- **AU-07** — The default role of a new account is `student`. The `teacher` role
+  MUST be granted exclusively through a **list of authorized e-mails/`sub` in the
+  server configuration** (reloaded without a redeployment), managed by the operator of the
+  platform. There is no application admin role in v1 (assumption H2 of the requirements
+  specification); no self-promotion is possible.
 
-## Liaison du compte GitHub (OAuth séparé)
+## GitHub account linking (separate OAuth)
 
-La liaison GitHub sert uniquement à établir l'identité GitHub de l'utilisateur ; les
-opérations sur les dépôts passent par la GitHub App de l'organisation, jamais par un
-token utilisateur (NFR-02, C-06).
+The GitHub linking only serves to establish the GitHub identity of the user; the
+operations on the repositories go through the GitHub App of the organization, never through a
+user token (NFR-02, C-06).
 
-- **AU-08** — La liaison MUST utiliser un flux GitHub OAuth (web application flow)
-  distinct du login, déclenchable uniquement par un utilisateur déjà authentifié
-  edu-ID. Scope minimal : `read:user` (aucun scope d'écriture).
-- **AU-09** — Après le callback, le backend MUST stocker sur le compte :
-  `github_user_id` (immuable, clé de référence), `github_login` (affichage,
-  resynchronisé périodiquement car modifiable), `github_linked_at`. Le token OAuth
-  GitHub MUST être **jeté** immédiatement après lecture de l'identité ; il n'est
-  jamais persisté (conformité C-06 et NFR-02).
-- **AU-10** — Un `github_user_id` MUST être lié à au plus un compte local. En cas de
-  conflit, la liaison est refusée avec un message indiquant qu'un autre compte
-  plateforme utilise déjà ce compte GitHub.
-- **AU-11** — Un étudiant sans liaison GitHub MUST pouvoir naviguer et consulter ses
-  assignments ; seule l'**acceptation d'un assignment** est bloquée tant que la
-  liaison n'est pas faite (bandeau d'onboarding). Comportement de référence pour
+- **AU-08** — The linking MUST use a GitHub OAuth flow (web application flow)
+  distinct from the login, triggerable only by a user already authenticated with
+  edu-ID. Minimal scope: `read:user` (no write scope).
+- **AU-09** — After the callback, the backend MUST store on the account:
+  `github_user_id` (immutable, reference key), `github_login` (display,
+  periodically resynchronized since it is modifiable), `github_linked_at`. The GitHub OAuth
+  token MUST be **discarded** immediately after the identity has been read; it is
+  never persisted (C-06 and NFR-02 compliance).
+- **AU-10** — A `github_user_id` MUST be linked to at most one local account. In case of
+  conflict, the linking is refused with a message indicating that another platform
+  account already uses this GitHub account.
+- **AU-11** — A student without GitHub linking MUST be able to navigate and consult their
+  assignments; only the **acceptance of an assignment** is blocked as long as the
+  linking is not done (onboarding banner). Reference behavior for
   US-10.
-- **AU-12** — Déliaison : l'utilisateur MUST pouvoir délier son compte GitHub. La
-  déliaison ne retire pas les accès collaborateur déjà provisionnés sur les dépôts
-  existants ; elle bloque toute nouvelle acceptation d'assignment. La reliaison à un
-  autre compte GitHub MUST être journalisée (audit) et notifiée aux teachers des
-  classrooms concernées (NT-03).
+- **AU-12** — Unlinking: the user MUST be able to unlink their GitHub account. The
+  unlinking does not remove the collaborator accesses already provisioned on the existing
+  repositories; it blocks any new assignment acceptance. Re-linking to
+  another GitHub account MUST be logged (audit) and notified to the teachers of the
+  classrooms concerned (NT-03).
 
-## Import du roster par le teacher
+## Roster import by the teacher
 
-- **AU-13** — Le teacher MUST pouvoir importer la liste des étudiants d'une classroom
-  par fichier CSV, encodage UTF-8, séparateur `,` ou `;` (auto-détecté), avec ligne
-  d'en-tête obligatoire :
+- **AU-13** — The teacher MUST be able to import the list of students of a classroom
+  through a CSV file, UTF-8 encoding, `,` or `;` separator (auto-detected), with a mandatory
+  header row:
 
 ```text
 nom,prenom,email
@@ -125,699 +125,698 @@ Dupont,Marie,marie.dupont@heig-vd.ch
 Martin,Luc,luc.martin@heig-vd.ch
 ```
 
-- **AU-14** — Validation à l'import : e-mail syntaxiquement valide, normalisé (trim,
-  minuscules) ; lignes vides ignorées ; doublons d'e-mail **intra-fichier** rejetés
-  avec numéro de ligne. L'import est **atomique : tout ou rien**, avec rapport
-  d'erreurs. Cette sémantique est la référence unique (US-02 s'y conforme).
-- **AU-15** — Chaque ligne crée une entrée de roster
-  `Enrollment { classroom_id, nom, prenom, email, status }` avec `status = pending`.
-  Statuts : `pending` / `claimed` (libellés FR « non réclamée » / « réclamée » à
-  l'affichage — vocabulaire unique pour tous les documents). Le même e-mail peut
-  figurer dans plusieurs classrooms (une entrée par classroom).
-- **AU-16** — Ré-import : **upsert par e-mail** — les entrées existantes (y compris
-  `claimed`) sont conservées et leurs nom/prénom mis à jour, les nouvelles sont
-  ajoutées. Les entrées absentes du fichier ne sont PAS supprimées automatiquement ;
-  le teacher les retire individuellement (AU-17).
-- **AU-17** — Le teacher MUST pouvoir ajouter/éditer/supprimer une entrée de roster
-  manuellement (mêmes champs que le CSV). Si un dépôt étudiant existe pour cette
-  entrée, la suppression directe est bloquée : une **désinscription explicite** est
-  requise, dont les effets sont : retrait de l'accès collaborateur de l'étudiant sur
-  les dépôts de la classroom, **conservation** des dépôts (archivage au choix du
-  teacher, GH-25), conservation des GradeRuns et métriques, journalisation (audit).
+- **AU-14** — Validation at import time: syntactically valid e-mail, normalized (trim,
+  lowercase); empty rows ignored; **intra-file** e-mail duplicates rejected
+  with the row number. The import is **atomic: all or nothing**, with an error
+  report. This semantics is the single reference (US-02 conforms to it).
+- **AU-15** — Each row creates a roster entry
+  `Enrollment { classroom_id, nom, prenom, email, status }` with `status = pending`.
+  Statuses: `pending` / `claimed` (French labels "non réclamée" / "réclamée" at
+  display time — single vocabulary for all the documents). The same e-mail may
+  appear in several classrooms (one entry per classroom).
+- **AU-16** — Re-import: **upsert by e-mail** — the existing entries (including
+  `claimed` ones) are kept and their last name/first name updated, the new ones are
+  added. The entries absent from the file are NOT deleted automatically;
+  the teacher removes them individually (AU-17).
+- **AU-17** — The teacher MUST be able to add/edit/delete a roster entry
+  manually (same fields as the CSV). If a student repository exists for this
+  entry, direct deletion is blocked: an **explicit unenrollment** is
+  required, whose effects are: removal of the student's collaborator access on
+  the repositories of the classroom, **preservation** of the repositories (archiving at the teacher's
+  discretion, GH-25), preservation of the GradeRuns and metrics, logging (audit).
 
-## Claim du roster par l'étudiant
+## Roster claim by the student
 
-Flux unique : **claim automatique** à la connexion, sur e-mail vérifié, sans
-confirmation explicite et sans exiger la liaison GitHub (référence pour US-11 ;
-hypothèse H3).
+Single flow: **automatic claim** at login, on a verified e-mail, without
+explicit confirmation and without requiring the GitHub linking (reference for US-11;
+assumption H3).
 
-- **AU-18** — Après login edu-ID (avec `email_verified = true`), le backend MUST
-  rechercher les entrées de roster `pending` dont l'e-mail normalisé égale l'e-mail
-  edu-ID normalisé, et les rattacher automatiquement au compte : `status = claimed`,
-  `user_id` renseigné, `claimed_at` horodaté. Toutes les classrooms correspondantes
-  sont réclamées en une fois ; un écran récapitulatif informe l'étudiant des
-  classrooms rejointes. Le `github_login` n'apparaît dans le roster qu'après la
-  liaison GitHub (AU-09), qui n'est pas une condition du claim.
-- **AU-19** — Le matching MUST être exact (insensible à la casse) sur l'e-mail
-  complet. Aucun matching flou (nom/prénom) automatique.
-- **AU-20** — Cas sans correspondance : le compte est créé mais sans inscription.
-  L'étudiant voit un écran « aucune classroom trouvée pour `<email>` » l'invitant à
-  contacter son enseignant. Le teacher MUST pouvoir résoudre le cas soit en corrigeant
-  l'e-mail de l'entrée roster (le claim se rejoue à la connexion suivante ou via un
-  bouton « réessayer »), soit en rattachant manuellement l'entrée à un compte existant
-  depuis la vue roster.
-- **AU-21** — Cas ambigus : une entrée roster ne peut être `claimed` que par un seul
-  compte (contrainte d'unicité `enrollment → user`). Si l'e-mail d'un compte
-  correspond à une entrée déjà réclamée par un autre compte, aucun rattachement n'a
-  lieu et l'anomalie est signalée au teacher (badge « conflit » dans la vue roster) ;
-  résolution manuelle par le teacher uniquement.
-- **AU-22** — Un rattachement manuel par le teacher (AU-20, AU-21) MUST être
-  journalisé (qui, quand, quelle entrée, quel compte).
+- **AU-18** — After the edu-ID login (with `email_verified = true`), the backend MUST
+  look for the `pending` roster entries whose normalized e-mail equals the normalized
+  edu-ID e-mail, and attach them automatically to the account: `status = claimed`,
+  `user_id` filled in, `claimed_at` timestamped. All the matching classrooms
+  are claimed at once; a summary screen informs the student of the
+  classrooms joined. The `github_login` only appears in the roster after the
+  GitHub linking (AU-09), which is not a condition of the claim.
+- **AU-19** — The matching MUST be exact (case-insensitive) on the full
+  e-mail. No automatic fuzzy matching (last name/first name).
+- **AU-20** — Case without a match: the account is created but without enrollment.
+  The student sees a screen "no classroom found for `<email>`" inviting them to
+  contact their teacher. The teacher MUST be able to resolve the case either by correcting
+  the e-mail of the roster entry (the claim replays at the next login or via a
+  "retry" button), or by manually attaching the entry to an existing account
+  from the roster view.
+- **AU-21** — Ambiguous cases: a roster entry can only be `claimed` by a single
+  account (uniqueness constraint `enrollment → user`). If the e-mail of an account
+  matches an entry already claimed by another account, no attachment takes
+  place and the anomaly is reported to the teacher ("conflict" badge in the roster view);
+  manual resolution by the teacher only.
+- **AU-22** — A manual attachment by the teacher (AU-20, AU-21) MUST be
+  logged (who, when, which entry, which account).
 
-## Rôles et autorisations
+## Roles and authorizations
 
-- **AU-23** — Deux rôles applicatifs : `teacher` et `student` (attribution du rôle
-  teacher : AU-07). Matrice d'accès :
+- **AU-23** — Two application roles: `teacher` and `student` (granting of the teacher
+  role: AU-07). Access matrix:
 
-| Ressource | Teacher (propriétaire) | Student |
+| Resource | Teacher (owner) | Student |
 | --- | --- | --- |
-| Classroom (création, édition, suppression) | Oui (les siennes) | Non |
-| Roster (import, édition, conflits, github_login, dernière connexion) | Oui | Non |
-| Assignments (création, publication, modification encadrée US-08, suppression avec archivage GH-25, synchro, verrouillage) | Oui | Lecture seule, uniquement ceux de ses classrooms |
-| Dépôts étudiants (liens, métriques, notes) | Tous ceux de ses classrooms | Uniquement le sien (lien, statut CI, note indicative) |
-| Dépôt source et squashed | Oui | Non (ni lien, ni existence) |
-| Clés API | Oui (les siennes) | Non |
+| Classroom (creation, editing, deletion) | Yes (their own) | No |
+| Roster (import, editing, conflicts, github_login, last login) | Yes | No |
+| Assignments (creation, publication, controlled modification US-08, deletion with archiving GH-25, synchronization, locking) | Yes | Read-only, only those of their classrooms |
+| Student repositories (links, metrics, grades) | All those of their classrooms | Only their own (link, CI status, indicative grade) |
+| Source and squashed repository | Yes | No (neither the link nor the existence) |
+| API keys | Yes (their own) | No |
 
-- **AU-24** — Toute autorisation MUST être vérifiée côté backend à chaque requête
-  (ownership de la classroom pour le teacher, enrollment `claimed` pour l'étudiant).
-  Le filtrage UI n'est jamais suffisant.
-- **AU-25** — Un teacher ne voit pas les classrooms d'un autre teacher. (Le partage de
-  classroom entre co-enseignants est hors périmètre v1 ; le modèle
-  `classroom → teacher` reste 1-N extensible.)
-- **AU-26** — Les notes et métriques d'un étudiant ne sont jamais visibles par un
-  autre étudiant.
+- **AU-24** — Every authorization MUST be verified on the backend side at each request
+  (ownership of the classroom for the teacher, `claimed` enrollment for the student).
+  UI filtering is never enough.
+- **AU-25** — A teacher does not see the classrooms of another teacher. (Classroom
+  sharing between co-teachers is out of the v1 scope; the
+  `classroom → teacher` model stays 1-N extensible.)
+- **AU-26** — The grades and metrics of a student are never visible to
+  another student.
 
-## Dernière connexion
+## Last login
 
-- **AU-27** — Le backend MUST horodater `last_login_at` à chaque création de session
-  edu-ID réussie. C'est cette valeur (connexion au portail) qui est affichée dans le
-  tableau roster du teacher — décision de la question ouverte §5.5 de l'analyse.
-- **AU-28** — La date du dernier push (`last_commit_at` par dépôt) est une métrique
-  distincte, affichée au niveau assignment, et NE remplace PAS `last_login_at`.
+- **AU-27** — The backend MUST timestamp `last_login_at` at each successful edu-ID
+  session creation. It is this value (login to the portal) that is displayed in the
+  teacher's roster table — decision on open question §5.5 of the analysis.
+- **AU-28** — The date of the last push (`last_commit_at` per repository) is a distinct
+  metric, displayed at the assignment level, and does NOT replace `last_login_at`.
 
-# Intégration GitHub (GH)
+# GitHub integration (GH)
 
 ## GitHub App
 
-### Modèle et permissions
+### Model and permissions
 
-- **GH-01** — L'intégration repose sur une **GitHub App** unique (pas d'OAuth App pour
-  les opérations serveur), installée sur chaque organisation adossée à une classroom.
-  Les jetons d'installation offrent des permissions fines, un quota de 5 000 req/h
-  **par installation** (donc par organisation) et une identité bot dédiée
+- **GH-01** — The integration relies on a single **GitHub App** (no OAuth App for
+  the server operations), installed on each organization backing a classroom.
+  The installation tokens offer fine-grained permissions, a quota of 5,000 req/h
+  **per installation** (therefore per organization) and a dedicated bot identity
   (`<app-slug>[bot]`).
-- **GH-02** — L'App demande les **permissions minimales** suivantes :
+- **GH-02** — The App requests the following **minimal permissions**:
 
-| Permission (repository) | Niveau | Usage |
+| Permission (repository) | Level | Use |
 | --- | --- | --- |
-| Metadata | Read | Obligatoire (base API) |
-| Administration | Read & write | Créer les dépôts, gérer les collaborateurs, rulesets, archivage |
-| Contents | Read & write | Push squashed, commits de revert, commit de deadline, lecture des arbres |
-| Workflows | Read & write | Pousser des dépôts contenant `.github/workflows/grading.yml` |
-| Pull requests | Read & write | PR de synchronisation |
-| Checks | Read | Lecture des check-runs et annotations (grading, §3) |
-| Actions | Read | Détails des `workflow_run` |
+| Metadata | Read | Mandatory (API basis) |
+| Administration | Read & write | Create the repositories, manage the collaborators, rulesets, archiving |
+| Contents | Read & write | Squashed push, revert commits, deadline commit, reading of the trees |
+| Workflows | Read & write | Push repositories containing `.github/workflows/grading.yml` |
+| Pull requests | Read & write | Synchronization PR |
+| Checks | Read | Reading of the check-runs and annotations (grading, §3) |
+| Actions | Read | Details of the `workflow_run` |
 
-Aucune permission *organization* n'est requise hormis **Members : Read** (optionnelle,
-validation de l'appartenance du teacher à l'org). Toute permission supplémentaire est
-proscrite sans révision de cette spec.
+No *organization* permission is required apart from **Members: Read** (optional,
+validation of the teacher's membership of the org). Any additional permission is
+forbidden without a revision of this spec.
 
-- **GH-03** — L'authentification App suit le schéma standard : JWT signé avec la clé
-  privée (durée ≤ 10 min) → `POST /app/installations/{id}/access_tokens` →
-  **installation token** (durée 1 h). Le backend met en cache le token par
-  installation et le renouvelle à T−10 min ; il n'est jamais persisté en base ni
-  exposé au front. Les opérations git (push) utilisent
+- **GH-03** — The App authentication follows the standard scheme: JWT signed with the private
+  key (duration ≤ 10 min) → `POST /app/installations/{id}/access_tokens` →
+  **installation token** (duration 1 h). The backend caches the token per
+  installation and renews it at T−10 min; it is never persisted in the database nor
+  exposed to the front. The git operations (push) use
   `https://x-access-token:<token>@github.com/...`.
 
-### Installation sur l'organisation
+### Installation on the organization
 
-- **GH-04** — À la création d'une classroom, le teacher choisit l'organisation cible :
-  la plateforme le redirige vers la page d'installation de l'App
-  (`https://github.com/apps/<slug>/installations/new`) avec `state` signé (CSRF + id
-  classroom). Portée recommandée : **All repositories** (les dépôts étudiants sont
-  créés dynamiquement ; la portée « selected » imposerait un ajout manuel à chaque
-  provisionnement).
-- **GH-05** — Le webhook `installation` (`created`) confirme l'installation ; le
-  backend enregistre `installation_id` sur l'`Organization` et vérifie que le compte
-  installé correspond à l'organisation attendue. Une classroom ne peut être activée
-  qu'avec une installation valide.
-- **GH-06** — Les événements `installation` (`deleted`, `suspend`) et
-  `installation_repositories` marquent l'organisation **dégradée** : les opérations
-  d'écriture sont suspendues, le teacher est notifié (NT-03) avec un lien de
-  réinstallation. Aucune donnée n'est supprimée.
+- **GH-04** — When a classroom is created, the teacher chooses the target organization:
+  the platform redirects them to the installation page of the App
+  (`https://github.com/apps/<slug>/installations/new`) with a signed `state` (CSRF + classroom
+  id). Recommended scope: **All repositories** (the student repositories are
+  created dynamically; the "selected" scope would impose a manual addition at each
+  provisioning).
+- **GH-05** — The `installation` (`created`) webhook confirms the installation; the
+  backend records `installation_id` on the `Organization` and checks that the account
+  installed matches the expected organization. A classroom can only be activated
+  with a valid installation.
+- **GH-06** — The `installation` (`deleted`, `suspend`) and
+  `installation_repositories` events mark the organization as **degraded**: the write
+  operations are suspended, the teacher is notified (NT-03) with a reinstallation
+  link. No data is deleted.
 
-## Dépôts sources et stratégies de source
+## Source repositories and source strategies
 
-### Création du dépôt squashed
+### Creation of the squashed repository
 
-- **GH-10** — À la création d'un assignment, le backend valide que le dépôt source
-  appartient à l'organisation de la classroom et que les branches sélectionnées
-  existent, puis crée le dépôt **squashed** : privé, nommé `<source>-squashed`
-  (suffixe numérique en cas de collision), description renvoyant vers l'assignment.
-  Son URL est exposée dans l'UI teacher.
-- **GH-11** — Le contenu du squashed est produit selon la **stratégie de source** de
-  l'assignment (GH-12/GH-13) et poussé par le bot via git (pas l'API Contents,
-  inadaptée aux arbres complets). Le squashed est **géré exclusivement par le bot** :
-  un push manuel dessus est détecté (webhook `push`, auteur ≠ bot) et signalé au
+- **GH-10** — When an assignment is created, the backend validates that the source repository
+  belongs to the organization of the classroom and that the selected branches
+  exist, then creates the **squashed** repository: private, named `<source>-squashed`
+  (numeric suffix in case of a collision), description pointing back to the assignment.
+  Its URL is exposed in the teacher UI.
+- **GH-11** — The content of the squashed repository is produced according to the **source strategy** of
+  the assignment (GH-12/GH-13) and pushed by the bot through git (not the Contents API,
+  unsuitable for full trees). The squashed repository is **managed exclusively by the bot**:
+  a manual push on it is detected (`push` webhook, author ≠ bot) and reported to the
   teacher.
 
-### Stratégie « whole repository »
+### "Whole repository" strategy
 
-- **GH-12** — Le squashed est un **miroir des branches sélectionnées** du source :
-  mêmes commits, mêmes SHA (`git push` des refs sélectionnées, sans tags ni autres
-  refs). L'historique complet est donc transmis aux étudiants.
+- **GH-12** — The squashed repository is a **mirror of the selected branches** of the source:
+  same commits, same SHAs (`git push` of the selected refs, without tags or other
+  refs). The full history is therefore transmitted to the students.
 
-### Stratégie « squash into primary commits »
+### "Squash into primary commits" strategy
 
-- **GH-13** — Définition retenue : pour chaque branche sélectionnée, un **commit
-  primaire** est l'état complet de la branche à un instant de publication.
-  Concrètement :
+- **GH-13** — Retained definition: for each selected branch, a **primary
+  commit** is the complete state of the branch at a publication instant.
+  Concretely:
 
-  1. À la création de l'assignment, le squashed reçoit, par branche, **exactement un
-     commit racine** dont l'arbre est celui du HEAD de la branche source.
-     Auteur/committer : identité bot. Message :
+  1. When the assignment is created, the squashed repository receives, per branch, **exactly one
+     root commit** whose tree is that of the HEAD of the source branch.
+     Author/committer: bot identity. Message:
 
      ```text
      Initial version — <assignment>
 
-     Source: <org>/<source>@<sha-abrégé>
+     Source: <org>/<source>@<short-sha>
      ```
 
-  2. À chaque synchronisation ultérieure (GH-50), un **nouveau commit primaire** est
-     ajouté **au-dessus** du précédent : arbre = HEAD du source, parent = HEAD du
-     squashed. L'historique du squashed est donc la suite linéaire des versions
-     publiées, sans exposer les commits intermédiaires du teacher.
-  3. Chaque commit primaire porte le SHA source dans son message (traçabilité) ; le
-     backend persiste le mapping `commit primaire ↔ sha source`.
+  2. At each later synchronization (GH-50), a **new primary commit** is
+     added **on top of** the previous one: tree = HEAD of the source, parent = HEAD of the
+     squashed repository. The history of the squashed repository is therefore the linear sequence of the published
+     versions, without exposing the intermediate commits of the teacher.
+  3. Each primary commit carries the source SHA in its message (traceability); the
+     backend persists the mapping `primary commit ↔ source sha`.
 
-- **GH-14** — Cette définition garantit que dépôts étudiants et squashed partagent un
-  **ancêtre commun**, condition des PR de synchro propres (GH-52). Extension possible
-  (hors périmètre v1) : des tags `primary/*` sur le source pour publier plusieurs
-  jalons d'un coup.
+- **GH-14** — This definition guarantees that the student repositories and the squashed repository share a
+  **common ancestor**, the condition for clean synchronization PRs (GH-52). Possible extension
+  (out of the v1 scope): `primary/*` tags on the source to publish several
+  milestones at once.
 
-### Sélection des branches
+### Branch selection
 
-- **GH-15** — Par défaut, la branche récupérée est la **branche par défaut du
-  source** ; si l'assignment ne la précise pas, la règle est : `main` si elle existe,
-  sinon `master`, sinon la branche par défaut GitHub. Le teacher peut sélectionner des
-  branches additionnelles ; la première sélectionnée devient la branche par défaut des
-  dépôts étudiants.
+- **GH-15** — By default, the branch retrieved is the **default branch of the
+  source**; if the assignment does not specify it, the rule is: `main` if it exists,
+  otherwise `master`, otherwise the GitHub default branch. The teacher can select
+  additional branches; the first one selected becomes the default branch of the
+  student repositories.
 
-## Provisionnement du dépôt étudiant
+## Provisioning of the student repository
 
-- **GH-20** — À l'acceptation par l'étudiant, un job idempotent (clé
-  `assignment_id + user_id`) exécute :
+- **GH-20** — Upon acceptance by the student, an idempotent job (key
+  `assignment_id + user_id`) executes:
 
-  1. Création du dépôt privé `<assignment-slug>-<github_login>` dans l'organisation
+  1. Creation of the private repository `<assignment-slug>-<github_login>` in the organization
      (`POST /orgs/{org}/repos`, `auto_init: false`).
-  2. **Push git des refs du squashed** (branches sélectionnées) — et non « generate
-     from template », qui réécrirait l'historique et casserait l'ancêtre commun
+  2. **Git push of the refs of the squashed repository** (selected branches) — and not "generate
+     from template", which would rewrite the history and break the common ancestor
      (GH-14).
-  3. Ajout de l'étudiant comme collaborateur avec le rôle **push** (jamais
-     maintain/admin) ; l'invitation GitHub est acceptée par l'étudiant (lien et état
-     affichés dans l'UI tant que `pending`).
-  4. Pose du ruleset de protection (GH-21).
-  5. Enregistrement de `repo_url`, `default_branch`, `accepted_at` ; l'URL est
-     affichée à l'étudiant.
+  3. Addition of the student as a collaborator with the **push** role (never
+     maintain/admin); the GitHub invitation is accepted by the student (link and state
+     displayed in the UI as long as it is `pending`).
+  4. Setting of the protection ruleset (GH-21).
+  5. Recording of `repo_url`, `default_branch`, `accepted_at`; the URL is
+     displayed to the student.
 
-  Tout échec partiel est repris par le job (le nom de dépôt existant est réutilisé,
-  jamais dupliqué). Le SLA de 60 s (NFR-12) couvre les étapes 1 à 5, c'est-à-dire
-  jusqu'à l'**envoi** de l'invitation ; l'acceptation de l'invitation par l'étudiant
-  est hors SLA.
-- **GH-21** — **Interdiction du force push et de la suppression de branche** : un
-  **ruleset** au niveau du dépôt cible les branches sélectionnées avec les règles
-  *block force pushes* et *restrict deletions*, **sans** bypass pour les
-  collaborateurs ; l'App et le rôle **Organization admin** figurent en acteurs de
-  bypass. Contrainte : les rulesets sur dépôts privés exigent un plan GitHub
-  Team/Enterprise — vérification obligatoire avant M2, avec le coût en sièges des
-  outside collaborators et les quotas d'invitations (**C-07** du cahier des charges).
-- **GH-22** — Fallback si les rulesets sont indisponibles : le webhook `push` expose
-  `forced: true` ; le backend restaure alors la branche au dernier SHA connu par un
-  push bot et notifie teacher et étudiant. À cette fin (et pour le gel de note,
-  GR-14), le backend persiste **à chaque webhook push** : branche, SHA de tête et
-  **heure de réception serveur**. Mode dégradé documenté, non silencieux.
-- **GH-23** — L'étudiant n'obtient jamais de droit d'administration : il ne peut ni
-  supprimer le dépôt, ni modifier les rulesets, ni gérer les webhooks (l'App reçoit
-  ses événements au niveau installation, sans webhook par dépôt).
-- **GH-24** — **Cycle de vie des invitations** : les invitations collaborateur GitHub
-  expirent après 7 jours et il n'existe pas de webhook d'expiration. Le job de
-  réconciliation (GH-62) liste les invitations `pending`
-  (`GET /repos/{owner}/{repo}/invitations`) ; si une invitation est expirée alors que
-  l'étudiant n'a pas accès au dépôt, une ré-invitation est envoyée automatiquement (au
-  plus une par 24 h et par dépôt) et l'étudiant est notifié. L'étudiant et le teacher
-  disposent en outre d'une action « renvoyer l'invitation » dans l'UI. L'état
-  d'invitation (`pending` / `expirée` / `acceptée`) est visible des deux rôles.
-- **GH-25** — **Cascades de suppression** : la plateforme ne supprime **jamais** un
-  dépôt GitHub silencieusement.
+  Any partial failure is taken up by the job (the existing repository name is reused,
+  never duplicated). The 60 s SLA (NFR-12) covers steps 1 to 5, that is,
+  up to the **sending** of the invitation; the acceptance of the invitation by the student
+  is out of SLA.
+- **GH-21** — **Prohibition of force push and branch deletion**: a
+  **ruleset** at the repository level targets the selected branches with the rules
+  *block force pushes* and *restrict deletions*, **without** a bypass for the
+  collaborators; the App and the **Organization admin** role appear as bypass
+  actors. Constraint: rulesets on private repositories require a GitHub
+  Team/Enterprise plan — mandatory verification before M2, with the seat cost of the
+  outside collaborators and the invitation quotas (**C-07** of the requirements specification).
+- **GH-22** — Fallback if the rulesets are unavailable: the `push` webhook exposes
+  `forced: true`; the backend then restores the branch to the last SHA known from a
+  bot push and notifies teacher and student. To this end (and for the grade freeze,
+  GR-14), the backend persists **at each push webhook**: branch, head SHA and
+  **server reception time**. Degraded mode documented, not silent.
+- **GH-23** — The student never obtains an administration right: they can neither
+  delete the repository, nor modify the rulesets, nor manage the webhooks (the App receives
+  its events at the installation level, without a per-repository webhook).
+- **GH-24** — **Life cycle of the invitations**: the GitHub collaborator invitations
+  expire after 7 days and there is no expiration webhook. The reconciliation
+  job (GH-62) lists the `pending` invitations
+  (`GET /repos/{owner}/{repo}/invitations`); if an invitation has expired while
+  the student does not have access to the repository, a re-invitation is sent automatically (at
+  most one per 24 h and per repository) and the student is notified. The student and the teacher
+  additionally have a "resend the invitation" action in the UI. The invitation
+  state (`pending` / `expired` / `accepted`) is visible to both roles.
+- **GH-25** — **Deletion cascades**: the platform **never** deletes a
+  GitHub repository silently.
 
-  1. Désinscription d'un étudiant (AU-17) : retrait de l'accès collaborateur,
-     conservation du dépôt (archivage proposé au teacher).
-  2. Suppression d'un assignment : confirmation explicite requise ; les dépôts
-     étudiants sont **archivés** (jamais supprimés) et le squashed conservé.
-  3. Suppression d'une classroom : refusée tant qu'il reste des assignments publiés ;
-     mêmes règles d'archivage.
+  1. Unenrollment of a student (AU-17): removal of the collaborator access,
+     preservation of the repository (archiving offered to the teacher).
+  2. Deletion of an assignment: explicit confirmation required; the student
+     repositories are **archived** (never deleted) and the squashed repository is kept.
+  3. Deletion of a classroom: refused as long as published assignments remain;
+     same archiving rules.
 
-## Fichiers protégés — commit de revert
+## Protected files — revert commit
 
-- **GH-30** — La liste des fichiers protégés (chemins exacts relatifs à la racine, pas
-  de glob en v1) est définie sur l'assignment. Pré-cochage à la création :
-  `criteria.yml`, `README.md` **et `.github/workflows/grading.yml`** s'ils existent
-  dans le source (cohérent avec GR-01 ; décocher `grading.yml` déclenche un
-  avertissement, cf. US-04). La **version de référence** d'un fichier protégé est
-  celle du **dernier commit primaire/sync** poussé par le bot (pas la version
-  initiale : une synchro peut légitimement les mettre à jour).
-- **GH-31** — **Détection** : à chaque webhook `push` sur une branche sélectionnée
-  d'un dépôt étudiant, si `sender` ≠ bot, le backend compare `before...after`
-  (`GET /repos/.../compare`) et extrait l'intersection des fichiers touchés avec la
-  liste protégée (modification, suppression ou renommage).
-- **GH-32** — **Algorithme de revert** (API Git Data, atomique) :
+- **GH-30** — The list of protected files (exact paths relative to the root, no
+  glob in v1) is defined on the assignment. Pre-checking at creation time:
+  `criteria.yml`, `README.md` **and `.github/workflows/grading.yml`** if they exist
+  in the source (consistent with GR-01; unchecking `grading.yml` triggers a
+  warning, see US-04). The **reference version** of a protected file is
+  that of the **last primary/sync commit** pushed by the bot (not the initial
+  version: a synchronization may legitimately update them).
+- **GH-31** — **Detection**: at each `push` webhook on a selected branch
+  of a student repository, if `sender` ≠ bot, the backend compares `before...after`
+  (`GET /repos/.../compare`) and extracts the intersection of the touched files with the
+  protected list (modification, deletion or renaming).
+- **GH-32** — **Revert algorithm** (Git Data API, atomic):
 
-  1. Lire le HEAD courant de la branche.
-  2. Créer un arbre `base_tree = HEAD` remplaçant chaque chemin protégé par le blob de
-     référence (recréation si supprimé).
-  3. Si l'arbre résultant est identique à celui de HEAD, ne rien faire (déjà
-     conforme).
-  4. Créer le commit (auteur/committer bot) et avancer la ref par **fast-forward**
-     (`update ref`, non forcé) — le travail de l'étudiant n'est jamais réécrit,
-     uniquement recouvert.
+  1. Read the current HEAD of the branch.
+  2. Create a tree `base_tree = HEAD` replacing each protected path with the reference
+     blob (re-creation if deleted).
+  3. If the resulting tree is identical to that of HEAD, do nothing (already
+     compliant).
+  4. Create the commit (bot author/committer) and advance the ref by **fast-forward**
+     (`update ref`, non-forced) — the student's work is never rewritten,
+     only covered over.
 
-  Message de commit :
+  Commit message:
 
   ```text
   chore(protected): restore protected files
 
-  Fichiers restaurés : criteria.yml, README.md
-  Référence : squashed@<sha-abrégé>. Ces fichiers sont gérés par l'assignment
-  et ne doivent pas être modifiés.
+  Restored files: criteria.yml, README.md
+  Reference: squashed@<short-sha>. These files are managed by the assignment
+  and must not be modified.
   ```
 
-- **GH-33** — **Anti-boucle** : les pushes dont l'auteur est le bot sont ignorés par
-  GH-31. Si l'étudiant re-modifie, le revert se répète ; au-delà de **5 reverts /
-  heure / dépôt**, le backend cesse de reverter, marque le dépôt « protected files en
-  conflit » et notifie le teacher (protection contre un script étudiant en boucle et
-  contre l'épuisement du quota). Ce plafond est un critère d'acceptation d'US-21.
-- **GH-34** — **Notification** : chaque revert notifie l'étudiant (NT-01, e-mail
-  optionnel NT-02) avec la liste des fichiers restaurés ; le compteur de reverts
-  apparaît dans la vue teacher du dépôt. La course « push étudiant pendant le revert »
-  est bénigne : l'update non forcé échoue et le webhook du nouveau push redéclenche
-  l'analyse.
-- **GH-35** — **Résolution de l'état « protected files en conflit »** :
+- **GH-33** — **Anti-loop**: the pushes whose author is the bot are ignored by
+  GH-31. If the student re-modifies them, the revert repeats; beyond **5 reverts /
+  hour / repository**, the backend stops reverting, marks the repository "protected files in
+  conflict" and notifies the teacher (protection against a looping student script and
+  against exhaustion of the quota). This ceiling is an acceptance criterion of US-21.
+- **GH-34** — **Notification**: each revert notifies the student (NT-01, optional
+  e-mail NT-02) with the list of the restored files; the revert counter
+  appears in the teacher view of the repository. The "student push during the revert"
+  race is benign: the non-forced update fails and the webhook of the new push re-triggers
+  the analysis.
+- **GH-35** — **Resolution of the "protected files in conflict" state**:
 
-  1. Vue teacher : le dépôt est signalé (badge), avec l'historique des reverts et une
-     action **« réactiver la protection »** qui pousse un revert final, remet le
-     compteur à zéro et réarme la détection.
-  2. Vue student : un bandeau explique que les fichiers protégés du dépôt ne sont plus
-     restaurés automatiquement et invite à revenir à la version de référence.
-  3. Tant que l'état persiste, la note courante du dépôt est marquée « à vérifier »
-     dans la vue teacher (les fichiers de critères peuvent être altérés) ; les
-     GradeRuns continuent d'être enregistrés.
+  1. Teacher view: the repository is flagged (badge), with the history of the reverts and a
+     **"re-enable the protection"** action that pushes a final revert, resets the
+     counter to zero and re-arms the detection.
+  2. Student view: a banner explains that the protected files of the repository are no longer
+     restored automatically and invites them to return to the reference version.
+  3. As long as the state persists, the current grade of the repository is marked "to be verified"
+     in the teacher view (the criteria files may be altered); the
+     GradeRuns keep being recorded.
 
 ## Deadline
 
-- **GH-40** — Comparaison des mécanismes de **lock** :
+- **GH-40** — Comparison of the **lock** mechanisms:
 
-| Mécanisme | Effet | Bot garde l'écriture | Étudiant garde la lecture | Réversible | Limites |
+| Mechanism | Effect | Bot keeps write access | Student keeps read access | Reversible | Limits |
 | --- | --- | --- | --- | --- | --- |
-| Archivage du dépôt | Tout devient read-only (code, issues, PR) | Non (désarchiver d'abord) | Oui | Oui (API) | Bloque aussi la synchro et le revert ; grossier mais simple |
-| Retrait/downgrade des droits | Collaborateur passé à `pull` | Oui | Oui | Oui | Par collaborateur ; l'étudiant perd aussi la gestion de ses PR |
-| Ruleset « lock branch » | Push bloqué sur les branches ciblées | **Oui (bypass App)** | Oui | Oui | Requiert plan Team/Enterprise (cf. GH-21, C-07) |
+| Archiving of the repository | Everything becomes read-only (code, issues, PR) | No (unarchive first) | Yes | Yes (API) | Also blocks the synchronization and the revert; coarse but simple |
+| Removal/downgrade of the rights | Collaborator moved to `pull` | Yes | Yes | Yes | Per collaborator; the student also loses the management of their PRs |
+| "Lock branch" ruleset | Push blocked on the targeted branches | **Yes (App bypass)** | Yes | Yes | Requires a Team/Enterprise plan (see GH-21, C-07) |
 
-- **GH-41** — Stratégie retenue : **ruleset lock**. Acteurs de bypass du ruleset : la
-  **GitHub App** (revert tardif, commit correctif) **et le rôle Organization admin**
-  (le teacher conserve l'écriture, comme le garantit US-22) ; ces deux bypass font
-  partie des critères d'acceptation. La réversibilité du ruleset est un atout pour une
-  évolution future (extensions de délai individuelles), **hors périmètre v1**
-  (cf. §3.2 du cahier des charges, hypothèse H1). L'**archivage** est le fallback si
-  les rulesets sont indisponibles : il est appliqué **après** toute écriture bot
-  restante et retire l'écriture à tous, bot et teacher compris — la garantie d'accès
-  en écriture d'US-22 ne vaut donc qu'en mode ruleset ; le mode archivage est signalé
-  comme dégradé dans l'UI teacher.
-- **GH-42** — La stratégie **deadline commit** pousse, à l'échéance, un commit
-  **vide** signé bot sur chaque branche sélectionnée :
+- **GH-41** — Retained strategy: **lock ruleset**. Bypass actors of the ruleset: the
+  **GitHub App** (late revert, corrective commit) **and the Organization admin role**
+  (the teacher keeps write access, as US-22 guarantees); these two bypasses are
+  part of the acceptance criteria. The reversibility of the ruleset is an asset for a
+  future evolution (individual deadline extensions), **out of the v1 scope**
+  (see §3.2 of the requirements specification, assumption H1). **Archiving** is the fallback if
+  the rulesets are unavailable: it is applied **after** any remaining bot write
+  and removes write access from everyone, bot and teacher included — the write access
+  guarantee of US-22 therefore only holds in ruleset mode; the archiving mode is reported
+  as degraded in the teacher UI.
+- **GH-42** — The **deadline commit** strategy pushes, at the due time, an **empty**
+  bot-signed commit on each selected branch:
 
   ```text
   chore(deadline): deadline reached — <assignment> (2026-07-03T23:59:00+02:00)
   ```
 
-  Le dépôt reste ouvert ; la **note indicative gelée** est déterminée par GR-12 à
-  GR-14 (commits reçus avant la deadline, heure serveur — le commit de deadline
-  lui-même et les runs qu'il déclenche sont ignorés, GH-44 et GR-05). Les deux
-  stratégies sont exclusives et fixées par assignment.
-- **GH-43** — Le job de deadline (scheduler, timezone **Europe/Zurich**) est
-  idempotent, reprend les dépôts en échec, se replanifie si la deadline est modifiée
-  (US-08), et journalise `locked_at` / `deadline_commit_sha` par dépôt. Budget
-  temporel (unique, aligné US-22 et NFR-13) : **démarrage ≤ 60 s après l'échéance,
-  application complète sur 100 dépôts ≤ 5 min**. Pour tout litige sur un push proche
-  de l'échéance, c'est l'**heure de réception serveur du webhook push** qui fait foi
-  (GR-14), jamais l'horodatage git.
-- **GH-44** — **Effets de bord des pushes bot** : les pushes effectués avec un token
-  d'installation GitHub App déclenchent les workflows Actions (contrairement au
-  `GITHUB_TOKEN`). Conséquences et mitigations obligatoires :
+  The repository stays open; the **frozen indicative grade** is determined by GR-12 to
+  GR-14 (commits received before the deadline, server time — the deadline commit
+  itself and the runs it triggers are ignored, GH-44 and GR-05). The two
+  strategies are exclusive and fixed per assignment.
+- **GH-43** — The deadline job (scheduler, **Europe/Zurich** timezone) is
+  idempotent, takes up the failed repositories, reschedules itself if the deadline is modified
+  (US-08), and logs `locked_at` / `deadline_commit_sha` per repository. Time
+  budget (single, aligned with US-22 and NFR-13): **start ≤ 60 s after the due time,
+  full application over 100 repositories ≤ 5 min**. For any dispute about a push close
+  to the due time, it is the **server reception time of the push webhook** that prevails
+  (GR-14), never the git timestamp.
+- **GH-44** — **Side effects of the bot pushes**: the pushes performed with a GitHub App
+  installation token trigger the Actions workflows (unlike the
+  `GITHUB_TOKEN`). Mandatory consequences and mitigations:
 
-  1. Les runs dont le commit de tête est un commit bot (revert, deadline commit,
-     synchro) sont **ignorés par le grading** : aucun GradeRun n'est créé (GR-05).
-  2. Le template `grading.yml` fourni aux teachers contient une condition de job
-     `if: github.actor != '<app-slug>[bot]'` pour éviter les runs inutiles.
-  3. Impact quota : un commit de deadline sur 100 dépôts peut déclencher jusqu'à
-     100 runs simultanés ; la consommation Actions correspondante est mesurée lors du
-     spike S3 et documentée avant le jalon M4.
+  1. The runs whose head commit is a bot commit (revert, deadline commit,
+     synchronization) are **ignored by the grading**: no GradeRun is created (GR-05).
+  2. The `grading.yml` template provided to the teachers contains a job condition
+     `if: github.actor != '<app-slug>[bot]'` to avoid useless runs.
+  3. Quota impact: a deadline commit over 100 repositories may trigger up to
+     100 simultaneous runs; the corresponding Actions consumption is measured during the
+     S3 spike and documented before milestone M4.
 
-## Synchronisation source → squashed → dépôts étudiants
+## Synchronization source → squashed → student repositories
 
-- **GH-50** — **Déclenchement** : le webhook `push` sur une branche sélectionnée du
-  dépôt **source** rend la synchro *disponible* dans l'UI teacher (état « source en
-  avance de N commits »). La propagation vers les étudiants est **déclenchée
-  explicitement par le teacher** (pas d'auto-push : éviter de spammer les étudiants de
-  PR à chaque commit intermédiaire).
-- **GH-51** — À la demande de synchro, le backend met à jour le **squashed** :
-  fast-forward des refs (stratégie whole repository) ou ajout d'un commit primaire
-  (GH-13). Puis, pour chaque dépôt étudiant provisionné et non verrouillé :
+- **GH-50** — **Triggering**: the `push` webhook on a selected branch of the
+  **source** repository makes the synchronization *available* in the teacher UI (state "source ahead
+  by N commits"). The propagation to the students is **triggered
+  explicitly by the teacher** (no auto-push: avoid spamming the students with
+  PRs at each intermediate commit).
+- **GH-51** — On a synchronization request, the backend updates the **squashed repository**:
+  fast-forward of the refs (whole repository strategy) or addition of a primary commit
+  (GH-13). Then, for each provisioned and non-locked student repository:
 
-  1. Push de la branche squashed vers la ref `sync/<branche>` du dépôt étudiant (mise
-     à jour forcée autorisée sur cette ref bot uniquement).
-  2. Ouverture d'une PR `sync/<branche>` → `<branche>`, auteur bot, titre
-     `Sync assignment update (<sha-abrégé>)`, corps listant les fichiers modifiés.
-  3. S'il existe déjà une **PR de synchro ouverte**, elle est réutilisée (la ref est
-     mise à jour, un commentaire signale la nouvelle version) — jamais deux PR de
-     synchro ouvertes simultanément.
+  1. Push of the squashed branch to the `sync/<branch>` ref of the student repository (forced
+     update allowed on this bot ref only).
+  2. Opening of a PR `sync/<branch>` → `<branch>`, bot author, title
+     `Sync assignment update (<short-sha>)`, body listing the modified files.
+  3. If an **open synchronization PR** already exists, it is reused (the ref is
+     updated, a comment reports the new version) — never two synchronization PRs
+     open simultaneously.
 
-  Les pushes sur `sync/<branche>` peuvent déclencher des workflows : ces runs (branche
-  non sélectionnée, commit bot) sont **exclus du grading et des métriques** (GR-05,
+  The pushes on `sync/<branch>` may trigger workflows: these runs (non-selected
+  branch, bot commit) are **excluded from the grading and from the metrics** (GR-05,
   GR-15).
-- **GH-52** — **Conflits** : ils sont portés par la PR (GitHub les affiche) et résolus
-  par l'étudiant ; le bot ne merge jamais automatiquement. Si le diff est vide pour un
-  dépôt (étudiant déjà à jour), aucune PR n'est ouverte. L'état des PR de synchro
-  (ouverte / mergée / en conflit) est agrégé dans la vue teacher via les webhooks
-  `pull_request`.
-- **GH-53** — Toutes les écritures de synchro utilisent l'**identité bot** de l'App
-  (`<app-slug>[bot]`, e-mail no-reply GitHub associé), jamais l'identité du teacher.
+- **GH-52** — **Conflicts**: they are carried by the PR (GitHub displays them) and resolved
+  by the student; the bot never merges automatically. If the diff is empty for a
+  repository (student already up to date), no PR is opened. The state of the synchronization PRs
+  (open / merged / in conflict) is aggregated in the teacher view through the `pull_request`
+  webhooks.
+- **GH-53** — All the synchronization writes use the **bot identity** of the App
+  (`<app-slug>[bot]`, associated GitHub no-reply e-mail), never the identity of the teacher.
 
 ## Webhooks
 
-- **GH-60** — Un unique endpoint `POST /webhooks/github` reçoit les événements de
-  l'App. Chaque livraison est vérifiée par **signature HMAC**
-  (`X-Hub-Signature-256`, secret dédié), dédupliquée par `X-GitHub-Delivery`,
-  acquittée en < 5 s (traitement asynchrone en file de jobs).
-- **GH-61** — Événements souscrits et usages :
+- **GH-60** — A single endpoint `POST /webhooks/github` receives the events of
+  the App. Each delivery is verified by **HMAC signature**
+  (`X-Hub-Signature-256`, dedicated secret), deduplicated by `X-GitHub-Delivery`,
+  acknowledged in < 5 s (asynchronous processing in a job queue).
+- **GH-61** — Subscribed events and uses:
 
-| Événement | Usage |
+| Event | Use |
 | --- | --- |
-| `installation`, `installation_repositories` | Cycle de vie de l'installation (GH-05, GH-06) |
-| `push` | Métriques (dernier commit/hash + heure de réception serveur, GH-22), détection protected files (GH-31), détection force push fallback (GH-22), détection d'avance du source (GH-50) |
-| `workflow_run` (`requested`, `in_progress`) | Passage du statut CI à `pending` (GR-04, GR-15) |
-| `workflow_run` (`completed`) | Statut CI pass/fail ; déclenche la lecture des check-runs pour la note (§3) |
-| `pull_request` | Suivi des PR de synchro (GH-52) |
-| `repository` | Détection de renommage/suppression/archivage hors plateforme → alerte teacher |
+| `installation`, `installation_repositories` | Life cycle of the installation (GH-05, GH-06) |
+| `push` | Metrics (last commit/hash + server reception time, GH-22), protected files detection (GH-31), force push fallback detection (GH-22), detection of the source getting ahead (GH-50) |
+| `workflow_run` (`requested`, `in_progress`) | Transition of the CI status to `pending` (GR-04, GR-15) |
+| `workflow_run` (`completed`) | pass/fail CI status; triggers the reading of the check-runs for the grade (§3) |
+| `pull_request` | Tracking of the synchronization PRs (GH-52) |
+| `repository` | Detection of renaming/deletion/archiving outside the platform → teacher alert |
 
-Il n'existe pas de webhook pour l'expiration des invitations collaborateur : elle est
-couverte par la réconciliation (GH-24, GH-62).
+There is no webhook for the expiration of the collaborator invitations: it is
+covered by the reconciliation (GH-24, GH-62).
 
-- **GH-62** — **Rattrapage** : un job périodique (quotidien, et à la demande)
-  réconcilie l'état via l'API (`GET /repos/.../branches`, listing des invitations
-  `pending` pour GH-24, listing des livraisons manquées via
-  `GET /app/hook/deliveries` avec re-livraison) afin qu'aucune perte de webhook ne
-  corrompe durablement les métriques ou les protections. La réconciliation des
-  GradeRuns suit GR-07.
-- **GH-63** — Toutes les opérations GitHub passent par un client centralisé (Octokit)
-  avec gestion des réponses `403 rate limit` / `secondary rate limit` (backoff +
-  reprise du job), journalisation des mutations (dépôt, opération, SHA avant/après)
-  pour audit.
+- **GH-62** — **Catch-up**: a periodic job (daily, and on demand)
+  reconciles the state through the API (`GET /repos/.../branches`, listing of the `pending`
+  invitations for GH-24, listing of the missed deliveries through
+  `GET /app/hook/deliveries` with redelivery) so that no webhook loss
+  lastingly corrupts the metrics or the protections. The reconciliation of the
+  GradeRuns follows GR-07.
+- **GH-63** — All the GitHub operations go through a centralized client (Octokit)
+  with handling of the `403 rate limit` / `secondary rate limit` responses (backoff +
+  resumption of the job), logging of the mutations (repository, operation, SHA before/after)
+  for audit.
 
-# Grading et collecte de métriques (GR)
+# Grading and metrics collection (GR)
 
-## Convention `grading.yml`
+## `grading.yml` convention
 
-### GR-01 — Workflow de grading
+### GR-01 — Grading workflow
 
-Un assignment est « gradé » si le dépôt étudiant contient le workflow
-`.github/workflows/grading.yml`. Ce fichier provient du dépôt source et est
-**pré-coché dans les fichiers protégés** à la création de l'assignment (GH-30,
-US-04) ; le teacher peut le décocher, auquel cas la suppression ou l'altération du
-workflow par l'étudiant n'est pas revertée (avertissement affiché). Le système
-identifie le workflow par son chemin (`path` du webhook `workflow_run`), pas par son
-nom d'affichage.
+An assignment is "graded" if the student repository contains the workflow
+`.github/workflows/grading.yml`. This file comes from the source repository and is
+**pre-checked in the protected files** when the assignment is created (GH-30,
+US-04); the teacher can uncheck it, in which case the deletion or alteration of the
+workflow by the student is not reverted (warning displayed). The system
+identifies the workflow by its path (`path` of the `workflow_run` webhook), not by its
+display name.
 
-### GR-02 — Format d'annotation de la note
+### GR-02 — Grade annotation format
 
-Le workflow émet la note via une commande de workflow GitHub Actions de type
-`notice`, avec un titre réservé `GRADE` :
+The workflow emits the grade through a GitHub Actions workflow command of the
+`notice` type, with a reserved title `GRADE`:
 
 ```bash
 echo "::notice title=GRADE::4.5/6"
 ```
 
-Le message DOIT respecter la grammaire suivante (regex appliquée par le backend) :
-
+The message MUST respect the following grammar (regex applied by the backend):
 ```text
 ^\s*(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)\s*$
 ```
 
-soit `points_obtenus/points_max`, décimales avec point, `points_max > 0`,
-`points_obtenus <= points_max`.
+that is `points_obtained/points_max`, decimals with a dot, `points_max > 0`,
+`points_obtained <= points_max`.
 
-**Justification** : la commande `::notice` crée une annotation attachée au check run
-du job, lisible via l'API REST
-(`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`) avec le seul scope
-`checks:read` de la GitHub App. Aucun artefact à téléverser, aucun token à injecter
-dans le workflow étudiant, une seule ligne de shell dans `grading.yml`, et
-l'annotation est visible telle quelle dans l'UI GitHub (transparence pour
-l'étudiant).
+**Justification**: the `::notice` command creates an annotation attached to the check run
+of the job, readable through the REST API
+(`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`) with only the
+`checks:read` scope of the GitHub App. No artifact to upload, no token to inject
+into the student workflow, a single shell line in `grading.yml`, and
+the annotation is visible as such in the GitHub UI (transparency for
+the student).
 
-**Limite assumée — note falsifiable** : le code de l'étudiant s'exécute dans le même
-run (tests) et peut lui-même imprimer une commande `::notice title=GRADE::...` sur la
-sortie standard, forgeant une note. Protéger `grading.yml` n'empêche pas cette
-injection. Le risque est **accepté** car la note est strictement indicative (GR-10,
-§3.2 du cahier des charges — hypothèse H5). Mitigations : toute annotation `GRADE`
-multiple dans un run, **même à valeurs identiques**, invalide la note
-(`parse_status = multiple`, alerte teacher, GR-17) ; le teacher garde l'accès aux
-logs du run pour vérification. Si l'intégrité devient requise, l'extension « artefact
-signé » (GR-16) remplace cette convention.
+**Assumed limitation — falsifiable grade**: the student's code executes in the same
+run (tests) and can itself print a `::notice title=GRADE::...` command on the
+standard output, forging a grade. Protecting `grading.yml` does not prevent this
+injection. The risk is **accepted** because the grade is strictly indicative (GR-10,
+§3.2 of the requirements specification — assumption H5). Mitigations: any multiple `GRADE`
+annotation in a run, **even with identical values**, invalidates the grade
+(`parse_status = multiple`, teacher alert, GR-17); the teacher keeps access to the
+logs of the run for verification. If integrity becomes required, the "signed
+artifact" extension (GR-16) replaces this convention.
 
-**Alternative écartée** : publication d'un artefact JSON (`grade.json`) téléchargé
-par le backend. Plus expressive (barème détaillé par exercice), mais plus lourde
-(upload d'artefact, téléchargement zip, rétention limitée) et invisible dans l'UI
-GitHub. Retenue comme extension future possible (GR-16), non requise pour le MVP.
+**Ruled-out alternative**: publication of a JSON artifact (`grade.json`) downloaded
+by the backend. More expressive (detailed scale per exercise), but heavier
+(artifact upload, zip download, limited retention) and invisible in the GitHub
+UI. Retained as a possible future extension (GR-16), not required for the MVP.
 
-### GR-03 — Unicité de l'annotation
+### GR-03 — Uniqueness of the annotation
 
-Le workflow DOIT émettre exactement une annotation `GRADE` par run. Le kit de
-démarrage fourni aux teachers (template `grading.yml`) documente cette contrainte et
-fournit un step final unique qui agrège les points et émet la notice avec
-`if: always()`, afin que la note soit publiée même si des steps de test échouent. Le
-template inclut aussi la condition anti-bot de GH-44.
+The workflow MUST emit exactly one `GRADE` annotation per run. The starter
+kit provided to the teachers (`grading.yml` template) documents this constraint and
+provides a single final step that aggregates the points and emits the notice with
+`if: always()`, so that the grade is published even if test steps fail. The
+template also includes the anti-bot condition of GH-44.
 
-## Capture par le backend
+## Capture by the backend
 
-### GR-04 — Déclencheurs webhook
+### GR-04 — Webhook triggers
 
-Le backend s'abonne à l'événement `workflow_run` de la GitHub App (GH-61) :
+The backend subscribes to the `workflow_run` event of the GitHub App (GH-61):
 
-1. `requested` / `in_progress` : le statut CI du dépôt passe à `pending` (GR-15) si le
-   run est éligible (GR-05, étape 1).
-2. `completed` : traitement complet ci-dessous (GR-05).
+1. `requested` / `in_progress`: the CI status of the repository moves to `pending` (GR-15) if the
+   run is eligible (GR-05, step 1).
+2. `completed`: full processing below (GR-05).
 
-Seuls les événements dont le dépôt correspond à un `StudentRepo` connu sont traités ;
-les autres sont ignorés (204).
+Only the events whose repository matches a known `StudentRepo` are processed;
+the others are ignored (204).
 
-### GR-05 — Pipeline d'extraction
+### GR-05 — Extraction pipeline
 
-À réception d'un `workflow_run` completed :
+Upon reception of a completed `workflow_run`:
 
-1. **Filtre d'éligibilité** : résoudre le `StudentRepo` à partir de `repository.id`,
-   puis vérifier que `head_branch` est une **branche sélectionnée** de l'assignment
-   (les refs `sync/*` et toute autre branche sont ignorées) et que le commit de tête
-   (`head_sha`) n'est **pas un commit poussé par le bot** (revert, deadline commit,
-   synchro — GH-44). Un run non éligible est ignoré : aucun GradeRun n'est créé.
-2. Si `workflow.path == .github/workflows/grading.yml` : lister les check runs du
-   `head_sha` (`GET /commits/{sha}/check-runs`), filtrer ceux du `check_suite` du run,
-   puis lire leurs annotations et rechercher `title == "GRADE"` de niveau `notice`.
-3. Parser le message selon GR-02 et créer un `GradeRun` (GR-08).
-4. Traiter le webhook de manière idempotente : la paire
-   (`StudentRepo`, `workflow_run.id`, `run_attempt`) est unique ; un événement rejoué
-   ne crée pas de doublon.
+1. **Eligibility filter**: resolve the `StudentRepo` from `repository.id`,
+   then check that `head_branch` is a **selected branch** of the assignment
+   (the `sync/*` refs and any other branch are ignored) and that the head commit
+   (`head_sha`) is **not a commit pushed by the bot** (revert, deadline commit,
+   synchronization — GH-44). A non-eligible run is ignored: no GradeRun is created.
+2. If `workflow.path == .github/workflows/grading.yml`: list the check runs of the
+   `head_sha` (`GET /commits/{sha}/check-runs`), filter those of the `check_suite` of the run,
+   then read their annotations and look for `title == "GRADE"` of `notice` level.
+3. Parse the message according to GR-02 and create a `GradeRun` (GR-08).
+4. Process the webhook idempotently: the pair
+   (`StudentRepo`, `workflow_run.id`, `run_attempt`) is unique; a replayed event
+   does not create a duplicate.
 
-### GR-06 — Fallback pass/fail (dépôts sans `grading.yml`)
+### GR-06 — pass/fail fallback (repositories without `grading.yml`)
 
-Si le dépôt ne contient pas `grading.yml`, le statut CI est **agrégé** sur le dernier
-commit étudiant éligible (GR-05, étape 1) de la branche par défaut du dépôt :
+If the repository does not contain `grading.yml`, the CI status is **aggregated** over the last
+eligible student commit (GR-05, step 1) of the default branch of the repository:
 
-1. `pass` si **tous** les `workflow_run` completed portant sur ce commit ont
-   `conclusion = success` ;
-2. `fail` si **au moins un** run completed a une autre conclusion ;
-3. `pending` si au moins un run est `requested`/`in_progress` et aucun n'a échoué ;
-4. `none` s'il n'existe aucun workflow.
+1. `pass` if **all** the completed `workflow_run` bearing on this commit have
+   `conclusion = success`;
+2. `fail` if **at least one** completed run has another conclusion;
+3. `pending` if at least one run is `requested`/`in_progress` and none has failed;
+4. `none` if no workflow exists.
 
-Un `GradeRun` est créé sans note (`grade_points = null`, `parse_status = fallback`)
-par run completed éligible. Cette règle d'agrégation est la référence unique pour
+A `GradeRun` is created without a grade (`grade_points = null`, `parse_status = fallback`)
+per eligible completed run. This aggregation rule is the single reference for
 `ci_status` (US-05, US-14, AU-35).
 
-### GR-07 — Rattrapage
+### GR-07 — Catch-up
 
-Un job de réconciliation s'exécute **toutes les 15 minutes** (période configurable,
-défaut 15 min) et re-interroge les runs des `StudentRepo` actifs dont le dernier
-webhook reçu date de plus de **N = 30 minutes** (configurable), pour compenser les
-webhooks perdus. Le pipeline GR-05 est réutilisé à l'identique.
+A reconciliation job runs **every 15 minutes** (configurable period,
+default 15 min) and re-queries the runs of the active `StudentRepo` whose last
+webhook received is older than **N = 30 minutes** (configurable), to compensate for the
+lost webhooks. The GR-05 pipeline is reused identically.
 
-## Stockage — modèle `GradeRun`
+## Storage — the `GradeRun` model
 
-### GR-08 — Schéma
+### GR-08 — Schema
 
-Chaque passe CI éligible capturée produit un enregistrement immuable :
+Each eligible captured CI run produces an immutable record:
 
-| Champ | Type | Description |
+| Field | Type | Description |
 | --- | --- | --- |
-| `id` | uuid | Identifiant interne |
-| `student_repo_id` | fk | Dépôt étudiant concerné |
-| `workflow_run_id` | bigint | Id GitHub du run |
-| `run_attempt` | int | Tentative (re-run) |
-| `head_branch` | text | Branche du run (sélectionnée, cf. GR-05) |
-| `head_sha` | char(40) | Commit évalué |
+| `id` | uuid | Internal identifier |
+| `student_repo_id` | fk | Student repository concerned |
+| `workflow_run_id` | bigint | GitHub id of the run |
+| `run_attempt` | int | Attempt (re-run) |
+| `head_branch` | text | Branch of the run (selected, see GR-05) |
+| `head_sha` | char(40) | Evaluated commit |
 | `conclusion` | enum | `success`, `failure`, `cancelled`, `timed_out`, … |
-| `grade_points` | numeric nullable | Points obtenus |
-| `grade_max` | numeric nullable | Points maximum |
+| `grade_points` | numeric nullable | Points obtained |
+| `grade_max` | numeric nullable | Maximum points |
 | `parse_status` | enum | `ok`, `no_annotation`, `malformed`, `multiple`, `fallback` |
-| `after_deadline` | bool | `true` si le `head_sha` a été **reçu** (webhook push, heure serveur, GH-22) après la deadline, ou si son heure de réception est inconnue alors que la deadline est passée (GR-14) |
-| `completed_at` | timestamptz | Fin du run (heure GitHub) |
+| `after_deadline` | bool | `true` if the `head_sha` was **received** (push webhook, server time, GH-22) after the deadline, or if its reception time is unknown while the deadline has passed (GR-14) |
+| `completed_at` | timestamptz | End of the run (GitHub time) |
 | `created_at` | timestamptz | Insertion |
 
-### GR-09 — Note courante
+### GR-09 — Current grade
 
-Le champ dénormalisé `StudentRepo.current_grade` référence le `GradeRun` retenu : le
-plus récent (par `completed_at`) dont `after_deadline = false` et
-`parse_status IN (ok, fallback)`. Les runs non éligibles (branche non sélectionnée,
-commit bot) n'existant pas en base (GR-05), ils ne peuvent jamais devenir la note
-courante. L'historique complet reste consultable.
+The denormalized field `StudentRepo.current_grade` references the retained `GradeRun`: the
+most recent one (by `completed_at`) whose `after_deadline = false` and
+`parse_status IN (ok, fallback)`. Since the non-eligible runs (non-selected branch,
+bot commit) do not exist in the database (GR-05), they can never become the current
+grade. The full history remains consultable.
 
-## Affichage
+## Display
 
-### GR-10 — Vue student
+### GR-10 — Student view
 
-Après chaque passe CI, l'étudiant voit sur son assignment : la note indicative
-(`x/y` ou pass/fail), le commit évalué (hash court, lien GitHub), l'horodatage du run
-et la mention explicite « note indicative, non contractuelle ». La mise à jour est
-poussée en temps réel (SSE/WebSocket, cf. architecture).
+After each CI run, the student sees on their assignment: the indicative grade
+(`x/y` or pass/fail), the evaluated commit (short hash, GitHub link), the timestamp of the run
+and the explicit mention "indicative grade, not contractual". The update is
+pushed in real time (SSE/WebSocket, see architecture).
 
-### GR-11 — Vue teacher
+### GR-11 — Teacher view
 
-Le teacher voit, par assignment, un tableau des étudiants avec note courante, statut
-CI, dernier commit, et peut ouvrir l'historique des `GradeRun` d'un étudiant. Ces
-données sont aussi exposées par l'API à clé (§4).
+The teacher sees, per assignment, a table of the students with current grade, CI
+status, last commit, and can open the `GradeRun` history of a student. These
+data are also exposed by the key-based API (§4).
 
-## Gel à la deadline
+## Freeze at the deadline
 
-### GR-12 — Gel de la note
+### GR-12 — Grade freeze
 
-À la deadline (job de deadline GH-43, timezone Europe/Zurich), la note courante est
-gelée : `StudentRepo.frozen_grade_run_id` pointe le `GradeRun` retenu selon GR-09 au
-moment du gel. Les runs marqués `after_deadline = true` ne modifient jamais la note
-gelée.
+At the deadline (deadline job GH-43, Europe/Zurich timezone), the current grade is
+frozen: `StudentRepo.frozen_grade_run_id` points to the `GradeRun` retained according to GR-09 at
+the moment of the freeze. The runs marked `after_deadline = true` never modify the
+frozen grade.
 
-### GR-13 — Visibilité post-deadline
+### GR-13 — Post-deadline visibility
 
-Après la deadline, la note gelée et le statut restent visibles côté student et
-teacher. Les runs post-deadline (re-runs manuels, dépôt non verrouillé en stratégie
-deadline commit) sont affichés dans l'historique avec un badge « après deadline »,
-côté teacher uniquement.
+After the deadline, the frozen grade and the status remain visible on the student and
+teacher sides. The post-deadline runs (manual re-runs, repository not locked in the
+deadline commit strategy) are displayed in the history with an "after deadline" badge,
+on the teacher side only.
 
-### GR-14 — Critère de gel : heure de réception serveur
+### GR-14 — Freeze criterion: server reception time
 
-Le critère de gel est le **moment où la plateforme a reçu le commit évalué**, jamais
-l'horodatage git (fixé par le client, trivialement falsifiable via
-`GIT_COMMITTER_DATE`) :
+The freeze criterion is the **moment when the platform received the evaluated commit**, never
+the git timestamp (set by the client, trivially falsifiable through
+`GIT_COMMITTER_DATE`):
 
-1. À chaque webhook `push` sur une branche sélectionnée, le backend persiste le SHA
-   de tête et l'**heure de réception serveur** (GH-22).
-2. Un run compte pour la note gelée (`after_deadline = false`) si et seulement si son
-   `head_sha` a été reçu par webhook **avant la deadline** et porte sur une branche
-   sélectionnée (GR-05).
-3. Un `head_sha` sans heure de réception connue (webhook perdu, réconcilié après
-   coup) est traité `after_deadline = true` dès lors que la deadline est passée —
-   choix conservateur, arbitrable par le teacher au vu de l'historique.
-4. Un run portant sur un commit reçu avant la deadline mais **terminé après** compte
-   pour la note gelée : le gel effectif attend la fin des runs en cours sur des
-   commits éligibles, dans la limite d'un **délai de grâce configurable (défaut
-   30 min)** après la deadline. Passé ce délai, `frozen_grade_run_id` est figé
-   définitivement.
+1. At each `push` webhook on a selected branch, the backend persists the head
+   SHA and the **server reception time** (GH-22).
+2. A run counts for the frozen grade (`after_deadline = false`) if and only if its
+   `head_sha` was received by webhook **before the deadline** and bears on a selected
+   branch (GR-05).
+3. A `head_sha` without a known reception time (lost webhook, reconciled after
+   the fact) is treated as `after_deadline = true` as soon as the deadline has passed —
+   a conservative choice, arbitrable by the teacher in view of the history.
+4. A run bearing on a commit received before the deadline but **finished after** counts
+   for the frozen grade: the effective freeze waits for the end of the runs in progress on
+   eligible commits, within the limit of a **configurable grace period (default
+   30 min)** after the deadline. Past that period, `frozen_grade_run_id` is fixed
+   definitively.
 
-Ce critère est la référence unique du gel (US-14, US-22, GH-42, GH-43).
+This criterion is the single reference of the freeze (US-14, US-22, GH-42, GH-43).
 
-## Métriques de dépôt
+## Repository metrics
 
-### GR-15 — Collecte
+### GR-15 — Collection
 
-Le backend maintient par `StudentRepo`, alimenté par les webhooks `push` et
-`workflow_run` (jamais par polling en régime nominal, cf. GR-07 pour le rattrapage) :
+The backend maintains per `StudentRepo`, fed by the `push` and
+`workflow_run` webhooks (never by polling in nominal operation, see GR-07 for the catch-up):
 
-- `last_commit_at` et `last_commit_sha` (dernier push sur les branches sélectionnées,
-  commits du bot et refs `sync/*` exclus), avec l'heure de réception serveur par SHA
-  (GH-22) ;
-- `ci_status` : `none` / `pending` / `pass` / `fail` — `pending` est posé par les
-  événements `workflow_run` `requested`/`in_progress` (GR-04), les autres valeurs par
-  GR-05/GR-06. Cette énumération est la source unique des valeurs exposées (AU-35) ;
-- `current_grade` (GR-09) et horodatage du dernier run.
+- `last_commit_at` and `last_commit_sha` (last push on the selected branches,
+  bot commits and `sync/*` refs excluded), with the server reception time per SHA
+  (GH-22);
+- `ci_status`: `none` / `pending` / `pass` / `fail` — `pending` is set by the
+  `workflow_run` `requested`/`in_progress` events (GR-04), the other values by
+  GR-05/GR-06. This enumeration is the single source of the exposed values (AU-35);
+- `current_grade` (GR-09) and timestamp of the last run.
 
-Ces métriques alimentent le tableau teacher et l'API à clé.
+These metrics feed the teacher table and the key-based API.
 
-## Extensions et cas limites
+## Extensions and edge cases
 
-### GR-16 — Extension future : artefact de note signé
+### GR-16 — Future extension: signed grade artifact
 
-Hors périmètre v1. Si l'intégrité de la note devient requise (au-delà de
-l'indicatif), `grading.yml` publie un artefact `grade.json` (barème détaillé par
-exercice) que le backend télécharge et vérifie ; cette variante remplace alors
-l'annotation GR-02. Référencée par GR-02 comme alternative écartée pour le MVP.
+Out of the v1 scope. If the integrity of the grade becomes required (beyond the
+indicative), `grading.yml` publishes a `grade.json` artifact (detailed scale per
+exercise) that the backend downloads and verifies; this variant then replaces the
+GR-02 annotation. Referenced by GR-02 as an alternative ruled out for the MVP.
 
-### GR-17 — Table des cas limites
+### GR-17 — Table of the edge cases
 
-| Cas | Comportement |
+| Case | Behavior |
 | --- | --- |
-| Run échoué (`conclusion=failure`) avec annotation `GRADE` présente | La note est capturée normalement (le step notice tourne en `if: always()`) ; `conclusion` reflète l'échec |
-| Run échoué sans annotation | `GradeRun` avec `parse_status=no_annotation`, `grade_points=null` ; la note courante n'est pas modifiée ; statut CI = `fail` |
-| Annotation absente sur un run réussi | `parse_status=no_annotation` ; alerte visible côté teacher (probable `grading.yml` défectueux) |
-| Annotation malformée (regex GR-02 non satisfaite, `points > max`, `max = 0`) | `parse_status=malformed`, `grade_points=null`, message d'erreur conservé pour diagnostic teacher |
-| Plusieurs annotations `GRADE` dans le même run, **même à valeurs identiques** | `parse_status=multiple`, `grade_points=null`, alerte teacher (mitigation anti-forge, GR-02) |
-| Run annulé ou `timed_out` | `GradeRun` enregistré avec la conclusion ; pas d'extraction de note |
-| Run sur une ref `sync/*`, une branche non sélectionnée ou un commit bot (revert, deadline commit) | **Ignoré** : aucun `GradeRun` créé (GR-05, GH-44, GH-51) |
-| Re-run après deadline (`run_attempt > 1` ou nouveau run sur commit reçu après l'échéance) | Enregistré avec `after_deadline=true` ; note gelée inchangée (GR-12) ; visible teacher seulement (GR-13) |
-| Push post-deadline avec commit antidaté (`GIT_COMMITTER_DATE`) | Sans effet : le gel se fonde sur l'heure de réception serveur du webhook, pas sur l'horodatage git (GR-14) |
-| Webhook dupliqué ou rejoué | Idempotence par (`repo`, `run_id`, `run_attempt`) (GR-05) |
-| `grading.yml` supprimé par l'étudiant | S'il est protégé (défaut, GH-30/GR-01) : revert automatique ; les runs intermédiaires sans grading passent en fallback GR-06. S'il a été volontairement déprotégé par le teacher : bascule assumée en fallback |
-| Annotation `GRADE` forgée par le code étudiant | Risque documenté et accepté (note indicative) ; une annotation surnuméraire invalide la note (GR-02, hypothèse H5) |
-| Dépôt en état « protected files en conflit » | GradeRuns enregistrés, note marquée « à vérifier » côté teacher (GH-35) |
+| Failed run (`conclusion=failure`) with a `GRADE` annotation present | The grade is captured normally (the notice step runs with `if: always()`); `conclusion` reflects the failure |
+| Failed run without an annotation | `GradeRun` with `parse_status=no_annotation`, `grade_points=null`; the current grade is not modified; CI status = `fail` |
+| Annotation absent on a successful run | `parse_status=no_annotation`; alert visible on the teacher side (probably a defective `grading.yml`) |
+| Malformed annotation (GR-02 regex not satisfied, `points > max`, `max = 0`) | `parse_status=malformed`, `grade_points=null`, error message kept for teacher diagnosis |
+| Several `GRADE` annotations in the same run, **even with identical values** | `parse_status=multiple`, `grade_points=null`, teacher alert (anti-forgery mitigation, GR-02) |
+| Run cancelled or `timed_out` | `GradeRun` recorded with the conclusion; no grade extraction |
+| Run on a `sync/*` ref, a non-selected branch or a bot commit (revert, deadline commit) | **Ignored**: no `GradeRun` created (GR-05, GH-44, GH-51) |
+| Re-run after the deadline (`run_attempt > 1` or new run on a commit received after the due time) | Recorded with `after_deadline=true`; frozen grade unchanged (GR-12); visible to the teacher only (GR-13) |
+| Post-deadline push with a backdated commit (`GIT_COMMITTER_DATE`) | Without effect: the freeze is based on the server reception time of the webhook, not on the git timestamp (GR-14) |
+| Duplicated or replayed webhook | Idempotence by (`repo`, `run_id`, `run_attempt`) (GR-05) |
+| `grading.yml` deleted by the student | If it is protected (default, GH-30/GR-01): automatic revert; the intermediate runs without grading fall back to GR-06. If it was deliberately unprotected by the teacher: assumed switch to the fallback |
+| `GRADE` annotation forged by the student code | Risk documented and accepted (indicative grade); a supernumerary annotation invalidates the grade (GR-02, assumption H5) |
+| Repository in the "protected files in conflict" state | GradeRuns recorded, grade marked "to be verified" on the teacher side (GH-35) |
 
-# API à clé et CLI
+# Key-based API and CLI
 
-Objectif : permettre au CLI (§4.4) de lister puis cloner les dépôts étudiants d'un
+Goal: allow the CLI (§4.4) to list then clone the student repositories of an
 assignment.
 
-## Cycle de vie des clés
+## Life cycle of the keys
 
-- **AU-29** — Un teacher MUST pouvoir créer plusieurs clés API, chacune avec : label
-  libre, scopes, liste de classrooms autorisées (ou `*` = toutes ses classrooms), date
-  d'expiration optionnelle (défaut SHOULD : 12 mois).
-- **AU-30** — Format de clé : `hgc_` + 40 caractères aléatoires (≥ 200 bits, CSPRNG).
-  La clé complète n'est affichée qu'une seule fois à la création. En base :
-  `{ id, teacher_id, label, key_prefix (12 premiers caractères, pour identification),
-  key_hash = SHA-256(clé), scopes, classroom_ids, expires_at, created_at,
-  last_used_at, revoked_at }`. La clé en clair n'est jamais stockée.
-- **AU-31** — Scopes v1 : `classrooms:read` (classrooms, rosters, assignments) et
-  `repos:read` (liste des dépôts étudiants et métadonnées de clone). Aucun scope
-  d'écriture en v1.
-- **AU-32** — Révocation immédiate par le teacher (soft delete `revoked_at`) ; une clé
-  révoquée ou expirée MUST être refusée avec `401`. La liste des clés du teacher
-  affiche prefix, label, scopes, `last_used_at`, expiration — jamais la clé.
-- **AU-33** — Une clé n'accorde jamais plus que les droits courants de son teacher :
-  si le teacher perd une classroom, la clé la perd aussi.
+- **AU-29** — A teacher MUST be able to create several API keys, each with: a free-form
+  label, scopes, a list of authorized classrooms (or `*` = all their classrooms), an optional
+  expiration date (SHOULD default: 12 months).
+- **AU-30** — Key format: `hgc_` + 40 random characters (≥ 200 bits, CSPRNG).
+  The full key is displayed only once at creation time. In the database:
+  `{ id, teacher_id, label, key_prefix (first 12 characters, for identification),
+  key_hash = SHA-256(key), scopes, classroom_ids, expires_at, created_at,
+  last_used_at, revoked_at }`. The key in clear text is never stored.
+- **AU-31** — v1 scopes: `classrooms:read` (classrooms, rosters, assignments) and
+  `repos:read` (list of the student repositories and clone metadata). No write
+  scope in v1.
+- **AU-32** — Immediate revocation by the teacher (soft delete `revoked_at`); a revoked
+  or expired key MUST be refused with `401`. The teacher's key list
+  displays prefix, label, scopes, `last_used_at`, expiration — never the key.
+- **AU-33** — A key never grants more than the current rights of its teacher:
+  if the teacher loses a classroom, the key loses it as well.
 
 ## Endpoints
 
-- **AU-34** — Authentification : en-tête `Authorization: Bearer hgc_...`. Réponses
-  d'erreur : `401` (clé absente/invalide/révoquée/expirée), `403` (scope ou classroom
-  hors périmètre), `404` (ressource inexistante ou hors périmètre — indiscernables).
-  Endpoints v1 :
+- **AU-34** — Authentication: `Authorization: Bearer hgc_...` header. Error
+  responses: `401` (key absent/invalid/revoked/expired), `403` (scope or classroom
+  out of perimeter), `404` (non-existent resource or out of perimeter — indistinguishable).
+  v1 endpoints:
 
-| Méthode | Chemin | Scope | Rôle |
+| Method | Path | Scope | Role |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/classrooms` | `classrooms:read` | Lister les classrooms accessibles |
-| `GET` | `/api/v1/classrooms/{id}/assignments` | `classrooms:read` | Lister les assignments d'une classroom |
-| `GET` | `/api/v1/assignments/{id}/repos` | `repos:read` | Lister les dépôts étudiants (cible du CLI) |
+| `GET` | `/api/v1/classrooms` | `classrooms:read` | List the accessible classrooms |
+| `GET` | `/api/v1/classrooms/{id}/assignments` | `classrooms:read` | List the assignments of a classroom |
+| `GET` | `/api/v1/assignments/{id}/repos` | `repos:read` | List the student repositories (CLI target) |
 
-- **AU-35** — Format de réponse : JSON, enveloppe
-  `{ "data": [...], "pagination": { "page", "per_page", "total" } }`, pagination par
-  `?page=&per_page=` (défaut 50, max 200). Les valeurs de `ci_status` sont celles de
-  l'énumération GR-15 (`none` / `pending` / `pass` / `fail`) ; la note est exposée en
-  paire `grade_points` / `grade_max` (GR-08), sans normalisation. Réponse de
-  `GET /api/v1/assignments/{id}/repos` :
+- **AU-35** — Response format: JSON, envelope
+  `{ "data": [...], "pagination": { "page", "per_page", "total" } }`, pagination by
+  `?page=&per_page=` (default 50, max 200). The values of `ci_status` are those of
+  the GR-15 enumeration (`none` / `pending` / `pass` / `fail`); the grade is exposed as a
+  `grade_points` / `grade_max` pair (GR-08), without normalization. Response of
+  `GET /api/v1/assignments/{id}/repos`:
 
 ```json
 {
@@ -850,84 +849,84 @@ assignment.
 }
 ```
 
-- **AU-36** — Champs nullables explicites : `github_login`, `accepted_at`,
-  `last_commit_*`, `ci_status`, `grade_points`, `grade_max` valent `null` tant que
-  l'événement correspondant n'a pas eu lieu (étudiant n'ayant pas accepté = entrée
-  présente avec `repo: null`), afin que le CLI voie aussi les étudiants sans dépôt.
-- **AU-37** — L'API à clé ne fournit PAS de credentials git : le clone s'effectue avec
-  les droits GitHub propres du teacher (membre de l'organisation). L'API ne sert que
-  la découverte des URLs et métadonnées.
+- **AU-36** — Explicit nullable fields: `github_login`, `accepted_at`,
+  `last_commit_*`, `ci_status`, `grade_points`, `grade_max` are `null` as long as
+  the corresponding event has not taken place (a student who has not accepted = entry
+  present with `repo: null`), so that the CLI also sees the students without a repository.
+- **AU-37** — The key-based API does NOT provide git credentials: the clone is performed with
+  the teacher's own GitHub rights (member of the organization). The API only serves
+  the discovery of the URLs and metadata.
 
-## Considérations de sécurité
+## Security considerations
 
-- **AU-38** — Transport : HTTPS obligatoire partout (redirection + HSTS). Comparaison
-  des hash de clés en temps constant.
-- **AU-39** — Rate limiting : API à clé SHOULD être limitée à 120 req/min par clé
-  (réponse `429` + `Retry-After`) ; endpoints d'auth (callbacks OIDC/OAuth, claim)
-  limités par IP.
-- **AU-40** — Rotation : la création d'une nouvelle clé pendant qu'une ancienne est
-  active MUST être possible (rotation sans interruption : créer → basculer le CLI →
-  révoquer). Le système SHOULD notifier le teacher avant l'expiration d'une clé
+- **AU-38** — Transport: HTTPS mandatory everywhere (redirection + HSTS). Comparison
+  of the key hashes in constant time.
+- **AU-39** — Rate limiting: the key-based API SHOULD be limited to 120 req/min per key
+  (`429` response + `Retry-After`); auth endpoints (OIDC/OAuth callbacks, claim)
+  limited by IP.
+- **AU-40** — Rotation: the creation of a new key while an old one is
+  active MUST be possible (rotation without interruption: create → switch the CLI over →
+  revoke). The system SHOULD notify the teacher before the expiration of a key
   (NT-03).
-- **AU-41** — Aucun secret dans les logs : clés API (au-delà du prefix), tokens
-  OIDC/OAuth, cookies de session et `client_secret` MUST être masqués dans les logs
-  applicatifs, journaux d'accès et messages d'erreur. Les URLs de callback contenant
-  `code` ne sont pas journalisées en clair.
-- **AU-42** — Audit : événements journalisés avec acteur et horodatage —
-  création/révocation de clé, liaison/déliaison GitHub, claim et rattachement manuel
-  de roster, désinscription, changement de rôle.
-- **AU-43** — Secrets serveur (client secrets OIDC/GitHub, clé privée GitHub App)
-  MUST provenir de l'environnement ou d'un gestionnaire de secrets, jamais du dépôt ni
-  de la base.
+- **AU-41** — No secret in the logs: API keys (beyond the prefix),
+  OIDC/OAuth tokens, session cookies and `client_secret` MUST be masked in the application
+  logs, access logs and error messages. The callback URLs containing
+  `code` are not logged in clear text.
+- **AU-42** — Audit: events logged with actor and timestamp —
+  key creation/revocation, GitHub linking/unlinking, claim and manual roster
+  attachment, unenrollment, role change.
+- **AU-43** — Server secrets (OIDC/GitHub client secrets, GitHub App private key)
+  MUST come from the environment or from a secret manager, never from the repository or
+  from the database.
 
-## CLI (livrable v1, hypothèse H7)
+## CLI (v1 deliverable, assumption H7)
 
-- **CLI-01** — Un CLI `hgc` est livré (binaire ou paquet npm). Configuration :
-  variables d'environnement `HGC_API_KEY` et `HGC_BASE_URL`, ou fichier
-  `~/.config/hgc/config.toml` (la variable d'environnement prime). La clé n'est
-  jamais passée en argument de ligne de commande (visible dans l'historique et
+- **CLI-01** — A `hgc` CLI is delivered (binary or npm package). Configuration:
+  environment variables `HGC_API_KEY` and `HGC_BASE_URL`, or the file
+  `~/.config/hgc/config.toml` (the environment variable prevails). The key is
+  never passed as a command-line argument (visible in the history and in
   `ps`).
-- **CLI-02** — Commandes v1 :
+- **CLI-02** — v1 commands:
 
-  1. `hgc classrooms` — liste les classrooms accessibles.
-  2. `hgc assignments <classroom-id>` — liste les assignments d'une classroom.
-  3. `hgc repos <assignment-id>` — liste les dépôts étudiants (tableau ; `--json`
-     pour la sortie brute AU-35).
-  4. `hgc clone <assignment-id> [--dir <path>] [--ssh | --https]` — clone en masse
-     les dépôts de l'assignment dans un répertoire par étudiant ; idempotent : si le
-     dépôt est déjà cloné, un `git fetch` est effectué à la place.
-- **CLI-03** — Le clone utilise les credentials git **propres du teacher** (AU-37) :
-  le CLI n'injecte aucun token dans les URLs. Parallélisme borné (défaut : 4 clones
-  simultanés, option `--parallel`) pour respecter les quotas GitHub.
-- **CLI-04** — Codes de sortie : `0` succès complet, `1` échec partiel (au moins un
-  dépôt en erreur, listé sur stderr), `2` erreur d'authentification ou d'usage. Les
-  étudiants sans dépôt (`repo: null`, AU-36) sont listés en fin d'exécution sans
-  constituer un échec.
+  1. `hgc classrooms` — lists the accessible classrooms.
+  2. `hgc assignments <classroom-id>` — lists the assignments of a classroom.
+  3. `hgc repos <assignment-id>` — lists the student repositories (table; `--json`
+     for the raw AU-35 output).
+  4. `hgc clone <assignment-id> [--dir <path>] [--ssh | --https]` — bulk-clones
+     the repositories of the assignment into one directory per student; idempotent: if the
+     repository is already cloned, a `git fetch` is performed instead.
+- **CLI-03** — The clone uses the teacher's **own** git credentials (AU-37):
+  the CLI injects no token into the URLs. Bounded parallelism (default: 4 simultaneous
+  clones, `--parallel` option) to respect the GitHub quotas.
+- **CLI-04** — Exit codes: `0` complete success, `1` partial failure (at least one
+  repository in error, listed on stderr), `2` authentication or usage error. The
+  students without a repository (`repo: null`, AU-36) are listed at the end of the run without
+  constituting a failure.
 
 # Notifications (NT)
 
-Cadre transverse pour toutes les mentions « notifié » des exigences (NFR-17 du cahier
-des charges).
+Cross-cutting frame for all the "notified" mentions of the requirements (NFR-17 of the requirements
+specification).
 
-- **NT-01** — Canal **in-app obligatoire** : centre de notifications dans le portail
-  (badge + liste horodatée, marquage lu/non-lu). Toute exigence « X est notifié » est
-  satisfaite par une notification in-app.
-- **NT-02** — Canal **e-mail optionnel** : opt-in par utilisateur, envoi asynchrone
-  avec reprise sur échec, contenu minimal (lien vers le portail, pas de données
-  sensibles). Aucun comportement fonctionnel ne dépend de la délivrance d'un e-mail.
-- **NT-03** — Événements notifiés v1 :
+- **NT-01** — **Mandatory in-app** channel: notification center in the portal
+  (badge + timestamped list, read/unread marking). Any "X is notified" requirement is
+  satisfied by an in-app notification.
+- **NT-02** — **Optional e-mail** channel: opt-in per user, asynchronous sending
+  with retry on failure, minimal content (link to the portal, no sensitive
+  data). No functional behavior depends on the delivery of an e-mail.
+- **NT-03** — v1 notified events:
 
-| Événement | Destinataire | Référence |
+| Event | Recipient | Reference |
 | --- | --- | --- |
-| Échec de provisionnement | Teacher + student | US-13, GH-20 |
-| Invitation expirée / ré-invitation | Student | GH-24 |
-| Revert de fichiers protégés | Student (teacher : compteur en vue dépôt) | GH-34 |
-| Dépôt « protected files en conflit » | Teacher + student | GH-33, GH-35 |
-| Force push détecté (fallback) | Teacher + student | GH-22 |
-| Installation GitHub App dégradée | Teacher | GH-06 |
-| Synchronisation terminée (récapitulatif) | Teacher | US-06 |
-| PR de synchro ouverte / mise à jour | Student | GH-51 |
-| Reliaison GitHub d'un étudiant | Teachers des classrooms concernées | AU-12 |
-| Conflit de claim roster | Teacher | AU-21 |
-| Expiration prochaine d'une clé API | Teacher | AU-40 |
-| Deadline appliquée (récapitulatif par assignment) | Teacher | GH-43 |
+| Provisioning failure | Teacher + student | US-13, GH-20 |
+| Expired invitation / re-invitation | Student | GH-24 |
+| Revert of protected files | Student (teacher: counter in the repository view) | GH-34 |
+| Repository in "protected files in conflict" | Teacher + student | GH-33, GH-35 |
+| Force push detected (fallback) | Teacher + student | GH-22 |
+| Degraded GitHub App installation | Teacher | GH-06 |
+| Synchronization finished (summary) | Teacher | US-06 |
+| Synchronization PR opened / updated | Student | GH-51 |
+| GitHub re-linking of a student | Teachers of the classrooms concerned | AU-12 |
+| Roster claim conflict | Teacher | AU-21 |
+| Upcoming expiration of an API key | Teacher | AU-40 |
+| Deadline applied (summary per assignment) | Teacher | GH-43 |

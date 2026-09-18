@@ -1,9 +1,9 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * Les tests qui exigent Podman rootful, Forgejo ou Keycloak ne tournent que
- * si CODESPACE_INTEGRATION=1 (`pnpm test:integration`) : le CI du monorepo
- * n'a aucun de ces services. Les tests unitaires tournent partout.
+ * The tests that require rootful Podman, Forgejo or Keycloak only run
+ * if CODESPACE_INTEGRATION=1 (`pnpm test:integration`): the monorepo CI
+ * has none of those services. The unit tests run everywhere.
  */
 const integration = [
   "src/engine/index.test.ts",

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# P2 — défait ce que setup.sh a posé : tables nft, ancrage, réseau.
-# Ne touche à aucune autre table nft ni à aucun autre réseau Podman.
-# Les conteneurs de session encore attachés au réseau bloquent sa suppression ;
-# on les liste plutôt que de les tuer.
+# P2 — undoes what setup.sh put in place: nft tables, anchor, network.
+# Touches no other nft table and no other Podman network.
+# Session containers still attached to the network block its removal;
+# we list them rather than kill them.
 set -uo pipefail
 . "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
@@ -11,36 +11,36 @@ ok()   { printf '  ok    %s\n' "$*"; }
 info() { printf '  ..    %s\n' "$*"; }
 warn() { printf '  !!    %s\n' "$*" >&2; }
 
-echo "== règles nftables =="
+echo "== nftables rules =="
 if cs_is_root; then
 	for fam in inet bridge; do
 		if nft list table "$fam" codespace >/dev/null 2>&1; then
-			nft delete table "$fam" codespace && ok "table $fam codespace supprimée"
+			nft delete table "$fam" codespace && ok "table $fam codespace deleted"
 		else
-			info "table $fam codespace absente"
+			info "table $fam codespace absent"
 		fi
 	done
 else
-	warn "pas root : tables nft laissées en place."
-	warn "BLOQUÉ : exécuter  sudo $CS_NET_DIR/teardown.sh"
+	warn "not root: nft tables left in place."
+	warn "BLOCKED: run  sudo $CS_NET_DIR/teardown.sh"
 fi
 
-echo "== conteneur d'ancrage =="
+echo "== anchor container =="
 if pd container exists "$CS_ANCHOR" 2>/dev/null; then
-	pd rm -f "$CS_ANCHOR" >/dev/null && ok "ancrage $CS_ANCHOR supprimé"
+	pd rm -f "$CS_ANCHOR" >/dev/null && ok "anchor $CS_ANCHOR deleted"
 else
-	info "ancrage absent"
+	info "anchor absent"
 fi
 
-echo "== réseau Podman =="
+echo "== Podman network =="
 if pd network exists "$CS_NET" 2>/dev/null; then
 	rest="$(pd ps -a --filter "network=$CS_NET" --format '{{.Names}}' | tr '\n' ' ')"
 	if [ -n "${rest// /}" ]; then
-		warn "conteneurs encore attachés à $CS_NET : $rest"
-		warn "les retirer puis relancer ce script."
+		warn "containers still attached to $CS_NET: $rest"
+		warn "remove them then run this script again."
 		exit 1
 	fi
-	pd network rm "$CS_NET" >/dev/null && ok "réseau $CS_NET supprimé"
+	pd network rm "$CS_NET" >/dev/null && ok "network $CS_NET deleted"
 else
-	info "réseau $CS_NET absent"
+	info "network $CS_NET absent"
 fi

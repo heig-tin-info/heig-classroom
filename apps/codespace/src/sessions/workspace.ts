@@ -1,33 +1,32 @@
 /**
- * Amorçage de l'espace de travail `<vol>/work` : un clone du dépôt de transit,
- * avec `origin` pointé sur le canal Git du portail.
+ * Seeding of the `<vol>/work` workspace: a clone of the staging repository,
+ * with `origin` pointed at the portal's Git channel.
  *
- * **Le moment compte.** Cette fonction s'exécute *avant* le `podman run` :
- * après lui, l'option `:U` a donné `work/` à la plage d'UID que
- * `--userns=auto` a tirée pour le conteneur, et le portail (uid `codespace`)
- * ne peut plus y créer ni y modifier un fichier — en particulier pas
- * `work/.git/config`. C'est la même contrainte que celle décrite dans
- * `shadow.ts`, vue du côté écriture.
+ * **Timing matters.** This function runs *before* the `podman run`: after it,
+ * the `:U` option has given `work/` to the UID range that `--userns=auto` drew
+ * for the container, and the portal (uid `codespace`) can no longer create or
+ * modify a file there — in particular not `work/.git/config`. This is the same
+ * constraint as the one described in `shadow.ts`, seen from the write side.
  *
- * Conséquence portée par `manager.ts` : l'identifiant de session est **stable
- * pour la vie du volume**, parce que le remote `origin` écrit ici le contient
- * et qu'il ne sera jamais réécrit.
+ * Consequence carried by `manager.ts`: the session id is **stable for the
+ * lifetime of the volume**, because the `origin` remote written here contains
+ * it and it will never be rewritten.
  *
- * Trois états sont distingués, et c'est le correctif du 2026-09-17 :
+ * Three states are distinguished, and that is the 2026-09-17 fix:
  *
- *  - `work/.git` absent → amorçage complet depuis le dépôt de transit ;
- *  - `work/.git` présent mais **sans aucun commit** (le cas d'une session dont
- *    le dépôt de transit était vide au premier démarrage, faute de jeton pour
- *    récupérer le dépôt privé de l'étudiant) → on complète : fetch, branche
- *    locale sur la branche par défaut, suivi de `origin/<branche>`. Les
- *    fichiers non suivis que l'étudiant a déjà créés sont conservés —
- *    `checkout -B` depuis une branche non née ne les touche pas ;
- *  - même cas, mais `work/` appartient déjà au conteneur : l'achèvement est
- *    impossible depuis l'hôte et `manager.ts` le fait par `engine.exec` après
- *    le démarrage (`completionScript`).
+ *  - `work/.git` absent → full seeding from the staging repository;
+ *  - `work/.git` present but **with no commit at all** (the case of a session
+ *    whose staging repository was empty at the first start, for lack of a token
+ *    to fetch the student's private repository) → it is completed: fetch, local
+ *    branch on the default branch, tracking `origin/<branch>`. The untracked
+ *    files the student has already created are kept — `checkout -B` from an
+ *    unborn branch does not touch them;
+ *  - same case, but `work/` already belongs to the container: completion is
+ *    impossible from the host and `manager.ts` does it through `engine.exec`
+ *    after the start (`completionScript`).
  *
- * Un dépôt qui porte déjà au moins un commit n'est **jamais** retouché :
- * l'étudiant est maître de son dépôt.
+ * A repository that already carries at least one commit is **never** touched
+ * again: the student owns their repository.
  */
 import { access, constants } from "node:fs/promises";
 import { join } from "node:path";
@@ -42,9 +41,9 @@ const IDENTITY = {
 } as const;
 
 /**
- * Identité git de l'étudiant, telle que la table `users` la connaît
- * (`display_name`, `email`). Elle n'est pas un secret : c'est le nom et
- * l'adresse académique que l'étudiant lit déjà dans classroom.
+ * The student's git identity, as the `users` table knows it (`display_name`,
+ * `email`). It is not a secret: it is the name and the academic address the
+ * student already reads in classroom.
  */
 export interface GitIdentity {
   name: string;
@@ -54,15 +53,15 @@ export interface GitIdentity {
 export interface WorkspaceOptions {
   paths: StagingPaths;
   sessionId: string;
-  /** `portal.internal` : le nom que `--add-host` donne à la passerelle. */
+  /** `portal.internal`: the name `--add-host` gives to the gateway. */
   gitRemoteHost: string;
   gitRemotePort: number;
   /**
-   * Identité à écrire dans `work/.git/config` si elle n'y est pas déjà. Les
-   * variables `GIT_AUTHOR_*` / `GIT_COMMITTER_*` du conteneur suffisent à
-   * `git commit`, mais l'étudiant qui tape `git config user.name` doit lire
-   * quelque chose, et une identité posée par l'étudiant lui-même n'est
-   * jamais écrasée.
+   * Identity to write into `work/.git/config` if it is not there already. The
+   * container's `GIT_AUTHOR_*` / `GIT_COMMITTER_*` variables are enough for
+   * `git commit`, but the student who types `git config user.name` must read
+   * something, and an identity set by the student themselves is never
+   * overwritten.
    */
   identity?: GitIdentity;
   log?: { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
@@ -80,9 +79,9 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /**
- * `work/` appartient à la plage d'UID du conteneur dès le premier `:U`, et le
- * portail n'y écrit plus. On le mesure plutôt que de le déduire de l'état de
- * la session : un `podman run` avorté laisse un répertoire encore à nous.
+ * `work/` belongs to the container's UID range from the first `:U` on, and the
+ * portal no longer writes there. This is measured rather than deduced from the
+ * session state: an aborted `podman run` leaves a directory still ours.
  */
 async function writable(path: string): Promise<boolean> {
   return access(path, constants.W_OK | constants.X_OK).then(
@@ -92,29 +91,29 @@ async function writable(path: string): Promise<boolean> {
 }
 
 /**
- * `safe.directory` : après le premier `:U`, `work/` n'appartient plus au
- * portail et git refuse d'y travailler (« detected dubious ownership »).
- * `HOME` étant déjà neutralisé par `gitRunner`, il n'existe aucune
- * configuration globale où poser l'exception : elle se pose à l'appel.
+ * `safe.directory`: after the first `:U`, `work/` no longer belongs to the
+ * portal and git refuses to work there ("detected dubious ownership"). `HOME`
+ * being already neutralised by `gitRunner`, there is no global configuration
+ * where the exception could be set: it is set on the call itself.
  */
 function gitWork(workDir: string, args: string[]): Promise<string> {
   return git(["-c", `safe.directory=${workDir}`, "-C", workDir, ...args], { env: IDENTITY });
 }
 
 export interface WorkspaceState {
-  /** `work/.git` existe. */
+  /** `work/.git` exists. */
   present: boolean;
-  /** Le portail peut encore y écrire (avant le premier `:U`). */
+  /** The portal can still write there (before the first `:U`). */
   writable: boolean;
-  /** `HEAD` pointe sur un commit. Faux pour une branche non née. */
+  /** `HEAD` points at a commit. False for an unborn branch. */
   born: boolean;
-  /** Branche courante, même non née. */
+  /** Current branch, even unborn. */
   branch: string | null;
-  /** `@{upstream}` résolu, `null` si la branche n'a aucun suivi. */
+  /** `@{upstream}` resolved, `null` if the branch has no tracking. */
   upstream: string | null;
 }
 
-/** Ce que le portail sait lire de `work/` sans y écrire. */
+/** What the portal can read from `work/` without writing to it. */
 export async function inspectWorkspace(workDir: string): Promise<WorkspaceState> {
   const present = await exists(join(workDir, ".git"));
   const canWrite = await writable(workDir);
@@ -142,16 +141,16 @@ export async function inspectWorkspace(workDir: string): Promise<WorkspaceState>
   };
 }
 
-/** Une valeur quelconque, rendue inoffensive pour `sh -lc`. */
+/** An arbitrary value, made harmless for `sh -lc`. */
 export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 /**
- * Pose `user.name` / `user.email` dans `work/.git/config`, **sans jamais
- * écraser** ce qui s'y trouve déjà : si l'étudiant a posé la sienne, elle
- * reste. Appelée depuis l'hôte, donc seulement tant que `work/` nous
- * appartient (avant le premier `:U`).
+ * Sets `user.name` / `user.email` in `work/.git/config`, **never overwriting**
+ * what is already there: if the student has set their own, it stays. Called
+ * from the host, hence only as long as `work/` belongs to us (before the first
+ * `:U`).
  */
 async function writeIdentity(workDir: string, identity: GitIdentity): Promise<void> {
   const present = async (key: string): Promise<boolean> =>
@@ -165,12 +164,12 @@ async function writeIdentity(workDir: string, identity: GitIdentity): Promise<vo
 }
 
 /**
- * Même chose, jouée **dans le conteneur** quand `work/` ne nous appartient
- * plus. Aucun secret n'y entre : un nom et une adresse académique.
+ * The same thing, played **inside the container** when `work/` no longer
+ * belongs to us. No secret gets in: a name and an academic address.
  *
- * Le script sort sans rien faire quand `/work` n'est pas un dépôt — c'est le
- * cas d'un devoir sans dépôt de transit — et ne touche à rien quand l'étudiant
- * a déjà posé son identité.
+ * The script exits without doing anything when `/work` is not a repository —
+ * the case of an assignment without a staging repository — and touches nothing
+ * when the student has already set their identity.
  */
 export function identityScript(identity: GitIdentity): string {
   const name = shellQuote(identity.name);
@@ -187,17 +186,17 @@ export function identityScript(identity: GitIdentity): string {
 }
 
 /**
- * Script d'achèvement, joué **dans le conteneur** quand `work/` ne nous
- * appartient plus. Il fait ce que `ensureWorkspace` fait depuis l'hôte, avec
- * les mêmes garanties :
+ * Completion script, played **inside the container** when `work/` no longer
+ * belongs to us. It does what `ensureWorkspace` does from the host, with the
+ * same guarantees:
  *
- *  - `fetch origin` passe par `http://portal.internal:9418/git/<session>`, que
- *    l'adresse IP source authentifie : **aucun secret n'entre dans le
- *    conteneur** (invariant 1) ;
- *  - `checkout -B` depuis une branche non née conserve les fichiers non suivis
- *    que l'étudiant a déjà écrits ; il refuse plutôt que d'écraser un fichier
- *    non suivi qu'apporte le dépôt, et le message le dit ;
- *  - `--set-upstream-to` rend `git pull` et `git push` sans argument corrects.
+ *  - `fetch origin` goes through `http://portal.internal:9418/git/<session>`,
+ *    which the source IP address authenticates: **no secret enters the
+ *    container** (invariant 1);
+ *  - `checkout -B` from an unborn branch keeps the untracked files the student
+ *    has already written; it refuses rather than overwriting an untracked file
+ *    the repository brings, and the message says so;
+ *  - `--set-upstream-to` makes argument-less `git pull` and `git push` correct.
  */
 export function completionScript(branch: string): string {
   return [
@@ -211,21 +210,22 @@ export function completionScript(branch: string): string {
 }
 
 export interface EnsureWorkspaceResult {
-  /** `work/.git` a été créé par cet appel. */
+  /** `work/.git` was created by this call. */
   created: boolean;
-  /** Un dépôt existant, sans commit, a été rempli par cet appel. */
+  /** An existing repository, without a commit, was filled by this call. */
   completed: boolean;
-  /** Branche locale posée, avec suivi. `null` : le dépôt de transit est vide. */
+  /** Local branch set, with tracking. `null`: the staging repository is empty. */
   branch: string | null;
   /**
-   * L'achèvement reste à faire et ne peut pas l'être depuis l'hôte : `work/`
-   * appartient déjà au conteneur. `manager.ts` le reprend par `engine.exec`
-   * après le démarrage.
+   * Completion is still to be done and cannot be done from the host: `work/`
+   * already belongs to the container. `manager.ts` picks it up through
+   * `engine.exec` after the start.
    */
   needsContainer: boolean;
   /**
-   * L'identité git reste à poser et ne peut pas l'être depuis l'hôte, pour la
-   * même raison. `manager.ts` joue alors `identityScript` par `engine.exec`.
+   * The git identity is still to be set and cannot be set from the host, for
+   * the same reason. `manager.ts` then plays `identityScript` through
+   * `engine.exec`.
    */
   needsIdentity: boolean;
 }
@@ -235,17 +235,18 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
   const origin = remoteUrl(opts.gitRemoteHost, opts.gitRemotePort, opts.sessionId);
   const state = await inspectWorkspace(work);
 
-  // L'identité se pose sur un dépôt qui existe déjà ; pour un dépôt créé plus
-  // bas, elle est écrite juste après l'`init`. Elle ne dépend ni des commits
-  // ni de la branche : un étudiant dont l'espace de travail est complet doit
-  // pouvoir commiter, et c'est précisément le cas observé en production.
+  // The identity is set on a repository that already exists; for a repository
+  // created further down, it is written right after the `init`. It depends
+  // neither on the commits nor on the branch: a student whose workspace is
+  // complete must be able to commit, and that is precisely the case observed in
+  // production.
   let needsIdentity = false;
   if (opts.identity && state.present) {
     if (state.writable) await writeIdentity(work, opts.identity);
     else needsIdentity = true;
   }
 
-  // Un dépôt qui porte des commits appartient à l'étudiant : on n'y touche pas.
+  // A repository that carries commits belongs to the student: it is left alone.
   if (state.present && state.born) {
     return {
       created: false,
@@ -258,12 +259,12 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
 
   const branch = await stagingHeadBranch(opts.paths.gitDir);
   if (state.present && branch === null) {
-    // Dépôt de transit toujours sans référence (dépôt cible vide en mode TP) :
-    // rien à poser, l'espace de travail reste celui de l'étudiant.
+    // Staging repository still without a ref (empty target repository in lab
+    // mode): nothing to set, the workspace stays the student's.
     return { created: false, completed: false, branch: null, needsContainer: false, needsIdentity };
   }
   if (state.present && !state.writable) {
-    // Reprise d'une session déjà démarrée : `:U` a donné `work/` au conteneur.
+    // Resumption of an already started session: `:U` gave `work/` to the container.
     return { created: false, completed: false, branch, needsContainer: true, needsIdentity };
   }
 
@@ -272,8 +273,8 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
     await git(["-C", work, "remote", "add", "origin", origin], { env: IDENTITY });
     if (opts.identity) await writeIdentity(work, opts.identity);
   }
-  // Le contenu vient du dépôt de transit par le chemin local : le portail n'a
-  // pas à passer par son propre serveur HTTP pour se parler à lui-même.
+  // The content comes from the staging repository through the local path: the
+  // portal has no reason to go through its own HTTP server to talk to itself.
   await gitWork(work, [
     "fetch",
     "-q",
@@ -289,9 +290,9 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
   )
     .split("\n")
     .filter(Boolean);
-  // La branche par défaut du dépôt de transit d'abord — c'est celle du dépôt
-  // de l'étudiant, `master` aussi souvent que `main` —, puis `origin/main`,
-  // puis la première venue.
+  // The staging repository's default branch first — it is the student
+  // repository's own, `master` as often as `main` — then `origin/main`, then
+  // the first one that comes.
   const preferred =
     branch && branches.includes(`origin/${branch}`)
       ? `origin/${branch}`
@@ -302,14 +303,14 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
   if (preferred) {
     local = preferred.replace(/^origin\//, "");
     await gitWork(work, ["checkout", "-q", "-B", local, preferred]);
-    // Le suivi est ce qui rend `git pull` et `git push` sans argument corrects
-    // dans le conteneur ; sans lui, l'étudiant doit nommer son remote et sa
-    // branche à chaque fois.
+    // Tracking is what makes argument-less `git pull` and `git push` correct
+    // inside the container; without it, the student has to name their remote and
+    // their branch every time.
     await gitWork(work, ["branch", "-q", `--set-upstream-to=${preferred}`, local]).catch(() => "");
   }
   opts.log?.info(
     { sessionId: opts.sessionId, origin, branch: local, completed: state.present },
-    state.present ? "espace de travail complété" : "espace de travail amorcé",
+    state.present ? "workspace completed" : "workspace seeded",
   );
   return {
     created: !state.present,

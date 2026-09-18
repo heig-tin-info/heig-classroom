@@ -40,13 +40,13 @@ const CONTAINER: StagingSession = {
 // Pure decisions
 // ---------------------------------------------------------------------------
 
-describe("adresse source", () => {
-  it("ramène une adresse IPv4 mappée en IPv6 à sa forme v4", () => {
+describe("source address", () => {
+  it("brings an IPv4-mapped IPv6 address back to its v4 form", () => {
     expect(normalizeIp("::ffff:10.77.0.7")).toBe("10.77.0.7");
     expect(normalizeIp("10.77.0.7")).toBe("10.77.0.7");
   });
 
-  it("borne le sous-réseau codespace", () => {
+  it("bounds the codespace subnet", () => {
     expect(ipInCidr("10.77.0.7", "10.77.0.0/24")).toBe(true);
     expect(ipInCidr("10.77.0.254", "10.77.0.0/24")).toBe(true);
     expect(ipInCidr("10.77.1.7", "10.77.0.0/24")).toBe(false);
@@ -55,7 +55,7 @@ describe("adresse source", () => {
     expect(ipInCidr("::1", "10.77.0.0/24")).toBe(false);
   });
 
-  it("n'accepte que l'adresse exacte de la session, depuis le pont", () => {
+  it("accepts only the exact address of the session, from the bridge", () => {
     expect(authorizeSource("10.77.0.7", CONTAINER)).toEqual({ ok: true });
     expect(authorizeSource("::ffff:10.77.0.7", CONTAINER)).toEqual({ ok: true });
     // Another container on the same bridge: not this session.
@@ -72,8 +72,8 @@ describe("adresse source", () => {
   });
 });
 
-describe("service demandé et politique", () => {
-  it("reconnaît les quatre requêtes du protocole intelligent", () => {
+describe("requested service and policy", () => {
+  it("recognises the four smart-protocol requests", () => {
     expect(requestedService("GET", "info/refs", { service: "git-upload-pack" })).toBe(
       "git-upload-pack",
     );
@@ -84,20 +84,20 @@ describe("service demandé et politique", () => {
     expect(requestedService("POST", "git-receive-pack", {})).toBe("git-receive-pack");
   });
 
-  it("traite les chemins du protocole bête comme des lectures", () => {
+  it("treats dumb-protocol paths as reads", () => {
     expect(requestedService("GET", "HEAD", {})).toBe("git-upload-pack");
     expect(requestedService("GET", "objects/info/packs", {})).toBe("git-upload-pack");
     expect(requestedService("GET", "objects/ab/cdef", {})).toBe("git-upload-pack");
   });
 
-  it("autorise toujours receive-pack, et upload-pack selon le devoir", () => {
+  it("always allows receive-pack, and upload-pack according to the assignment", () => {
     expect(serviceAllowed("git-receive-pack", { uploadPack: false })).toBe(true);
     expect(serviceAllowed("git-upload-pack", { uploadPack: true })).toBe(true);
     expect(serviceAllowed("git-upload-pack", { uploadPack: false })).toBe(false);
   });
 });
 
-describe("variables CGI", () => {
+describe("CGI variables", () => {
   const env = backendEnv({
     projectRoot: "/vol/e1/tp",
     pathInfo: "/staging.git/git-receive-pack",
@@ -114,7 +114,7 @@ describe("variables CGI", () => {
     },
   });
 
-  it("pose ce que git http-backend attend", () => {
+  it("sets what git http-backend expects", () => {
     expect(env["GIT_PROJECT_ROOT"]).toBe("/vol/e1/tp");
     expect(env["GIT_HTTP_EXPORT_ALL"]).toBe("1");
     expect(env["PATH_INFO"]).toBe("/staging.git/git-receive-pack");
@@ -125,19 +125,19 @@ describe("variables CGI", () => {
     expect(env["REMOTE_ADDR"]).toBe("10.77.0.7");
   });
 
-  it("transmet Content-Encoding pour que http-backend décompresse lui-même", () => {
+  it("passes Content-Encoding on so that http-backend decompresses by itself", () => {
     expect(env["HTTP_CONTENT_ENCODING"]).toBe("gzip");
     expect(env["HTTP_GIT_PROTOCOL"]).toBe("version=2");
   });
 
-  it("ne transmet aucun autre en-tête, et neutralise la configuration du poste", () => {
+  it("passes no other header on, and neutralises the workstation configuration", () => {
     expect(env["HTTP_COOKIE"]).toBeUndefined();
     expect(env["HTTP_AUTHORIZATION"]).toBeUndefined();
     expect(env["GIT_CONFIG_NOSYSTEM"]).toBe("1");
     expect(env["HOME"]).toBe("/nonexistent");
   });
 
-  it("omet CONTENT_LENGTH sur un corps en chunked (lecture jusqu'à EOF)", () => {
+  it("omits CONTENT_LENGTH on a chunked body (read until EOF)", () => {
     const chunked = backendEnv({
       projectRoot: "/vol",
       pathInfo: "/staging.git/git-receive-pack",
@@ -208,14 +208,14 @@ async function waitForEvents(store: PushEventStore, sessionId: string, n: number
   return store.bySession(sessionId);
 }
 
-describe("canal Git de bout en bout (boucle locale)", () => {
-  it("clone, commit, push : le PushEvent porte le bon sha", async () => {
+describe("Git channel end to end (loopback)", () => {
+  it("clone, commit, push: the PushEvent carries the right sha", async () => {
     const h = await harness();
     const clone = join(h.base, "clone");
     await git(["clone", h.remote, clone], { env: FIXTURE_ENV });
 
     await writeFile(join(clone, "main.c"), "int main(void) { return 42; }\n", "utf8");
-    await git(["-C", clone, "commit", "-am", "rendu"], { env: FIXTURE_ENV });
+    await git(["-C", clone, "commit", "-am", "submission"], { env: FIXTURE_ENV });
     const sha = (await git(["-C", clone, "rev-parse", "HEAD"], { env: FIXTURE_ENV })).trim();
     const pushed = await git(["-C", clone, "push", "origin", "HEAD:main"], { env: FIXTURE_ENV });
     expect(pushed).toBeDefined();
@@ -231,26 +231,26 @@ describe("canal Git de bout en bout (boucle locale)", () => {
     h.close();
   });
 
-  it("une requête d'une autre adresse reçoit 403 sans toucher au dépôt", async () => {
+  it("a request from another address gets a 403 without touching the repository", async () => {
     // The session belongs to a container on the bridge; the test speaks from
     // the loopback, which is the host's position.
     const h = await harness({ containerIp: "10.77.0.7" });
     const response = await fetch(`${h.remote}/info/refs?service=git-receive-pack`);
     expect(response.status).toBe(403);
-    expect(await response.text()).toMatch(/adresse source/);
+    expect(await response.text()).toMatch(/source address/);
     h.close();
   });
 
-  it("une session inconnue reçoit 404", async () => {
+  it("an unknown session gets a 404", async () => {
     const h = await harness();
     const response = await fetch(
-      `http://127.0.0.1:${h.port}/git/s-inexistante/info/refs?service=git-upload-pack`,
+      `http://127.0.0.1:${h.port}/git/s-nonexistent/info/refs?service=git-upload-pack`,
     );
     expect(response.status).toBe(404);
     h.close();
   });
 
-  it("devoir uploadpack:false : le fetch est refusé proprement, le push passe", async () => {
+  it("assignment with uploadpack:false: the fetch is refused cleanly, the push goes through", async () => {
     const open = await harness();
     const clone = join(open.base, "clone");
     await git(["clone", open.remote, clone], { env: FIXTURE_ENV });
@@ -259,21 +259,21 @@ describe("canal Git de bout en bout (boucle locale)", () => {
     const failure = await git(["clone", closed.remote, join(closed.base, "clone")], {
       env: FIXTURE_ENV,
     }).catch((err: Error) => err.message);
-    expect(String(failure)).toMatch(/désactivée pour ce devoir|403/);
+    expect(String(failure)).toMatch(/disabled for this assignment|403/);
 
     // …while the push, which is the submission, still works.
-    await git(["-C", clone, "commit", "--allow-empty", "-m", "rendu d'examen"], {
+    await git(["-C", clone, "commit", "--allow-empty", "-m", "exam submission"], {
       env: FIXTURE_ENV,
     });
     await git(["-C", clone, "remote", "set-url", "origin", closed.remote], { env: FIXTURE_ENV });
-    await git(["-C", clone, "push", "origin", "HEAD:refs/heads/rendu"], { env: FIXTURE_ENV });
+    await git(["-C", clone, "push", "origin", "HEAD:refs/heads/submission"], { env: FIXTURE_ENV });
     const rows = await waitForEvents(closed.store, "s-exam", 1);
-    expect(rows.map((r) => r.ref)).toContain("refs/heads/rendu");
+    expect(rows.map((r) => r.ref)).toContain("refs/heads/submission");
     open.close();
     closed.close();
   });
 
-  it("un corps gzippé est décompressé par http-backend (HTTP_CONTENT_ENCODING)", async () => {
+  it("a gzipped body is decompressed by http-backend (HTTP_CONTENT_ENCODING)", async () => {
     const h = await harness();
     // A protocol v2 `ls-refs`, gzipped, which is the shape `git` sends when
     // it decides to compress a request body. Without HTTP_CONTENT_ENCODING,
@@ -295,13 +295,13 @@ describe("canal Git de bout en bout (boucle locale)", () => {
     h.close();
   });
 
-  it("un gros push (plusieurs mégaoctets) traverse sans être bufferisé", async () => {
+  it("a large push (several megabytes) goes through without being buffered", async () => {
     const h = await harness();
     const clone = join(h.base, "clone");
     await git(["clone", h.remote, clone], { env: FIXTURE_ENV });
-    await writeFile(join(clone, "gros.txt"), "ligne de données\n".repeat(400_000), "utf8");
+    await writeFile(join(clone, "big.txt"), "line of data\n".repeat(400_000), "utf8");
     await git(["-C", clone, "add", "-A"], { env: FIXTURE_ENV });
-    await git(["-C", clone, "commit", "-m", "gros fichier"], { env: FIXTURE_ENV });
+    await git(["-C", clone, "commit", "-m", "big file"], { env: FIXTURE_ENV });
     const sha = (await git(["-C", clone, "rev-parse", "HEAD"], { env: FIXTURE_ENV })).trim();
     await git(["-C", clone, "push", "origin", "HEAD:main"], { env: FIXTURE_ENV });
 
@@ -310,7 +310,7 @@ describe("canal Git de bout en bout (boucle locale)", () => {
     h.close();
   });
 
-  it("un push qui ne change rien n'enregistre aucun PushEvent", async () => {
+  it("a push that changes nothing records no PushEvent", async () => {
     const h = await harness();
     const clone = join(h.base, "clone");
     await git(["clone", h.remote, clone], { env: FIXTURE_ENV });

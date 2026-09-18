@@ -221,24 +221,24 @@ export const gitBackendPlugin: FastifyPluginAsync<GitBackendOptions> = async (ap
       const clientIp = normalizeIp(request.ip);
 
       if (!session) {
-        request.log.warn({ sessionId, clientIp }, "dépôt de transit inconnu");
-        return deny(reply, 404, "session inconnue");
+        request.log.warn({ sessionId, clientIp }, "unknown staging repository");
+        return deny(reply, 404, "unknown session");
       }
       const decision = authorizeSource(clientIp, session, cidr);
       if (!decision.ok) {
         request.log.warn(
           { sessionId, clientIp, expected: session.containerIp, reason: decision.reason },
-          "accès au canal Git refusé",
+          "access to the Git channel refused",
         );
-        return deny(reply, 403, "adresse source non autorisée pour cette session");
+        return deny(reply, 403, "source address not allowed for this session");
       }
       const service = requestedService(request.method, rest, request.query as Record<string, unknown>);
       if (!serviceAllowed(service, session)) {
-        request.log.info({ sessionId, service }, "upload-pack désactivé pour ce devoir");
+        request.log.info({ sessionId, service }, "upload-pack disabled for this assignment");
         return deny(
           reply,
           403,
-          "la récupération (fetch/clone) est désactivée pour ce devoir ; le push reste autorisé",
+          "fetch/clone is disabled for this assignment; push is still allowed",
         );
       }
 
@@ -307,17 +307,17 @@ async function serve(
     });
     child.on("close", (code) => {
       if (!settled) {
-        reject(new Error(`git http-backend a quitté avec ${code} : ${stderr.slice(0, 500)}`));
+        reject(new Error(`git http-backend exited with ${code}: ${stderr.slice(0, 500)}`));
       }
     });
   }).catch((err: Error) => {
-    request.log.error({ err: err.message, stderr }, "échec de git http-backend");
+    request.log.error({ err: err.message, stderr }, "git http-backend failed");
     return null;
   });
 
   if (!head) {
     child.kill("SIGKILL");
-    return deny(reply, 500, "canal Git indisponible");
+    return deny(reply, 500, "Git channel unavailable");
   }
 
   // The body flows while this is wired up; nothing waits for the child.
@@ -363,12 +363,12 @@ async function afterReceivePack(
     );
     request.log.info(
       { sessionId: session.sessionId, refs: rows.map((r) => r.ref) },
-      "push enregistré",
+      "push recorded",
     );
   } catch (err) {
     request.log.error(
       { sessionId: session.sessionId, err: String((err as Error).message ?? err) },
-      "enregistrement du push impossible",
+      "could not record the push",
     );
   }
 }

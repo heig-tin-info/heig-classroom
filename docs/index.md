@@ -12,7 +12,7 @@ portal yourself is covered in [Deployment](deployment/index.md) — including
 the one-time [GitHub App](deployment/github-app.md) setup; teachers never
 create GitHub applications, installing the App on their organization is one
 click in the portal. The full requirements and architecture live in the
-Specifications section (in French), including the twelve architecture decision
+Specifications section, including the thirteen architecture decision
 records under `docs/adr/` in the repository.
 
 The stack in one sentence: a Fastify monolith over PostgreSQL, a React SPA,

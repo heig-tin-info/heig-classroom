@@ -1,9 +1,9 @@
 /**
- * Les routes HTML du portail et le démarrage de session.
+ * The portal's HTML routes and the session start.
  *
- * Chaque route porte sa garde d'autorisation explicitement : `requireUser`
- * pour l'étudiant, `requireTeacher` pour le tableau. Aucun crochet global ne
- * protège « tout sauf » — une liste d'exceptions se trompe en silence.
+ * Every route carries its authorization guard explicitly: `requireUser` for the
+ * student, `requireTeacher` for the dashboard. No global hook protects
+ * "everything but" — a list of exceptions goes wrong silently.
  */
 import type { FastifyInstance } from "fastify";
 import fp from "fastify-plugin";
@@ -35,9 +35,9 @@ export interface WebRoutesOptions {
 }
 
 /**
- * Attributs du cookie de session de codespace. `Path=/s/<id>` : le navigateur
- * n'envoie ce cookie qu'à cette session, donc deux sessions ouvertes dans le
- * même navigateur ne se marchent pas dessus.
+ * Attributes of the codespace session cookie. `Path=/s/<id>`: the browser only
+ * sends this cookie to that session, so two sessions open in the same browser
+ * do not step on each other.
  */
 export function sessionCookieOptions(sessionId: string, secure: boolean) {
   return {
@@ -84,8 +84,8 @@ async function webRoutesImpl(app: FastifyInstance, opts: WebRoutesOptions): Prom
           .send(errorPage("Devoir fermé", "La fenêtre d'ouverture de ce devoir est close."));
       }
       if (assignment.mode === "exam") {
-        // Invariant 5 : une session d'examen naît de `/exam/<devoir>/start`,
-        // vérifié, et de nulle part ailleurs.
+        // Invariant 5: an exam session is born from `/exam/<assignment>/start`,
+        // verified, and from nowhere else.
         return reply
           .code(403)
           .type("text/html; charset=utf-8")
@@ -101,12 +101,12 @@ async function webRoutesImpl(app: FastifyInstance, opts: WebRoutesOptions): Prom
       try {
         result = await manager.start(user, assignment);
       } catch (err) {
-        // L'espace de travail n'a pas pu être préparé : aucun conteneur n'a
-        // été lancé, et l'étudiant doit le savoir (voir `seedStaging`).
+        // The workspace could not be prepared: no container was started, and
+        // the student must know it (see `seedStaging`).
         if (!(err instanceof WorkspaceBootstrapError)) throw err;
         req.log.warn(
           { assignmentId: assignment.id, login: user.login, cause: err.shortCause },
-          "démarrage refusé : espace de travail impossible à préparer",
+          "start refused: the workspace could not be prepared",
         );
         return reply
           .code(503)
@@ -120,7 +120,7 @@ async function webRoutesImpl(app: FastifyInstance, opts: WebRoutesOptions): Prom
           healthyInMs: result.healthyInMs,
           totalMs: Date.now() - started,
         },
-        "démarrage de session",
+        "session start",
       );
       reply.setCookie(
         SESSION_COOKIE,
@@ -142,7 +142,7 @@ async function webRoutesImpl(app: FastifyInstance, opts: WebRoutesOptions): Prom
     "/teacher/sessions/:sessionId/close",
     { preHandler: (req, reply) => app.requireTeacher(req, reply) },
     async (req, reply) => {
-      await manager.close(req.params.sessionId, `fermeture par ${req.user?.login ?? "?"}`);
+      await manager.close(req.params.sessionId, `closed by ${req.user?.login ?? "?"}`);
       return reply.redirect("/teacher/sessions", 303);
     },
   );

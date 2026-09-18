@@ -1,28 +1,28 @@
 #!/usr/bin/env bash
 #
-# heig-codespace — déploiement depuis le poste vers la VM. Rejouable.
+# heig-codespace — deployment from the workstation to the VM. Replayable.
 #
-#   apps/codespace/deploy/push.sh                # construire et déployer
-#   apps/codespace/deploy/push.sh --bootstrap    # + (re)mettre la VM en état
+#   apps/codespace/deploy/push.sh                # build and deploy
+#   apps/codespace/deploy/push.sh --bootstrap    # + (re)set the VM up
 #   apps/codespace/deploy/push.sh --rebuild-image
 #
-# Ce qu'il fait :
-#   1. construit @hgc/codespace et ses paquets (tsc)
-#   2. `pnpm deploy --prod --legacy` : un arbre autonome (node_modules élagué,
-#      workspaces recopiés), exactement comme le Dockerfile de classroom
-#   3. vérifie que ce qui est nécessaire à l'exécution y est
-#   4. rsync de deploy/ infra/ images/ vers /srv/codespace/src
-#   5. rsync de l'arbre vers /srv/codespace/releases/<horodatage>
-#   6. bascule du lien /srv/codespace/app
-#   7. construction de l'image étudiante sur la VM si elle manque
-#   8. redémarrage du service, attente de /healthz en local puis en HTTPS
+# What it does:
+#   1. builds @hgc/codespace and its packages (tsc)
+#   2. `pnpm deploy --prod --legacy`: a self-contained tree (pruned
+#      node_modules, workspaces copied in), exactly like classroom's Dockerfile
+#   3. checks that whatever is needed at run time is there
+#   4. rsync of deploy/ infra/ images/ to /srv/codespace/src
+#   5. rsync of the tree to /srv/codespace/releases/<timestamp>
+#   6. switch of the /srv/codespace/app symlink
+#   7. build of the student image on the VM if it is missing
+#   8. service restart, wait for /healthz locally then over HTTPS
 #
-# Retour arrière : voir docs/deploy.md. En résumé, rebasculer le lien vers la
-# release précédente et redémarrer — aucune migration Drizzle n'est
-# destructive, mais une release antérieure au dernier `drizzle/` ne sait pas
-# lire un schéma plus récent.
+# Rollback: see docs/deploy.md. In short, point the symlink back at the
+# previous release and restart — no Drizzle migration is destructive, but a
+# release older than the latest `drizzle/` does not know how to read a newer
+# schema.
 #
-# Aucun pnpm n'est nécessaire sur la VM : l'arbre déployé est autonome.
+# No pnpm is needed on the VM: the deployed tree is self-contained.
 set -euo pipefail
 
 TARGET="${CODESPACE_SSH:-root@code.chevallier.io}"
@@ -44,57 +44,57 @@ for arg in "$@"; do
 	case "$arg" in
 		--bootstrap)     DO_BOOTSTRAP=1 ;;
 		--rebuild-image) REBUILD_IMAGE=1 ;;
-		*) echo "option inconnue : $arg" >&2; exit 2 ;;
+		*) echo "unknown option: $arg" >&2; exit 2 ;;
 	esac
 done
 
 ok()   { printf '  ok    %s\n' "$*"; }
 step() { printf '\n== %s\n' "$*"; }
-die()  { printf '  ÉCHEC %s\n' "$*" >&2; exit 1; }
+die()  { printf '  FAIL  %s\n' "$*" >&2; exit 1; }
 
 OUT="$(mktemp -d "${TMPDIR:-/tmp}/hgc-codespace-deploy.XXXXXX")"
-# pnpm deploy veut un répertoire inexistant ou vide.
+# pnpm deploy wants a directory that does not exist, or an empty one.
 rmdir "$OUT"
 trap 'rm -rf "$OUT"' EXIT
 
-# ------------------------------------------------------------ 1. construction
-step "construction de @hgc/codespace et de ses paquets"
+# ------------------------------------------------------------------ 1. build
+step "build of @hgc/codespace and its packages"
 cd "$REPO_ROOT"
 pnpm --filter '@hgc/codespace...' --workspace-concurrency=1 build
-ok "tsc : paquets + application"
+ok "tsc: packages + application"
 
-step "arbre de production autonome"
+step "self-contained production tree"
 pnpm --filter @hgc/codespace deploy --prod --legacy "$OUT" >/dev/null
 ok "pnpm deploy --prod --legacy"
-# `pnpm deploy` applique les règles de publication npm : `dist/` est dans le
-# `.gitignore` du paquet, donc il n'est pas copié. C'est le même geste que le
-# Dockerfile de classroom, qui recopie `drizzle/` pour la même raison.
-[ -f "$APP_DIR/dist/server.js" ] || die "dist/server.js absent : la construction a échoué"
+# `pnpm deploy` applies the npm publishing rules: `dist/` is in the package's
+# `.gitignore`, so it is not copied. It is the same move as classroom's
+# Dockerfile, which copies `drizzle/` back in for the same reason.
+[ -f "$APP_DIR/dist/server.js" ] || die "dist/server.js missing: the build failed"
 cp -r "$APP_DIR/dist" "$OUT/dist"
-ok "dist/ recopié dans l'arbre"
+ok "dist/ copied into the tree"
 
-# ------------------------------------------------------ 3. ce qu'il faut à l'exécution
-step "contenu de l'arbre déployé"
-need() { [ -e "$OUT/$1" ] || die "absent de l'arbre déployé : $1"; ok "$1"; }
+# ------------------------------------------------ 3. what run time needs
+step "contents of the deployed tree"
+need() { [ -e "$OUT/$1" ] || die "missing from the deployed tree: $1"; ok "$1"; }
 need dist/server.js
 need package.json
-# migrationsFolder() de db/client.ts cherche `drizzle/meta/_journal.json` dans
-# les ancêtres du module compilé : il doit être à la racine de la release.
+# migrationsFolder() in db/client.ts looks for `drizzle/meta/_journal.json` in
+# the compiled module's ancestors: it must sit at the release root.
 need drizzle/meta/_journal.json
 need node_modules/better-sqlite3
 need node_modules/@hgc/domain/dist/index.js
 need node_modules/@hgc/contracts/dist/index.js
-# infra/ et seed/ voyagent avec le paquet (aucun champ `files` ne les exclut) ;
-# à l'exécution, le portail ne lit ni l'un ni l'autre : SECCOMP_PROFILE pointe
-# sur /srv/codespace/src/infra (la copie que les unités systemd utilisent
-# aussi), et `seed/` ne sert qu'à `scripts/seed.ts`, qui n'est pas déployé.
-[ -e "$OUT/infra/seccomp/codespace.json" ] && ok "infra/ présent (non utilisé à l'exécution)"
-[ -e "$OUT/seed/assignments.yaml" ] && ok "seed/ présent (non utilisé à l'exécution)"
-[ ! -e "$OUT/node_modules/typescript" ] || die "devDependencies dans l'arbre --prod"
-ok "taille : $(du -sh "$OUT" | cut -f1)"
+# infra/ and seed/ travel with the package (no `files` field excludes them);
+# at run time the portal reads neither: SECCOMP_PROFILE points at
+# /srv/codespace/src/infra (the copy the systemd units use as well), and
+# `seed/` only serves `scripts/seed.ts`, which is not deployed.
+[ -e "$OUT/infra/seccomp/codespace.json" ] && ok "infra/ present (unused at run time)"
+[ -e "$OUT/seed/assignments.yaml" ] && ok "seed/ present (unused at run time)"
+[ ! -e "$OUT/node_modules/typescript" ] || die "devDependencies in the --prod tree"
+ok "size: $(du -sh "$OUT" | cut -f1)"
 
-# --------------------------------------------------- 4. sources d'infra sur la VM
-step "sources d'infrastructure vers $TARGET:$PREFIX/src"
+# --------------------------------------------- 4. infra sources on the VM
+step "infrastructure sources to $TARGET:$PREFIX/src"
 rsync -a --delete "${RSYNC_E[@]}" \
 	--rsync-path="mkdir -p $PREFIX/src && rsync" \
 	"$APP_DIR/deploy" "$APP_DIR/infra" "$APP_DIR/images" \
@@ -103,7 +103,7 @@ rsync -a --delete "${RSYNC_E[@]}" \
 ok "deploy/ infra/ images/"
 
 if [ "$DO_BOOTSTRAP" -eq 1 ]; then
-	step "bootstrap de la VM (idempotent)"
+	step "VM bootstrap (idempotent)"
 	"${SSH[@]}" "CODESPACE_DOMAIN=$DOMAIN $PREFIX/src/deploy/bootstrap.sh"
 fi
 
@@ -114,35 +114,35 @@ rsync -a --delete "${RSYNC_E[@]}" \
 	"$OUT/" "$TARGET:$PREFIX/releases/$STAMP/"
 ok "$PREFIX/releases/$STAMP"
 
-# ------------------------------------------ 6..8. bascule, image, redémarrage
-step "bascule, image, redémarrage"
+# ------------------------------------------ 6..8. switch, image, restart ----
+step "switch, image, restart"
 "${SSH[@]}" bash -s -- "$STAMP" "$IMAGE_TAG" "$REBUILD_IMAGE" "$KEEP_RELEASES" <<'REMOTE'
 set -euo pipefail
 STAMP="$1"; IMAGE_TAG="$2"; REBUILD_IMAGE="$3"; KEEP="$4"
 PREFIX=/srv/codespace
 pd() { podman --remote --url unix:///run/podman/podman.sock "$@"; }
 
-previous="$(readlink "$PREFIX/app" 2>/dev/null || echo "(aucune)")"
+previous="$(readlink "$PREFIX/app" 2>/dev/null || echo "(none)")"
 ln -sfnT "releases/$STAMP" "$PREFIX/app"
-echo "  lien app : $previous -> releases/$STAMP"
+echo "  app symlink: $previous -> releases/$STAMP"
 
 if [ "$REBUILD_IMAGE" = 1 ] || ! pd image exists "$IMAGE_TAG"; then
-	echo "  construction de $IMAGE_TAG (1 à 2 min sur 2 vCPU)…"
+	echo "  building $IMAGE_TAG (1 to 2 min on 2 vCPU)…"
 	t0=$(date +%s)
 	pd build -q -t "$IMAGE_TAG" -t codespace/c-dev:latest "$PREFIX/src/images/c-dev" >/dev/null
-	echo "  image construite en $(( $(date +%s) - t0 )) s"
+	echo "  image built in $(( $(date +%s) - t0 )) s"
 else
-	echo "  image $IMAGE_TAG déjà présente"
+	echo "  image $IMAGE_TAG already present"
 fi
 
 systemctl restart codespace.service
 for i in $(seq 1 60); do
 	if curl -sf -m 2 http://127.0.0.1:3100/healthz >/dev/null; then
-		echo "  /healthz local : OK après ${i}s"
+		echo "  /healthz local: OK after ${i}s"
 		break
 	fi
 	if [ "$i" = 60 ]; then
-		echo "  /healthz local : PAS DE RÉPONSE" >&2
+		echo "  /healthz local: NO ANSWER" >&2
 		systemctl --no-pager --lines=40 status codespace.service >&2 || true
 		journalctl -u codespace.service -n 60 --no-pager >&2 || true
 		exit 1
@@ -150,26 +150,26 @@ for i in $(seq 1 60); do
 	sleep 1
 done
 
-# On garde quelques releases pour le retour arrière, pas plus : 38 Go de disque
-# et l'image de 1,5 Go vivent sur le même volume.
+# We keep a few releases for rollback, no more: 38 GB of disk and the 1.5 GB
+# image live on the same volume.
 current="$(basename "$(readlink "$PREFIX/app")")"
 ls -1 "$PREFIX/releases" | sort -r | tail -n +$((KEEP + 1)) | while read -r old; do
 	[ "$old" = "$current" ] && continue
 	rm -rf "${PREFIX:?}/releases/$old"
-	echo "  release élaguée : $old"
+	echo "  release pruned: $old"
 done
 REMOTE
 
 # ----------------------------------------------------------- 8bis. HTTPS ----
-step "vérification depuis le poste"
+step "check from the workstation"
 for i in $(seq 1 30); do
 	body="$(curl -sS -m 5 "https://$DOMAIN/healthz" 2>/dev/null || true)"
 	if [ "$body" = '{"ok":true}' ]; then
 		ok "https://$DOMAIN/healthz -> $body"
 		break
 	fi
-	[ "$i" = 30 ] && die "https://$DOMAIN/healthz ne répond pas ($body)"
+	[ "$i" = 30 ] && die "https://$DOMAIN/healthz does not answer ($body)"
 	sleep 2
 done
 
-printf '\nrelease déployée : %s\n' "$STAMP"
+printf '\nrelease deployed: %s\n' "$STAMP"

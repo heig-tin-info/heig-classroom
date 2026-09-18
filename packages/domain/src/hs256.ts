@@ -1,8 +1,8 @@
 /**
- * JWT compact HS256, sans dépendance : Web Crypto (Node ≥ 20, navigateurs).
- * Sert aux jetons de lancement et de service entre classroom et le portail
- * (packages/contracts/src/codespace.ts). Volontairement minimal : un seul
- * algorithme, pas de négociation d'en-tête, vérification stricte de `alg`.
+ * Compact HS256 JWT, dependency-free: Web Crypto (Node >= 20, browsers).
+ * Used for the launch and service tokens between classroom and the portal
+ * (packages/contracts/src/codespace.ts). Deliberately minimal: a single
+ * algorithm, no header negotiation, strict checking of `alg`.
  */
 
 const enc = new TextEncoder();
@@ -35,13 +35,13 @@ export async function signHs256(claims: Record<string, unknown>, secret: string)
 }
 
 export interface VerifyHs256Options {
-  /** `aud` attendu ; refus si absent ou différent. */
+  /** Expected `aud`; rejected when absent or different. */
   audience: string;
-  /** `iss` attendu ; refus si absent ou différent. */
+  /** Expected `iss`; rejected when absent or different. */
   issuer?: string;
-  /** Horloge injectable (secondes Unix). */
+  /** Injectable clock (Unix seconds). */
   now?: () => number;
-  /** Tolérance en secondes sur `exp` et `iat`. */
+  /** Tolerance in seconds on `exp` and `iat`. */
   skewSeconds?: number;
 }
 

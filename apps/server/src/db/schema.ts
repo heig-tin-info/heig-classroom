@@ -1,6 +1,6 @@
 /**
- * Drizzle schema, M1 scope (see docs/03-architecture.md, section
- * « Schéma de base de données »). UTC everywhere (timestamptz), uuid v7
+ * Drizzle schema, M1 scope (see docs/03-architecture.md, database schema
+ * section). UTC everywhere (timestamptz), uuid v7
  * primary keys generated application-side. UNIQUE constraints are the
  * idempotency mechanism (NFR-09).
  */
@@ -368,7 +368,7 @@ export const assignments = pgTable(
  * as grade-final, trigger `milestone`). Both the resolved date (jobs use it)
  * and the J±n offset relative to the deadline (reusable across semesters,
  * re-resolved when the deadline moves) are stored. The platform stays
- * ignorant of the barème: the per-criterion `milestone:` tag lives in
+ * ignorant of the grading scale: the per-criterion `milestone:` tag lives in
  * criteria.yml and `score grade --milestone <name>` filters on it.
  */
 export const assignmentMilestones = pgTable(

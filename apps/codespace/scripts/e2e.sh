@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Enveloppe de scripts/e2e.ts. Tout est dans le .ts ; ce fichier ne fait que
-# le lancer avec tsx et le .env de l'application.
+# Wrapper around scripts/e2e.ts. Everything is in the .ts; this file only
+# runs it with tsx and the application's .env.
 #
 #   ./scripts/e2e.sh
-#   E2E_GRACE_MS=5000 ./scripts/e2e.sh     # grâce raccourcie
+#   E2E_GRACE_MS=5000 ./scripts/e2e.sh     # shortened grace period
 set -euo pipefail
 cd "$(dirname "$0")/.."
 exec ./node_modules/.bin/tsx --env-file-if-exists=.env scripts/e2e.ts "$@"

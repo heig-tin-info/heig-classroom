@@ -1,49 +1,49 @@
 /**
- * Test d'acceptation de bout en bout du portail v0 (docs/jalon-0.md § V1).
+ * End-to-end acceptance test of portal v0 (docs/jalon-0.md § V1).
  *
- * Il fait, pour de vrai et dans cet ordre :
+ * It does, for real and in this order:
  *
- *   1. connexion Keycloak en `student` — vrai flux OIDC, code + PKCE ;
- *   2. clic Démarrer, chargement du poste de travail, **mise à niveau
- *      websocket réellement vérifiée** à travers le proxy ;
- *   3. dans le conteneur : `hello.c`, `make`, `gdb -batch`, `git push` ;
- *      `PushEvent` en base et commit dans Forgejo ;
- *   4. `podman kill` puis rechargement : relance sur le même volume ;
- *   5. plus de battement, grâce écoulée : conteneur détruit, volume et
- *      `shadow.git` intacts ;
- *   6. redémarrage du portail avec une session active : même conteneur ;
- *   7. `/s/<sid>/` sans cookie : refusé, et le tableau enseignant n'est servi
- *      qu'à un compte porteur du rôle de realm `teacher` ;
- *   8. examen : `/exam/<id>/start` refusé sans `X-Dev-SEB`, accepté avec, puis
- *      `/s/<sid>/` refusé depuis une autre adresse ;
- *   9. lancement depuis classroom : devoir poussé par `PUT /api/assignments/<id>`
- *      avec un jeton de service, session ouverte par `GET /launch?token=…` sans
- *      seconde connexion, push relayé vers le dépôt **du jeton**, rejeu du
- *      jeton refusé, quota de l'enseignant opposé à un second étudiant.
+ *   1. Keycloak sign-in as `student` — a real OIDC flow, code + PKCE;
+ *   2. Start click, workbench loading, **websocket upgrade really
+ *      checked** through the proxy;
+ *   3. inside the container: `hello.c`, `make`, `gdb -batch`, `git push`;
+ *      `PushEvent` in the database and commit in Forgejo;
+ *   4. `podman kill` then reload: restarted on the same volume;
+ *   5. no more heartbeat, grace period elapsed: container destroyed, volume
+ *      and `shadow.git` intact;
+ *   6. portal restart with a live session: same container;
+ *   7. `/s/<sid>/` without a cookie: refused, and the teacher board is served
+ *      only to an account carrying the `teacher` realm role;
+ *   8. exam: `/exam/<id>/start` refused without `X-Dev-SEB`, accepted with it,
+ *      then `/s/<sid>/` refused from another address;
+ *   9. launch from classroom: assignment pushed by `PUT /api/assignments/<id>`
+ *      with a service token, session opened by `GET /launch?token=…` without a
+ *      second sign-in, push relayed to the repository **of the token**, token
+ *      replay refused, teacher quota opposed to a second student.
  *
- * ## Pourquoi pas Playwright
+ * ## Why not Playwright
  *
- * Le navigateur n'apporterait ici que le rendu du poste de travail, que le
- * script vérifie déjà par la configuration `vscode-workbench-web-configuration`
- * servie et par une **vraie** mise à niveau websocket (`101` et
- * `Sec-WebSocket-Accept` recalculé). Le reste du parcours — cookies, refus,
- * adresses — se pilote plus sûrement en HTTP, et un binaire Chromium de plus
- * ne serait qu'un point de panne supplémentaire sur un poste WSL.
+ * Here the browser would only add the rendering of the workbench, which the
+ * script already checks through the `vscode-workbench-web-configuration`
+ * configuration served and through a **real** websocket upgrade (`101` and a
+ * recomputed `Sec-WebSocket-Accept`). The rest of the journey — cookies,
+ * refusals, addresses — is driven more reliably over HTTP, and one more
+ * Chromium binary would just be one more point of failure on a WSL workstation.
  *
- * Une seule concession au navigateur est nécessaire : Keycloak pose ses
- * cookies d'état en `Secure` même en clair, ce qu'un vrai navigateur accepte
- * sur `http://localhost` (origine réputée sûre) et que la bibliothèque
- * standard refuserait. Le bocal à cookies ci-dessous fait donc ce que fait le
- * navigateur sur localhost, et rien de plus.
+ * A single concession to the browser is necessary: Keycloak sets its state
+ * cookies as `Secure` even in the clear, which a real browser accepts on
+ * `http://localhost` (an origin deemed trustworthy) and which the standard
+ * library would refuse. So the cookie jar below does what the browser does on
+ * localhost, and nothing more.
  *
- * ## Le terminal
+ * ## The terminal
  *
- * jalon-0 dit « dans le terminal de code-server ». Sans navigateur il n'y a
- * pas de terminal ; les commandes passent donc par `podman exec`, dans le même
- * conteneur, sous le même utilisateur `student`, avec le même durcissement.
- * C'est le même shell, ouvert par une autre porte.
+ * jalon-0 says "in the code-server terminal". Without a browser there is no
+ * terminal; the commands therefore go through `podman exec`, in the same
+ * container, under the same `student` user, with the same hardening.
+ * It is the same shell, opened through another door.
  *
- * Lancement :  pnpm --filter @hgc/codespace e2e
+ * Run with:  pnpm --filter @hgc/codespace e2e
  */
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -56,11 +56,11 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// --- configuration du banc d'essai ------------------------------------------
-// Base et volumes dédiés : le test est rejouable et ne touche pas au
-// développement courant. La grâce est raccourcie pour que l'assertion du
-// ramasse-miettes tienne en quelques secondes plutôt qu'en dix minutes ;
-// c'est le seul réglage assoupli, et il est explicite.
+// --- test bench configuration -----------------------------------------------
+// Dedicated database and volumes: the test is replayable and does not touch
+// day-to-day development. The grace period is shortened so that the garbage
+// collector assertion holds in a few seconds rather than in ten minutes;
+// it is the only relaxed setting, and it is an explicit one.
 const E2E_ROOT = join(REPO_ROOT, "var/e2e");
 process.env["DATABASE_PATH"] = join(E2E_ROOT, "codespace.sqlite");
 process.env["VOLUMES_ROOT"] = join(E2E_ROOT, "volumes");
@@ -69,9 +69,9 @@ process.env["SESSION_GC_INTERVAL_MS"] = "2000";
 process.env["SHADOW_INTERVAL_MS"] = process.env["E2E_SHADOW_MS"] ?? "5000";
 process.env["LOG_LEVEL"] = process.env["E2E_LOG_LEVEL"] ?? "warn";
 process.env["SEB_VERIFIER"] = "simulated";
-// Développement uniquement : rend `request.ip` contrôlable par
-// `X-Forwarded-For`, ce qui est la seule façon de simuler un second poste
-// sans second poste. `loadConfig()` refuse ce réglage en production.
+// Development only: makes `request.ip` controllable through
+// `X-Forwarded-For`, which is the only way to simulate a second workstation
+// without a second workstation. `loadConfig()` refuses this setting in production.
 process.env["TRUST_PROXY"] = "1";
 
 const { loadConfig } = await import("../src/auth/config.js");
@@ -85,7 +85,7 @@ const config = loadConfig();
 const BASE = `http://localhost:${config.PORT}`;
 const PODMAN = ["--remote", "--url", config.PODMAN_URL];
 
-// --- journal ----------------------------------------------------------------
+// --- log --------------------------------------------------------------------
 let failures = 0;
 const measures: Array<[string, string]> = [];
 
@@ -101,12 +101,12 @@ function fail(what: string, detail: string): void {
 }
 function check(condition: boolean, what: string, detail = ""): boolean {
   if (condition) ok(what, detail);
-  else fail(what, detail || "condition fausse");
+  else fail(what, detail || "false condition");
   return condition;
 }
 function measure(name: string, value: string): void {
   measures.push([name, value]);
-  console.log(`  MESURE  ${name} = ${value}`);
+  console.log(`  MEASURE ${name} = ${value}`);
 }
 
 // --- podman -----------------------------------------------------------------
@@ -123,7 +123,7 @@ async function podmanOk(args: string[]): Promise<boolean> {
     () => false,
   );
 }
-/** `podman exec` avec le shell du conteneur ; rend stdout même en cas d'échec. */
+/** `podman exec` with the container shell; returns stdout even on failure. */
 async function inSession(sessionId: string, script: string): Promise<{ out: string; code: number }> {
   try {
     const out = await podman(["exec", containerNameFor(sessionId), "/bin/sh", "-lc", script]);
@@ -134,7 +134,7 @@ async function inSession(sessionId: string, script: string): Promise<{ out: stri
   }
 }
 
-// --- bocal à cookies --------------------------------------------------------
+// --- cookie jar -------------------------------------------------------------
 interface Cookie {
   name: string;
   value: string;
@@ -144,8 +144,8 @@ class Jar {
   private readonly jar: Cookie[] = [];
 
   absorb(headers: Headers): void {
-    // `getSetCookie` rend chaque en-tête séparément : indispensable, Keycloak
-    // en pose trois d'un coup.
+    // `getSetCookie` returns each header separately: indispensable, Keycloak
+    // sets three of them at once.
     for (const raw of headers.getSetCookie()) {
       const [pair, ...attrs] = raw.split(";");
       const eq = pair?.indexOf("=") ?? -1;
@@ -187,7 +187,7 @@ interface Reply {
   location: string | null;
   body: string;
   headers: Headers;
-  /** Chemin suivi par `follow`, pour que le diagnostic d'un échec soit lisible. */
+  /** Path followed by `follow`, so that diagnosing a failure stays readable. */
   hops: string[];
 }
 
@@ -216,7 +216,7 @@ async function request(
   };
 }
 
-/** Suit les redirections internes au portail, en gardant les cookies. */
+/** Follows the redirects internal to the portal, keeping the cookies. */
 async function follow(jar: Jar, url: string, max = 6): Promise<Reply> {
   let current = url;
   const hops: string[] = [];
@@ -229,23 +229,23 @@ async function follow(jar: Jar, url: string, max = 6): Promise<Reply> {
     }
     return { ...reply, hops };
   }
-  throw new Error(`trop de redirections depuis ${url}`);
+  throw new Error(`too many redirects from ${url}`);
 }
 
-// --- connexion OIDC ---------------------------------------------------------
+// --- OIDC sign-in -----------------------------------------------------------
 async function login(jar: Jar, username: string, password: string): Promise<void> {
-  // 1. le portail renvoie vers Keycloak
+  // 1. the portal redirects to Keycloak
   const start = await request(jar, `${BASE}/auth/login`);
   if (start.status !== 303 || !start.location) {
-    throw new Error(`/auth/login n'a pas redirigé (${start.status})`);
+    throw new Error(`/auth/login did not redirect (${start.status})`);
   }
-  // 2. formulaire de Keycloak
+  // 2. the Keycloak form
   const form = await fetch(start.location, { redirect: "manual" });
   const kcJar = new Jar();
   kcJar.absorb(form.headers);
   const html = await form.text();
   const action = /id="kc-form-login"[^>]*action="([^"]+)"/.exec(html)?.[1]?.replace(/&amp;/g, "&");
-  if (!action) throw new Error("formulaire de connexion Keycloak introuvable");
+  if (!action) throw new Error("Keycloak sign-in form not found");
   const posted = await fetch(action, {
     method: "POST",
     redirect: "manual",
@@ -257,19 +257,19 @@ async function login(jar: Jar, username: string, password: string): Promise<void
   });
   const callback = posted.headers.get("location");
   if (!callback) {
-    throw new Error(`Keycloak n'a pas redirigé vers le portail (${posted.status})`);
+    throw new Error(`Keycloak did not redirect to the portal (${posted.status})`);
   }
-  // 3. retour sur /auth/callback : le portail échange le code et pose son cookie
+  // 3. back on /auth/callback: the portal exchanges the code and sets its cookie
   const done = await request(jar, callback);
-  if (done.status !== 303) throw new Error(`/auth/callback a répondu ${done.status}`);
+  if (done.status !== 303) throw new Error(`/auth/callback answered ${done.status}`);
 }
 
-// --- mise à niveau websocket -------------------------------------------------
+// --- websocket upgrade -------------------------------------------------------
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 /**
- * Une vraie mise à niveau : 101 **et** `Sec-WebSocket-Accept` recalculé depuis
- * la clé envoyée. Un 200 ou un 403 n'est pas une mise à niveau.
+ * A real upgrade: 101 **and** a `Sec-WebSocket-Accept` recomputed from the key
+ * that was sent. A 200 or a 403 is not an upgrade.
  */
 function upgradeWebSocket(
   url: string,
@@ -277,8 +277,8 @@ function upgradeWebSocket(
 ): Promise<{ status: number; upgraded: boolean; acceptValid: boolean }> {
   return new Promise((resolvePromise, rejectPromise) => {
     const u = new URL(url);
-    // Base64 standard, pas base64url : `ws` valide la clé sur
-    // /^[+/0-9A-Za-z]{22}==$/ et refuserait un `-` ou un `_`.
+    // Standard base64, not base64url: `ws` validates the key against
+    // /^[+/0-9A-Za-z]{22}==$/ and would refuse a `-` or a `_`.
     const key = randomBytes(16).toString("base64");
     const req = http.request({
       host: u.hostname,
@@ -296,7 +296,7 @@ function upgradeWebSocket(
     });
     const timer = setTimeout(() => {
       req.destroy();
-      rejectPromise(new Error("mise à niveau websocket : délai dépassé"));
+      rejectPromise(new Error("websocket upgrade: timed out"));
     }, 15_000);
     req.on("upgrade", (res, socket) => {
       clearTimeout(timer);
@@ -318,7 +318,7 @@ function upgradeWebSocket(
   });
 }
 
-// --- utilitaires -------------------------------------------------------------
+// --- utilities ---------------------------------------------------------------
 async function exists(path: string): Promise<boolean> {
   return access(path).then(
     () => true,
@@ -337,17 +337,17 @@ async function waitFor<T>(
     if (value) return value;
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error(`délai dépassé en attendant ${what}`);
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 /**
- * Le volume est chown vers la plage d'UID du conteneur par `:U` : uid 1000 ne
- * peut pas le supprimer. On passe donc par un conteneur, comme le ferait
- * l'exploitation.
+ * The volume is chowned to the container's UID range by `:U`: uid 1000 cannot
+ * delete it. So we go through a container, the way the operators would have
+ * to.
  */
 async function wipeE2eRoot(): Promise<void> {
-  // Le montage créerait le répertoire s'il manquait, en root : on ne monte que
-  // ce qui existe déjà.
+  // The mount would create the directory if it were missing, as root: we only
+  // mount what already exists.
   if (await exists(E2E_ROOT)) {
     await podmanOk([
       "run", "--rm", "-v", `${E2E_ROOT}:/v`, "docker.io/library/alpine:3.20",
@@ -366,7 +366,7 @@ async function removeSessionContainers(): Promise<void> {
   }
 }
 
-// --- le test -----------------------------------------------------------------
+// --- the test ----------------------------------------------------------------
 type Portal = Awaited<ReturnType<typeof buildPortal>>;
 
 async function startPortal(): Promise<Portal> {
@@ -376,15 +376,15 @@ async function startPortal(): Promise<Portal> {
 }
 
 async function main(): Promise<void> {
-  step("préalables");
-  check(await podmanOk(["version"]), "socket Podman rootful joignable", config.PODMAN_URL);
+  step("prerequisites");
+  check(await podmanOk(["version"]), "rootful Podman socket reachable", config.PODMAN_URL);
   const anchor = await podman(["inspect", "codespace-anchor", "--format", "{{.State.Status}}"]).catch(
     () => "",
   );
-  check(anchor.trim() === "running", "conteneur d'ancrage en marche (jamais touché par le test)");
+  check(anchor.trim() === "running", "anchor container running (never touched by the test)");
   check(
     await podmanOk(["image", "exists", config.CODESPACE_IMAGE]),
-    "image étudiante présente",
+    "student image present",
     config.CODESPACE_IMAGE,
   );
   check(
@@ -392,7 +392,7 @@ async function main(): Promise<void> {
       (r) => r.ok,
       () => false,
     ),
-    "Forgejo joignable",
+    "Forgejo reachable",
     config.FORGE_URL,
   );
   check(
@@ -402,57 +402,57 @@ async function main(): Promise<void> {
       (r) => r.ok,
       () => false,
     ),
-    "Keycloak joignable",
+    "Keycloak reachable",
     config.OIDC_ISSUER,
   );
   check(
     config.CODESPACE_LAUNCH_SECRET.length >= 32,
-    "secret de lancement partagé présent dans .env (CODESPACE_LAUNCH_SECRET)",
-    `${config.CODESPACE_LAUNCH_SECRET.length} caractères`,
+    "shared launch secret present in .env (CODESPACE_LAUNCH_SECRET)",
+    `${config.CODESPACE_LAUNCH_SECRET.length} characters`,
   );
-  if (failures > 0) throw new Error("préalables non réunis");
+  if (failures > 0) throw new Error("prerequisites not met");
 
-  step("banc d'essai neuf");
+  step("fresh test bench");
   await removeSessionContainers();
   await wipeE2eRoot();
   await runSeed({ config, seedDir: join(REPO_ROOT, "seed"), log: () => undefined });
-  ok("graine posée dans une base et des volumes dédiés", E2E_ROOT);
+  ok("seed laid down in a dedicated database and volumes", E2E_ROOT);
 
   let portal = await startPortal();
   const jar = new Jar();
 
   try {
-    // --- 1. connexion ------------------------------------------------------
-    step("1. connexion OIDC réelle (Keycloak, code + PKCE)");
+    // --- 1. sign-in --------------------------------------------------------
+    step("1. real OIDC sign-in (Keycloak, code + PKCE)");
     await login(jar, "student", "student");
     const home = await follow(jar, `${BASE}/`);
-    check(home.status === 200, "page d'accueil servie après connexion");
-    check(home.body.includes("Sacha Student"), "l'identité vient bien de l'IdP");
-    check(home.body.includes("tp-pointeurs"), "le devoir de travaux pratiques est listé");
+    check(home.status === 200, "home page served after sign-in");
+    check(home.body.includes("Sacha Student"), "the identity really comes from the IdP");
+    check(home.body.includes("tp-pointeurs"), "the lab assignment is listed");
     check(
       !home.body.includes('action="/assignments/exam-c/start"'),
-      "le devoir d'examen n'a pas de bouton Démarrer (invariant 5)",
+      "the exam assignment has no Start button (invariant 5)",
     );
 
-    // --- 2. démarrage ------------------------------------------------------
-    step("2. clic Démarrer, poste de travail, websocket");
+    // --- 2. start ----------------------------------------------------------
+    step("2. Start click, workbench, websocket");
     const clicked = Date.now();
     const started = await request(jar, `${BASE}/assignments/tp-pointeurs/start`, {
       method: "POST",
     });
-    check(started.status === 303, "Démarrer redirige", `${started.status} ${started.location}`);
+    check(started.status === 303, "Start redirects", `${started.status} ${started.location}`);
     const sid = /\/s\/([^/]+)\//.exec(started.location ?? "")?.[1] ?? "";
-    check(sid.length > 0, "identifiant de session reçu", sid);
-    check(jar.get("cs_session")?.startsWith(`${sid}.`) === true, "cookie de session posé");
+    check(sid.length > 0, "session id received", sid);
+    check(jar.get("cs_session")?.startsWith(`${sid}.`) === true, "session cookie set");
 
     const workbench = await follow(jar, new URL(started.location as string, BASE).href);
     const tWorkbench = Date.now() - clicked;
-    check(workbench.status === 200, "poste de travail servi à travers le proxy");
+    check(workbench.status === 200, "workbench served through the proxy");
     check(
       workbench.body.includes("vscode-workbench-web-configuration"),
-      "la page est bien le workbench de code-server",
+      "the page really is the code-server workbench",
     );
-    measure("clic Démarrer → page workbench", `${(tWorkbench / 1000).toFixed(2)} s`);
+    measure("Start click → workbench page", `${(tWorkbench / 1000).toFixed(2)} s`);
 
     const wsUrl = `${BASE}/s/${sid}/?reconnectionToken=11111111-1111-1111-1111-111111111111&reconnection=false&skipWebSocketFrames=false`;
     const wsStarted = Date.now();
@@ -460,29 +460,29 @@ async function main(): Promise<void> {
       Cookie: jar.header(`${BASE}/s/${sid}/`) ?? "",
     });
     const tWs = Date.now() - wsStarted;
-    check(ws.upgraded, "mise à niveau websocket à travers le proxy", `statut ${ws.status}`);
-    check(ws.acceptValid, "Sec-WebSocket-Accept recalculé et conforme");
-    measure("clic Démarrer → websocket établi", `${((Date.now() - clicked) / 1000).toFixed(2)} s`);
-    measure("mise à niveau websocket seule", `${tWs} ms`);
+    check(ws.upgraded, "websocket upgrade through the proxy", `status ${ws.status}`);
+    check(ws.acceptValid, "Sec-WebSocket-Accept recomputed and correct");
+    measure("Start click → websocket established", `${((Date.now() - clicked) / 1000).toFixed(2)} s`);
+    measure("websocket upgrade alone", `${tWs} ms`);
 
     const wsNoCookie = await upgradeWebSocket(wsUrl, {});
     check(
       !wsNoCookie.upgraded && wsNoCookie.status === 403,
-      "websocket refusé sans cookie de session",
-      `statut ${wsNoCookie.status}`,
+      "websocket refused without a session cookie",
+      `status ${wsNoCookie.status}`,
     );
 
-    // --- 3. compilation, débogage, push ------------------------------------
-    step("3. dans le conteneur : hello.c, make, gdb, git push");
+    // --- 3. compilation, debugging, push -----------------------------------
+    step("3. inside the container: hello.c, make, gdb, git push");
     const listing = await inSession(sid, "ls -a /work && git -C /work remote -v");
-    check(listing.out.includes("Makefile"), "le modèle est dans l'espace de travail");
+    check(listing.out.includes("Makefile"), "the model is in the workspace");
     check(
       listing.out.includes(".vscode"),
-      "la configuration de lancement gdb est fournie par le dépôt modèle",
+      "the gdb launch configuration comes from the model repository",
     );
     check(
       listing.out.includes("portal.internal:9418/git/"),
-      "le remote origin est le canal Git du portail",
+      "the origin remote is the portal's Git channel",
     );
 
     const build = await inSession(
@@ -500,15 +500,15 @@ async function main(): Promise<void> {
         "gdb -batch -ex 'show disable-randomization' ./hello 2>&1 | tail -1",
       ].join("\n"),
     );
-    check(build.code === 0, "make + gdb -batch dans le conteneur", build.out.slice(-200));
-    check(build.out.includes("reponse 42"), "le programme compilé s'exécute");
+    check(build.code === 0, "make + gdb -batch inside the container", build.out.slice(-200));
+    check(build.out.includes("reponse 42"), "the compiled program runs");
     check(
       /exited normally|\[Inferior .* exited normally\]/.test(build.out),
-      "gdb a exécuté le programme sans « Operation not permitted »",
+      "gdb ran the program without Operation not permitted",
     );
     check(
       /disable-randomization.*is on|randomization.*\bon\b/i.test(build.out),
-      "gdb désactive bien l'ASLR (profil seccomp du projet)",
+      "gdb does disable ASLR (the project's seccomp profile)",
     );
 
     const pushed = await inSession(
@@ -525,21 +525,21 @@ async function main(): Promise<void> {
       ].join("\n"),
     );
     const sha = /SHA=([0-9a-f]{40})/.exec(pushed.out)?.[1] ?? "";
-    check(pushed.code === 0 && sha !== "", "git push depuis le conteneur", pushed.out.slice(-200));
+    check(pushed.code === 0 && sha !== "", "git push from the container", pushed.out.slice(-200));
 
-    const events = await waitFor("le PushEvent", async () => {
+    const events = await waitFor("the PushEvent", async () => {
       const rows = await portal.store.bySession(sid);
       return rows.some((r) => r.sha === sha) ? rows : null;
     });
     check(
       events.some((r) => r.sha === sha && r.ref === "refs/heads/main"),
-      "PushEvent en base avec le bon sha",
+      "PushEvent in the database with the right sha",
       sha.slice(0, 12),
     );
 
     const relayStarted = Date.now();
     await waitFor(
-      "le commit dans Forgejo",
+      "the commit in Forgejo",
       async () =>
         fetch(
           `${config.FORGE_URL}/api/v1/repos/codespace/tp-pointeurs-student/git/commits/${sha}`,
@@ -547,54 +547,54 @@ async function main(): Promise<void> {
         ).then((r) => r.ok),
       30_000,
     );
-    ok("commit relayé dans Forgejo");
-    measure("push → commit dans Forgejo", `${((Date.now() - relayStarted) / 1000).toFixed(2)} s`);
+    ok("commit relayed into Forgejo");
+    measure("push → commit in Forgejo", `${((Date.now() - relayStarted) / 1000).toFixed(2)} s`);
 
-    // --- 4. podman kill puis rechargement ----------------------------------
-    step("4. podman kill puis rechargement de la page");
+    // --- 4. podman kill then reload ----------------------------------------
+    step("4. podman kill then page reload");
     const beforeKill = (
       await podman(["inspect", containerNameFor(sid), "--format", "{{.Id}}"])
     ).trim();
     await podman(["kill", containerNameFor(sid)]);
     await waitFor(
-      "l'arrêt du conteneur",
+      "the container to stop",
       async () =>
         (await podman(["inspect", containerNameFor(sid), "--format", "{{.State.Status}}"]))
           .trim() !== "running",
     );
-    ok("conteneur tué");
+    ok("container killed");
     const reloadStarted = Date.now();
     const reloaded = await follow(jar, `${BASE}/s/${sid}/`);
     check(
       reloaded.status === 200,
-      "rechargement servi",
+      "reload served",
       `${reloaded.status} · ${reloaded.hops.join(" | ")}`,
     );
     check(
       reloaded.body.includes("vscode-workbench-web-configuration"),
-      "le poste de travail est de nouveau là",
+      "the workbench is there again",
       reloaded.body.slice(0, 160).replace(/\s+/g, " "),
     );
     const afterKill = (
       await podman(["inspect", containerNameFor(sid), "--format", "{{.Id}}"])
     ).trim();
-    check(afterKill !== beforeKill, "un nouveau conteneur a été lancé");
-    measure("rechargement après kill → workbench", `${((Date.now() - reloadStarted) / 1000).toFixed(2)} s`);
+    check(afterKill !== beforeKill, "a new container was started");
+    measure("reload after kill → workbench", `${((Date.now() - reloadStarted) / 1000).toFixed(2)} s`);
     const survived = await inSession(sid, "cat /work/hello.c");
-    check(survived.out.includes("reponse %d"), "le fichier est là : même volume");
+    check(survived.out.includes("reponse %d"), "the file is there: same volume");
 
-    // --- 5. grâce -----------------------------------------------------------
-    step("5. plus de battement : grâce, puis destruction du conteneur");
+    // --- 5. grace period ----------------------------------------------------
+    step("5. no more heartbeat: grace period, then container destruction");
     const volumeDir = join(config.volumesRoot, "student", "tp-pointeurs");
     await waitFor(
-      "la destruction du conteneur après la grâce",
+      "the container to be destroyed after the grace period",
       async () => !(await podmanOk(["inspect", containerNameFor(sid)])),
       Number(process.env["SESSION_GRACE_MS"]) + 20_000,
     );
-    ok("conteneur détruit après la grâce", `${process.env["SESSION_GRACE_MS"]} ms`);
-    check(await exists(join(volumeDir, "work")), "le volume de travail est conservé");
-    check(await exists(join(volumeDir, "staging.git")), "le dépôt de transit est conservé");
-    check(await exists(join(volumeDir, "shadow.git")), "le dépôt fantôme existe");
+    ok("container destroyed after the grace period", `${process.env["SESSION_GRACE_MS"]} ms`);
+    check(await exists(join(volumeDir, "work")), "the work volume is kept");
+    check(await exists(join(volumeDir, "staging.git")), "the staging repository is kept");
+    check(await exists(join(volumeDir, "shadow.git")), "the shadow repository exists");
     const shadowLog = await execFileAsync("git", [
       "--git-dir",
       join(volumeDir, "shadow.git"),
@@ -606,7 +606,7 @@ async function main(): Promise<void> {
     );
     check(
       shadowLog.trim().split("\n").filter(Boolean).length >= 1,
-      "shadow.git porte au moins un instantané",
+      "shadow.git holds at least one snapshot",
       shadowLog.trim().split("\n")[0] ?? "",
     );
     const shadowFiles = await execFileAsync("git", [
@@ -620,19 +620,19 @@ async function main(): Promise<void> {
       (r) => r.stdout,
       () => "",
     );
-    check(shadowFiles.includes("hello.c"), "l'instantané porte le travail de l'étudiant");
+    check(shadowFiles.includes("hello.c"), "the snapshot holds the student's work");
     check(
       !shadowFiles.includes(".git/"),
-      "l'instantané exclut le dépôt de l'étudiant",
+      "the snapshot excludes the student's repository",
     );
 
-    // --- 6. redémarrage du portail avec une session active -----------------
-    step("6. redémarrage du portail avec une session active");
+    // --- 6. portal restart with a live session -----------------------------
+    step("6. portal restart with a live session");
     const restarted = await request(jar, `${BASE}/assignments/tp-pointeurs/start`, {
       method: "POST",
     });
     const sid2 = /\/s\/([^/]+)\//.exec(restarted.location ?? "")?.[1] ?? "";
-    check(sid2 === sid, "la session du couple (étudiant, devoir) est reprise, pas dupliquée", sid2);
+    check(sid2 === sid, "the (student, assignment) session is resumed, not duplicated", sid2);
     await follow(jar, `${BASE}/s/${sid}/`);
     const liveBefore = (
       await podman(["inspect", containerNameFor(sid), "--format", "{{.Id}}"])
@@ -640,70 +640,70 @@ async function main(): Promise<void> {
 
     await portal.close();
     portal = await startPortal();
-    ok("portail redémarré");
+    ok("portal restarted");
     const afterRestart = await follow(jar, `${BASE}/s/${sid}/`);
     check(
       afterRestart.status === 200,
-      "la session reste accessible après redémarrage",
+      "the session stays reachable after the restart",
       `${afterRestart.status} ${afterRestart.body.slice(0, 160).replace(/\s+/g, " ")}`,
     );
     const liveAfter = (
       await podman(["inspect", containerNameFor(sid), "--format", "{{.Id}}"])
     ).trim();
-    check(liveAfter === liveBefore, "le conteneur n'a pas été recréé", liveAfter.slice(0, 12));
+    check(liveAfter === liveBefore, "the container was not recreated", liveAfter.slice(0, 12));
 
-    // --- 7. refus sans cookie ----------------------------------------------
-    step("7. refus d'accès sans cookie de session");
+    // --- 7. refusal without a cookie ---------------------------------------
+    step("7. access refused without a session cookie");
     const naked = await request(jar, `${BASE}/s/${sid}/`, { noCookies: true });
-    check(naked.status === 403, "403 sans cookie", String(naked.status));
-    check(naked.body.includes("Session non autorisée"), "page de refus explicite");
+    check(naked.status === 403, "403 without a cookie", String(naked.status));
+    check(naked.body.includes("Session non autorisée"), "explicit refusal page");
 
-    // --- 7 bis. rôle enseignant --------------------------------------------
-    step("7 bis. rôle enseignant, déduit du realm");
+    // --- 7 bis. teacher role -----------------------------------------------
+    step("7 bis. teacher role, derived from the realm");
     const teacherJar = new Jar();
     await login(teacherJar, "teacher", "teacher");
     const board = await follow(teacherJar, `${BASE}/teacher/sessions`);
-    check(board.status === 200, "le tableau des sessions est servi à l'enseignant");
-    check(board.body.includes("Sacha Student"), "la session de l'étudiant y figure");
-    check(board.body.includes("tp-pointeurs") || board.body.includes("TP 3"), "le devoir y figure");
-    check(board.body.includes("Fermer"), "le bouton Fermer est proposé");
+    check(board.status === 200, "the sessions board is served to the teacher");
+    check(board.body.includes("Sacha Student"), "the student's session is listed there");
+    check(board.body.includes("tp-pointeurs") || board.body.includes("TP 3"), "the assignment is listed there");
+    check(board.body.includes("Fermer"), "the Fermer button is offered");
     const studentBoard = await follow(jar, `${BASE}/teacher/sessions`);
     check(
       studentBoard.status === 403,
-      "le même tableau est refusé à l'étudiant",
+      "the same board is refused to the student",
       String(studentBoard.status),
     );
 
-    // --- 8. mode examen -----------------------------------------------------
-    step("8. mode examen : vérification SEB, puis provenance");
+    // --- 8. exam mode -------------------------------------------------------
+    step("8. exam mode: SEB verification, then provenance");
     const examJar = new Jar();
     await login(examJar, "student2", "student2");
     const refused = await request(examJar, `${BASE}/exam/exam-c/start`);
-    check(refused.status === 403, "démarrage d'examen refusé sans en-tête SEB", String(refused.status));
+    check(refused.status === 403, "exam start refused without the SEB header", String(refused.status));
     check(
       refused.body.includes("Safe Exam Browser"),
-      "la page de refus est celle du volet examen",
+      "the refusal page is the exam one",
     );
 
     const accepted = await request(examJar, `${BASE}/exam/exam-c/start`, {
       headers: { "x-dev-seb": "ok" },
     });
-    check(accepted.status === 303, "démarrage accepté avec X-Dev-SEB", String(accepted.status));
+    check(accepted.status === 303, "start accepted with X-Dev-SEB", String(accepted.status));
     const examSid = /\/s\/([^/]+)\//.exec(accepted.location ?? "")?.[1] ?? "";
-    check(examSid !== "", "session d'examen créée", examSid);
-    check(examJar.get("exam_session") !== undefined, "cookie exam_session posé");
-    check(examJar.get("cs_session")?.startsWith(`${examSid}.`) === true, "cookie de session posé");
+    check(examSid !== "", "exam session created", examSid);
+    check(examJar.get("exam_session") !== undefined, "exam_session cookie set");
+    check(examJar.get("cs_session")?.startsWith(`${examSid}.`) === true, "session cookie set");
 
     const examPage = await follow(examJar, `${BASE}/s/${examSid}/`);
     check(
       examPage.status === 200,
-      "l'épreuve s'ouvre depuis le même poste",
+      "the exam opens from the same workstation",
       `${examPage.status} ${examPage.body.slice(0, 160).replace(/\s+/g, " ")}`,
     );
     const examWork = await inSession(examSid, "ls /work && git -C /work log --oneline | head -1");
     check(
       examWork.out.includes("Makefile"),
-      "l'espace d'examen est amorcé depuis le modèle de l'enseignant (invariant 6)",
+      "the exam workspace is bootstrapped from the teacher's model (invariant 6)",
     );
 
     const elsewhere = await request(examJar, `${BASE}/s/${examSid}/`, {
@@ -711,28 +711,28 @@ async function main(): Promise<void> {
     });
     check(
       elsewhere.status === 403,
-      "l'épreuve est refusée depuis une autre adresse client",
+      "the exam is refused from another client address",
       String(elsewhere.status),
     );
     check(
       elsewhere.body.includes("autre poste") || elsewhere.body.includes("Safe Exam Browser"),
-      "page « session hors SEB »",
+      "'session outside SEB' page",
     );
 
-    // Invariant 5, affirmé : le proxy ne regarde aucun en-tête SEB. Une
-    // requête *avec* les en-têtes SEB mais sans cookie reste refusée.
+    // Invariant 5, asserted: the proxy looks at no SEB header. A request *with*
+    // the SEB headers but without a cookie is still refused.
     const headersOnly = await request(examJar, `${BASE}/s/${examSid}/`, {
       noCookies: true,
       headers: { "x-dev-seb": "ok", "x-safeexambrowser-configkeyhash": "0".repeat(64) },
     });
     check(
       headersOnly.status === 403,
-      "le proxy ne se laisse pas convaincre par un en-tête SEB (invariant 5)",
+      "the proxy is not convinced by an SEB header (invariant 5)",
       String(headersOnly.status),
     );
 
-    // --- 9. lancement depuis classroom -------------------------------------
-    step("9. lancement depuis classroom : PUT du devoir, puis /launch");
+    // --- 9. launch from classroom ------------------------------------------
+    step("9. launch from classroom: PUT of the assignment, then /launch");
 
     const nowSec = (): number => Math.floor(Date.now() / 1000);
     const SECRET = config.CODESPACE_LAUNCH_SECRET;
@@ -740,10 +740,10 @@ async function main(): Promise<void> {
     const CLASSROOM_STUDENT = "e2e-classroom";
     const CLASSROOM_TEACHER = "t-e2e";
     const CLASSROOM_REPO = `${config.FORGE_USER}/classroom-launch-e2e`;
-    /** Marqueur de l'exécution courante, pour que le rendu diffère du précédent. */
+    /** Marker of the current run, so the submission differs from the previous one. */
     const runTag = `${Date.now()}-${randomBytes(4).toString("hex")}`;
 
-    /** Jeton de service : serveur à serveur, audience `heig-codespace-api`. */
+    /** Service token: server to server, audience `heig-codespace-api`. */
     const makeServiceToken = (): Promise<string> =>
       signHs256(
         {
@@ -755,7 +755,7 @@ async function main(): Promise<void> {
         SECRET,
       );
 
-    /** Jeton de lancement : ce que classroom émet au clic sur Démarrer. */
+    /** Launch token: what classroom issues when Start is clicked. */
     const makeLaunchToken = (over: Record<string, unknown> = {}): Promise<string> =>
       signHs256(
         {
@@ -766,7 +766,7 @@ async function main(): Promise<void> {
           jti: randomBytes(16).toString("hex"),
           sub: CLASSROOM_STUDENT,
           email: "e2e@heig-vd.ch",
-          displayName: "Élève de classroom",
+          displayName: "Classroom student",
           githubLogin: "e2e-gh",
           assignmentId: CLASSROOM_ASSIGNMENT,
           repo: { fullName: CLASSROOM_REPO, defaultBranch: "main" },
@@ -775,18 +775,18 @@ async function main(): Promise<void> {
         SECRET,
       );
 
-    // Le dépôt de l'étudiant, tel que classroom l'aurait provisionné. Public,
-    // comme ceux de la graine : le miroir du dépôt de transit est lu par un
-    // `git fetch` sans jeton, à dessein (docs/v1.md D-V1-8).
+    // The student's repository, as classroom would have provisioned it. Public,
+    // like the seed ones: the mirror of the staging repository is read by a
+    // `git fetch` without a token, by design (docs/v1.md D-V1-8).
     const seedForge = forgejoSeedForge(config.FORGE_URL, config.FORGE_TOKEN);
     const [repoOwner, repoName] = CLASSROOM_REPO.split("/") as [string, string];
     await seedForge.ensure(repoOwner, repoName);
-    ok("dépôt de l'étudiant créé dans la forge", CLASSROOM_REPO);
+    ok("student repository created in the forge", CLASSROOM_REPO);
 
     const syncBody = (quota: number): unknown => ({
       id: CLASSROOM_ASSIGNMENT,
       slug: "tp-classroom",
-      name: "TP lancé depuis classroom",
+      name: "Lab launched from classroom",
       classroomId: "c-e2e",
       classroomName: "Classe de bout en bout",
       mode: "online",
@@ -814,48 +814,48 @@ async function main(): Promise<void> {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(syncBody(2)),
     });
-    check(unauthorised.status === 401, "PUT refusé sans jeton de service", String(unauthorised.status));
+    check(unauthorised.status === 401, "PUT refused without a service token", String(unauthorised.status));
 
     const synced = await putAssignment(2);
-    check(synced.status === 200, "devoir synchronisé depuis classroom", String(synced.status));
+    check(synced.status === 200, "assignment synchronised from classroom", String(synced.status));
     const syncedBody = JSON.parse(synced.body) as { id: string; configKey: string | null };
     check(
       syncedBody.id === CLASSROOM_ASSIGNMENT && syncedBody.configKey === null,
-      "réponse du PUT : identifiant, pas de Config Key en mode en ligne",
+      "PUT response: identifier, no Config Key in online mode",
     );
     const again = await putAssignment(2);
-    check(again.status === 200 && again.body === synced.body, "le PUT est idempotent");
+    check(again.status === 200 && again.body === synced.body, "the PUT is idempotent");
 
-    // L'étudiant arrive **sans se reconnecter** : pas de cookie OIDC dans ce
-    // bocal, seulement le jeton dans l'URL.
+    // The student arrives **without signing in again**: no OIDC cookie in this
+    // jar, only the token in the URL.
     const launchJar = new Jar();
     const launchToken = await makeLaunchToken();
     const launchStarted = Date.now();
     const launched = await request(launchJar, `${BASE}/launch?token=${launchToken}`);
-    check(launched.status === 303, "/launch ouvre la session", `${launched.status} ${launched.location}`);
+    check(launched.status === 303, "/launch opens the session", `${launched.status} ${launched.location}`);
     const csid = /\/s\/([^/]+)\//.exec(launched.location ?? "")?.[1] ?? "";
-    check(csid !== "", "identifiant de session reçu", csid);
+    check(csid !== "", "session id received", csid);
     check(
       launchJar.get("cs_session")?.startsWith(`${csid}.`) === true,
-      "cookie de session du portail posé par /launch (aucune seconde connexion)",
+      "portal session cookie set by /launch (no second sign-in)",
     );
-    check(launchJar.get("cs_auth") === undefined, "aucun cookie de connexion OIDC n'est requis");
+    check(launchJar.get("cs_auth") === undefined, "no OIDC sign-in cookie is required");
 
     const classroomWorkbench = await follow(launchJar, new URL(launched.location as string, BASE).href);
     check(
       classroomWorkbench.status === 200 &&
         classroomWorkbench.body.includes("vscode-workbench-web-configuration"),
-      "l'éditeur s'ouvre pour la session lancée depuis classroom",
+      "the editor opens for the session launched from classroom",
       `${classroomWorkbench.status}`,
     );
     measure(
-      "jeton de lancement → page workbench",
+      "launch token → workbench page",
       `${((Date.now() - launchStarted) / 1000).toFixed(2)} s`,
     );
 
     const replayed = await request(new Jar(), `${BASE}/launch?token=${launchToken}`);
-    check(replayed.status === 403, "usage unique : le même jeton est refusé", String(replayed.status));
-    check(replayed.body.includes("déjà servi"), "page de refus explicite sur le rejeu");
+    check(replayed.status === 403, "single use: the same token is refused", String(replayed.status));
+    check(replayed.body.includes("déjà servi"), "explicit refusal page on replay");
 
     const unknownAssignment = await request(
       new Jar(),
@@ -864,10 +864,10 @@ async function main(): Promise<void> {
     check(
       unknownAssignment.status === 403 &&
         unknownAssignment.body.includes("non synchronisé depuis classroom"),
-      "devoir inconnu : refus nommé",
+      "unknown assignment: named refusal",
     );
 
-    // Le push part vers le dépôt **du jeton**, pas vers une convention du devoir.
+    // The push goes to the repository **of the token**, not to a convention of the assignment.
     const classroomPush = await inSession(
       csid,
       [
@@ -875,13 +875,13 @@ async function main(): Promise<void> {
         "cd /work",
         "git config user.name etudiant",
         "git config user.email etudiant@codespace.local",
-        // Contenu unique : le dépôt de l'étudiant survit d'une exécution à
-        // l'autre (seul `var/e2e/` est balayé), et le miroir du dépôt de
-        // transit rapporte donc le rendu précédent. Sans cela, `git commit`
-        // n'aurait rien à écrire à la seconde exécution.
+        // Unique content: the student's repository survives from one run to the
+        // next (only `var/e2e/` is wiped), so the mirror of the staging
+        // repository brings back the previous submission. Without this,
+        // `git commit` would have nothing to write on the second run.
         `echo 'depuis classroom ${runTag}' > rendu.txt`,
         "git add -A",
-        "git commit -q -m 'rendu lancé depuis classroom'",
+        "git commit -q -m 'submission launched from classroom'",
         "git push -q origin HEAD:main",
         'echo "SHA=$(git rev-parse HEAD)"',
       ].join("\n"),
@@ -889,18 +889,18 @@ async function main(): Promise<void> {
     const classroomSha = /SHA=([0-9a-f]{40})/.exec(classroomPush.out)?.[1] ?? "";
     check(
       classroomPush.code === 0 && classroomSha !== "",
-      "git push depuis le conteneur lancé par jeton",
+      "git push from the container launched by token",
       classroomPush.out.slice(-200),
     );
     await waitFor(
-      "le commit dans le dépôt du jeton",
+      "the commit in the token's repository",
       async () =>
         fetch(`${config.FORGE_URL}/api/v1/repos/${CLASSROOM_REPO}/git/commits/${classroomSha}`, {
           headers: { Authorization: `token ${config.FORGE_TOKEN}` },
         }).then((r) => r.ok),
       30_000,
     );
-    ok("push relayé vers le dépôt porté par le jeton", CLASSROOM_REPO);
+    ok("push relayed to the repository carried by the token", CLASSROOM_REPO);
 
     const summaries = await request(new Jar(), `${BASE}/api/assignments/${CLASSROOM_ASSIGNMENT}/sessions`, {
       headers: { authorization: `Bearer ${await makeServiceToken()}` },
@@ -912,45 +912,45 @@ async function main(): Promise<void> {
     }>;
     check(
       summaries.status === 200 && rows.some((r) => r.sessionId === csid && r.userId === CLASSROOM_STUDENT),
-      "le tableau des sessions est rendu à classroom avec son propre identifiant d'utilisateur",
-      `${summaries.status} · ${rows.length} ligne(s)`,
+      "the sessions board is returned to classroom with its own user identifier",
+      `${summaries.status} · ${rows.length} row(s)`,
     );
     check(
       rows.find((r) => r.sessionId === csid)?.lastPushAt !== null,
-      "le résumé porte la date du dernier push",
+      "the summary carries the date of the last push",
     );
 
-    // Quota par enseignant : une session vivante, quota ramené à un, un second
-    // étudiant du même enseignant est refusé — et la reprise du premier, non.
-    check((await putAssignment(1)).status === 200, "quota de l'enseignant ramené à une session");
+    // Per-teacher quota: one live session, quota lowered to one, a second
+    // student of the same teacher is refused — and resuming the first is not.
+    check((await putAssignment(1)).status === 200, "teacher quota lowered to one session");
     const overQuota = await request(
       new Jar(),
       `${BASE}/launch?token=${await makeLaunchToken({ sub: "e2e-classroom2", email: "e2e2@heig-vd.ch" })}`,
     );
-    check(overQuota.status === 429, "second étudiant refusé : quota atteint", String(overQuota.status));
-    check(overQuota.body.includes("Quota atteint"), "page 429 explicite");
+    check(overQuota.status === 429, "second student refused: quota reached", String(overQuota.status));
+    check(overQuota.body.includes("Quota atteint"), "explicit 429 page");
     const resumed = await request(new Jar(), `${BASE}/launch?token=${await makeLaunchToken()}`);
     check(
       resumed.status === 303,
-      "la reprise de sa propre session ne consomme pas de quota",
+      "resuming one's own session does not consume quota",
       String(resumed.status),
     );
 
-    step("récapitulatif");
+    step("summary");
     for (const [name, value] of measures) console.log(`  ${name} : ${value}`);
     const volumes = await readdir(config.volumesRoot).catch(() => []);
-    console.log(`  volumes conservés : ${volumes.join(", ")}`);
+    console.log(`  volumes kept: ${volumes.join(", ")}`);
   } finally {
     await portal.close();
     await removeSessionContainers();
-    console.log("\nconteneurs de session nettoyés (ancrage, Forgejo et Keycloak intacts).");
+    console.log("\nsession containers cleaned up (anchor, Forgejo and Keycloak untouched).");
   }
 
   if (failures > 0) {
-    console.log(`\nRÉSULTAT : ${failures} assertion(s) en échec.`);
+    console.log(`\nRESULT: ${failures} assertion(s) failed.`);
     process.exit(1);
   }
-  console.log("\nRÉSULTAT : toutes les assertions sont vertes.");
+  console.log("\nRESULT: all assertions are green.");
 }
 
 await main();

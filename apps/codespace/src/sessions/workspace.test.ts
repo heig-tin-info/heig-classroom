@@ -1,15 +1,15 @@
 /**
- * Amorçage de l'espace de travail — le correctif du 2026-09-17.
+ * Workspace seeding — the 2026-09-17 fix.
  *
- * Ces tests sont **unitaires** : le moteur est simulé, `git` est le vrai, et
- * la « forge » est un dépôt nu local. Ils tiennent en un `pnpm test`, sans
- * Podman ni Forgejo, parce que ce qui est vérifié ici est la logique du
- * portail : échec bruyant, dépôt cible vide autorisé en travaux pratiques,
- * réamorçage à la reprise, branche de travail avec suivi.
+ * These tests are **unit tests**: the engine is faked, `git` is the real one,
+ * and the "forge" is a local bare repository. They fit in a `pnpm test`,
+ * without Podman nor Forgejo, because what is checked here is the portal's
+ * logic: loud failure, empty target repository allowed in lab mode, re-seeding
+ * on resumption, working branch with tracking.
  *
- * Ce que le portail faisait avant, et qui a coûté l'essai en production :
- * `git fetch` anonyme sur un dépôt privé, échec avalé, session ouverte sur un
- * répertoire vide.
+ * What the portal used to do, and what cost the production trial: anonymous
+ * `git fetch` on a private repository, failure swallowed, session opened on an
+ * empty directory.
  */
 import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -35,7 +35,7 @@ import {
 import { completionScript, identityScript, shellQuote } from "./workspace.js";
 import { findAnySession } from "./store.js";
 
-/** Moteur simulé : il n'applique pas `:U`, les droits sont posés à la main. */
+/** Fake engine: it does not apply `:U`, the permissions are set by hand. */
 class FakeEngine implements Engine {
   readonly containers = new Map<string, ContainerInfo>();
   readonly execs: Array<{ name: string; argv: string[] }> = [];
@@ -151,39 +151,39 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-/** Dépôt nu servant de « forge » locale : `<root>/forge/<owner>/<name>.git`. */
+/** Bare repository used as a local "forge": `<root>/forge/<owner>/<name>.git`. */
 function forgePath(owner: string, name: string): string {
   return join(root, "forge", owner, `${name}.git`);
 }
 const localForgeUrl = (repo: { owner: string; name: string }): string =>
   forgePath(repo.owner, repo.name);
 
-describe("échec bruyant de l'amorçage", () => {
-  it("un dépôt cible injoignable refuse la session, sans lancer de conteneur", async () => {
+describe("loud failure of the seeding", () => {
+  it("an unreachable target repository refuses the session, without launching a container", async () => {
     const assignment = await insertAssignment({ targetRepoPattern: "org/tp-{student}" });
     const seen: Array<{ owner: string; name: string }> = [];
     const manager = makeManager({
-      // Port 1 : connexion refusée immédiatement, aucun accès réseau réel.
+      // Port 1: connection refused immediately, no real network access.
       forgeUrlOf: (repo) => `http://127.0.0.1:1/${repo.owner}/${repo.name}.git`,
       forgeAuthorization: async (repo) => {
         seen.push(repo);
-        return "Bearer ghs_jeton";
+        return "Bearer ghs_token";
       },
     });
 
     await expect(manager.start(user, assignment)).rejects.toBeInstanceOf(WorkspaceBootstrapError);
     expect(engine.runs).toBe(0);
     expect(findAnySession(db, "student", "tp")?.state).toBe("failed");
-    // L'autorisation a bien été demandée pour le dépôt **source**.
+    // The authorization was indeed requested for the **source** repository.
     expect(seen).toEqual([{ owner: "org", name: "tp-student" }]);
   });
 
-  it("une forge non configurée reste une cause nommée pour l'étudiant", async () => {
+  it("an unconfigured forge stays a named cause for the student", async () => {
     const assignment = await insertAssignment({ targetRepoPattern: "org/tp-{student}" });
     const manager = makeManager({
       forgeUrlOf: (repo) => `http://127.0.0.1:1/${repo.owner}/${repo.name}.git`,
       forgeAuthorization: async () => {
-        throw new ForgeUnconfiguredError("pas d'App");
+        throw new ForgeUnconfiguredError("no App");
       },
     });
     const err = await manager.start(user, assignment).catch((e: unknown) => e);
@@ -192,9 +192,9 @@ describe("échec bruyant de l'amorçage", () => {
     expect(engine.runs).toBe(0);
   });
 
-  it("un dépôt cible sans aucune branche est autorisé en mode travaux pratiques", async () => {
+  it("a target repository with no branch at all is allowed in lab mode", async () => {
     const assignment = await insertAssignment({ targetRepoPattern: "org/tp-{student}" });
-    // Ce que classroom vient de provisionner : un dépôt nu, sans commit.
+    // What classroom has just provisioned: a bare repository, without a commit.
     await git(["init", "--bare", "-q", forgePath("org", "tp-student")]);
     const manager = makeManager({ forgeUrlOf: localForgeUrl });
 
@@ -203,12 +203,12 @@ describe("échec bruyant de l'amorçage", () => {
     expect(await refSnapshot(join(session.volumeDir, "staging.git"))).toEqual(new Map());
   });
 
-  it("en mode examen, un modèle sans branche refuse la session", async () => {
-    await git(["init", "--bare", "-q", forgePath("org", "modele")]);
+  it("in exam mode, a template without a branch refuses the session", async () => {
+    await git(["init", "--bare", "-q", forgePath("org", "template")]);
     const assignment = await insertAssignment({
       id: "exam",
       mode: "exam",
-      templateRepo: forgePath("org", "modele"),
+      templateRepo: forgePath("org", "template"),
     });
     const manager = makeManager();
     const err = await manager.start(user, assignment).catch((e: unknown) => e);
@@ -218,9 +218,9 @@ describe("échec bruyant de l'amorçage", () => {
   });
 });
 
-describe("reprise : dépôt de transit vide, espace de travail à compléter", () => {
-  /** L'état laissé par le premier essai réel : tout est là, mais tout est vide. */
-  async function sessionSansDepot(): Promise<{
+describe("resumption: empty staging repository, workspace to be completed", () => {
+  /** The state left by the first real trial: everything is there, but everything is empty. */
+  async function sessionWithoutRepo(): Promise<{
     assignment: AssignmentRow;
     sessionId: string;
     volumeDir: string;
@@ -229,27 +229,27 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
     await git(["init", "--bare", "-q", forgePath("org", "tp-student")]);
     const manager = makeManager({ forgeUrlOf: localForgeUrl });
     const { session } = await manager.start(user, assignment);
-    // L'étudiant a écrit un fichier dans un espace de travail vide.
+    // The student wrote a file into an empty workspace.
     await writeFile(join(session.volumeDir, "work", "test"), "Excellent", "utf8");
     return { assignment, sessionId: session.id, volumeDir: session.volumeDir };
   }
 
-  /** Le dépôt de l'étudiant, tel qu'il aurait dû être récupéré. */
-  async function remplirLaForge(branch = "master"): Promise<void> {
+  /** The student's repository, as it should have been fetched. */
+  async function fillTheForge(branch = "master"): Promise<void> {
     const src = await makeSourceRepo({
       dir: join(root, "amont"),
       branch,
       files: { "quadratic.c": "int main(void){return 0;}\n", "Makefile": "all:\n\t@true\n" },
-      message: "sujet du labo",
+      message: "lab statement",
     });
     await git(["push", "--mirror", forgePath("org", "tp-student")], {
       env: { GIT_DIR: src.gitDir },
     });
   }
 
-  it("réamorce, pose la branche par défaut et son suivi, et garde les fichiers de l'étudiant", async () => {
-    const { assignment, volumeDir } = await sessionSansDepot();
-    await remplirLaForge("master");
+  it("re-seeds, sets the default branch and its tracking, and keeps the student's files", async () => {
+    const { assignment, volumeDir } = await sessionWithoutRepo();
+    await fillTheForge("master");
     engine.kill(containerNameFor(findAnySession(db, "student", "tp")!.id));
 
     const manager = makeManager({ forgeUrlOf: localForgeUrl });
@@ -258,7 +258,7 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
     const work = join(volumeDir, "work");
     const refs = await refSnapshot(join(volumeDir, "staging.git"));
     expect([...refs.keys()]).toEqual(["refs/heads/master"]);
-    // `git pull` et `git push` sans argument doivent marcher dans le conteneur.
+    // Argument-less `git pull` and `git push` must work inside the container.
     expect((await git(["-C", work, "branch", "--show-current"])).trim()).toBe("master");
     expect(
       (
@@ -269,13 +269,13 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
       "Makefile",
       "quadratic.c",
     ]);
-    // Le fichier que l'étudiant avait écrit est toujours là, non suivi.
+    // The file the student had written is still there, untracked.
     expect((await git(["-C", work, "status", "--porcelain"])).trim()).toBe("?? test");
   });
 
-  it("le conteneur vivant n'est pas relancé, mais le dépôt de transit est réamorcé", async () => {
-    const { assignment, volumeDir } = await sessionSansDepot();
-    await remplirLaForge("master");
+  it("the live container is not relaunched, but the staging repository is re-seeded", async () => {
+    const { assignment, volumeDir } = await sessionWithoutRepo();
+    await fillTheForge("master");
 
     const manager = makeManager({ forgeUrlOf: localForgeUrl });
     const again = await manager.start(user, assignment);
@@ -286,12 +286,12 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
     ]);
   });
 
-  it("quand work/ appartient au conteneur, l'achèvement passe par podman exec", async () => {
-    if (process.getuid?.() === 0) return; // root ignore les droits : le cas ne se simule pas.
-    const { assignment, volumeDir } = await sessionSansDepot();
-    await remplirLaForge("master");
+  it("when work/ belongs to the container, completion goes through podman exec", async () => {
+    if (process.getuid?.() === 0) return; // root ignores permissions: the case cannot be simulated.
+    const { assignment, volumeDir } = await sessionWithoutRepo();
+    await fillTheForge("master");
     const work = join(volumeDir, "work");
-    // Ce que `:U` fait : `work/` n'appartient plus au portail.
+    // What `:U` does: `work/` no longer belongs to the portal.
     await chmod(work, 0o555);
     try {
       engine.kill(containerNameFor(findAnySession(db, "student", "tp")!.id));
@@ -307,18 +307,18 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
     expect(exec?.argv[2]).toContain("git fetch -q origin");
     expect(exec?.argv[2]).toContain("git checkout -q -B 'master' 'origin/master'");
     expect(exec?.argv[2]).toContain("--set-upstream-to='origin/master'");
-    // Aucun secret n'entre dans le conteneur (invariant 1).
+    // No secret enters the container (invariant 1).
     expect(exec?.argv[2]).not.toMatch(/Authorization|ghs_|token/);
   });
 
-  it("un dépôt de travail qui porte déjà des commits n'est jamais retouché", async () => {
-    const { assignment, volumeDir } = await sessionSansDepot();
+  it("a working repository that already carries commits is never touched again", async () => {
+    const { assignment, volumeDir } = await sessionWithoutRepo();
     const work = join(volumeDir, "work");
     await git(["-C", work, "add", "-A"], { env: FIXTURE_ENV });
-    await git(["-C", work, "commit", "-q", "-m", "travail de l'étudiant"], { env: FIXTURE_ENV });
+    await git(["-C", work, "commit", "-q", "-m", "the student's work"], { env: FIXTURE_ENV });
     const sha = (await git(["-C", work, "rev-parse", "HEAD"])).trim();
 
-    await remplirLaForge("master");
+    await fillTheForge("master");
     engine.kill(containerNameFor(findAnySession(db, "student", "tp")!.id));
     const manager = makeManager({ forgeUrlOf: localForgeUrl });
     await manager.start(user, assignment);
@@ -328,35 +328,35 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
   });
 });
 
-describe("identité git de l'étudiant dans work/.git/config", () => {
+describe("the student's git identity in work/.git/config", () => {
   async function config(work: string, key: string): Promise<string> {
     return (await git(["-C", work, "config", "--local", "--get", key]).catch(() => "")).trim();
   }
 
-  it("est posée à l'amorçage, depuis l'hôte, avant le podman run", async () => {
+  it("is set at seeding time, from the host, before the podman run", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
     const work = join(session.volumeDir, "work");
     expect(await config(work, "user.name")).toBe("Sacha Student");
     expect(await config(work, "user.email")).toBe("student@heig-vd.ch");
-    // Rien n'est passé par le conteneur : l'hôte pouvait encore écrire.
+    // Nothing went through the container: the host could still write.
     expect(engine.execs).toEqual([]);
   });
 
-  it("n'écrase jamais l'identité que l'étudiant a posée lui-même", async () => {
+  it("never overwrites the identity the student set themselves", async () => {
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
     const work = join(session.volumeDir, "work");
-    await git(["-C", work, "config", "--local", "user.name", "Pseudonyme"]);
+    await git(["-C", work, "config", "--local", "user.name", "Pseudonym"]);
     engine.kill(containerNameFor(session.id));
     await makeManager().start(user, assignment);
-    expect(await config(work, "user.name")).toBe("Pseudonyme");
+    expect(await config(work, "user.name")).toBe("Pseudonym");
   });
 
-  it("passe par podman exec quand work/ appartient déjà au conteneur", async () => {
-    if (process.getuid?.() === 0) return; // root ignore les droits.
+  it("goes through podman exec when work/ already belongs to the container", async () => {
+    if (process.getuid?.() === 0) return; // root ignores permissions.
     const assignment = await insertAssignment();
     const manager = makeManager();
     const { session } = await manager.start(user, assignment);
@@ -371,11 +371,11 @@ describe("identité git de l'étudiant dans work/.git/config", () => {
     const exec = engine.execs.find((e) => e.argv[2]?.includes("user.email"));
     expect(exec?.argv[0]).toBe("sh");
     expect(exec?.argv[2]).toBe(identityScript({ name: "Sacha Student", email: "student@heig-vd.ch" }));
-    // Aucun secret n'entre dans le conteneur (invariant 1).
+    // No secret enters the container (invariant 1).
     expect(exec?.argv[2]).not.toMatch(/Authorization|ghs_|token/);
   });
 
-  it("le script n'écrase rien, sort sans bruit hors dépôt, et cite proprement", () => {
+  it("the script overwrites nothing, exits quietly outside a repository, and quotes properly", () => {
     const script = identityScript({ name: "Jean-Luc D'Arc", email: "j@heig-vd.ch" });
     expect(script).toContain("git rev-parse --git-dir >/dev/null 2>&1 || exit 0");
     expect(script).toContain("git config --local --get user.name >/dev/null 2>&1 ||");
@@ -385,17 +385,17 @@ describe("identité git de l'étudiant dans work/.git/config", () => {
 });
 
 describe("repoRefFromUrl et shortCauseOf", () => {
-  it("découpe une URL de clonage", () => {
+  it("splits a clone URL", () => {
     expect(repoRefFromUrl("https://github.com/org/depot.git")).toEqual({
       owner: "org",
       name: "depot",
     });
     expect(repoRefFromUrl("https://github.com/org/depot")).toEqual({ owner: "org", name: "depot" });
-    // Un chemin local n'est pas un dépôt de forge : pas d'autorisation à poser.
+    // A local path is not a forge repository: no authorization to set.
     expect(repoRefFromUrl("/srv/codespace/volumes/e/d/source.git")).toBeUndefined();
   });
 
-  it("nomme la cause en français, sans jargon de git", () => {
+  it("names the cause in French, without git jargon", () => {
     const repo = { owner: "org", name: "depot" };
     expect(shortCauseOf(new ForgeUnconfiguredError("x"), repo)).toBe(
       "le portail n'a pas les accès à org/depot",
@@ -412,13 +412,13 @@ describe("repoRefFromUrl et shortCauseOf", () => {
   });
 });
 
-describe("branche par défaut", () => {
-  it("suit ce que classroom annonce, pas la première branche venue", () => {
+describe("default branch", () => {
+  it("follows what classroom announces, not the first branch that comes", () => {
     const lab = { mode: "lab", sourceRepo: null } as unknown as AssignmentRow;
     expect(
       defaultBranchOf({ targetRepo: { fullName: "o/d", defaultBranch: "master" } }, lab),
     ).toBe("master");
-    // Invariant 6 : en examen, la branche du modèle de l'enseignant.
+    // Invariant 6: in an exam, the branch of the teacher's template.
     const exam = {
       mode: "exam",
       sourceRepo: { fullName: "o/modele", defaultBranch: "trunk" },
@@ -429,18 +429,18 @@ describe("branche par défaut", () => {
     expect(defaultBranchOf({ targetRepo: null }, lab)).toBe("main");
   });
 
-  it("le dépôt a `grading` avant `master` : c'est `master` qui est posée, avec son suivi", async () => {
+  it("the repository has `grading` before `master`: it is `master` that is set, with its tracking", async () => {
     const assignment = await insertAssignment({
       targetRepoPattern: "org/tp-{student}",
       sourceRepo: { fullName: "org/tp-student", defaultBranch: "master" },
     });
-    // Ce que la CI de classroom laisse dans un dépôt d'étudiant : une branche
-    // `grading` qui trie avant `master` et qui n'est pas le travail.
+    // What classroom's CI leaves in a student repository: a `grading` branch
+    // that sorts before `master` and that is not the work.
     const src = await makeSourceRepo({
       dir: join(root, "amont"),
       branch: "master",
       files: { "quadratic.c": "int main(void){return 0;}\n" },
-      message: "sujet",
+      message: "statement",
     });
     await git(["branch", "grading", "master"], { env: { GIT_DIR: src.gitDir } });
     await git(["init", "--bare", "-q", forgePath("org", "tp-student")]);

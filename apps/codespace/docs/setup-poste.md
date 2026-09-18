@@ -1,17 +1,17 @@
-# Installation du poste de développement
+# Development workstation installation
 
-Fait le 2026-09-17 sur WSL2, Ubuntu 26.04, noyau 6.18 Microsoft, systemd actif. Valable tel quel pour une VM Ubuntu 24.04 ou 26.04, WSL mis à part.
+Done on 2026-09-17 on WSL2, Ubuntu 26.04, Microsoft kernel 6.18, systemd active. Valid as it stands for an Ubuntu 24.04 or 26.04 VM, WSL aside.
 
-## Paquets
+## Packages
 
 ```bash
 sudo apt install -y podman podman-compose crun netavark aardvark-dns passt uidmap nftables git
 echo "containers:2147483647:2147483648" | sudo tee -a /etc/subuid /etc/subgid
 ```
 
-La ligne `containers` est ce qui permet `--userns=auto` : Podman y découpe une plage de 1024 UID par conteneur.
+The `containers` line is what makes `--userns=auto` possible: Podman carves out a range of 1024 UIDs per container from it.
 
-## Socket rootful accessible sans root
+## Rootful socket reachable without root
 
 ```bash
 sudo groupadd -f podman
@@ -23,27 +23,27 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now podman.socket nftables
 ```
 
-Puis nouvelle session (le groupe n'est pris qu'à la connexion).
+Then open a new session (the group is only picked up at login).
 
-Piège 1 : `/usr/lib/tmpfiles.d/podman.conf` recrée `/run/podman` en `0700 root root` à chaque démarrage. Le socket peut être `root:podman 660`, le répertoire reste infranchissable et l'erreur est un simple "permission denied". La surcharge dans `/etc/tmpfiles.d/` du même nom prime.
+Pitfall 1: `/usr/lib/tmpfiles.d/podman.conf` recreates `/run/podman` as `0700 root root` at every boot. The socket may well be `root:podman 660`, the directory stays impassable and the error is a plain "permission denied". The override of the same name in `/etc/tmpfiles.d/` takes precedence.
 
-## Mode distant
+## Remote mode
 
 ```bash
 podman system connection add --default rootful unix:///run/podman/podman.sock
 echo "alias podman='podman --remote'" >> ~/.zshrc
 ```
 
-Piège 2 : le binaire `podman` sous Linux reste en mode **local rootless** même avec `CONTAINER_HOST` défini. Seul `--remote` active le mode distant. Sans lui, `podman run` crée des conteneurs rootless dans un espace de noms réseau privé avec pasta, tire les images dans un stockage séparé, et affiche un avertissement sur `/` non partagé. Tous les tests réseau y sont faux. Le module `engine/` du portail passe donc toujours `--remote --url`.
+Pitfall 2: the `podman` binary on Linux stays in **local rootless** mode even with `CONTAINER_HOST` set. Only `--remote` turns on remote mode. Without it, `podman run` creates rootless containers in a private network namespace with pasta, pulls images into a separate storage, and prints a warning about `/` not being shared. Every network test there is wrong. The portal's `engine/` module therefore always passes `--remote --url`.
 
-## Vérification
+## Verification
 
 ```bash
 podman info --format 'rootless={{.Host.Security.Rootless}} backend={{.Host.NetworkBackend}} runtime={{.Host.OCIRuntime.Name}}'
-# attendu : rootless=false backend=netavark runtime=crun
+# expected: rootless=false backend=netavark runtime=crun
 ```
 
-Test du réseau clos, reproduit et vert le 2026-09-17 :
+Closed network test, reproduced and green on 2026-09-17:
 
 ```bash
 podman network create --internal --disable-dns --subnet 10.77.1.0/24 --gateway 10.77.1.254 cstest
@@ -55,11 +55,11 @@ podman exec cstest1 wget -T 3 -qO- http://1.1.1.1/ || echo "sortie: close"
 sudo pkill -f 'http.server 9418'; podman rm -f cstest1; podman network rm cstest
 ```
 
-Mesuré aussi : deux conteneurs du même réseau `internal` se joignent (à bloquer par nftables, tâche P2) ; `--dns=none` supprime toute résolution ; deux conteneurs `--userns=auto` ont des plages d'UID hôte différentes (`2147483647` et `2147484671`).
+Also measured: two containers on the same `internal` network reach each other (to be blocked by nftables, task P2); `--dns=none` removes all name resolution; two `--userns=auto` containers get different host UID ranges (`2147483647` and `2147484671`).
 
-## WSL uniquement
+## WSL only
 
-`/etc/wsl.conf` doit garder une seule section `[boot]` :
+`/etc/wsl.conf` must keep a single `[boot]` section:
 
 ```ini
 [boot]
@@ -70,4 +70,4 @@ command = mount --make-rshared /
 default=ycr
 ```
 
-Docker Desktop, s'il est installé côté Windows, ne doit pas être intégré à cette distro : son démon vit ailleurs et rien de ce qui précède ne s'y applique.
+Docker Desktop, if it is installed on the Windows side, must not be integrated into this distro: its daemon lives elsewhere and none of the above applies to it.

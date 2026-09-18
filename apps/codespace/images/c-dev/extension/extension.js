@@ -1,22 +1,22 @@
 /**
- * heig.codespace-statusbar — barre d'etat du portail heig-codespace.
+ * heig.codespace-statusbar — status bar of the heig-codespace portal.
  *
- * Deux elements a droite de la barre d'etat :
- *   1. le temps restant jusqu'a l'echeance du devoir, rafraichi toutes les 30 s ;
- *   2. un bouton « Fermer » qui ouvre l'URL de retour (classroom ou portail).
+ * Two items at the right of the status bar:
+ *   1. the time left until the assignment deadline, refreshed every 30 s;
+ *   2. a « Fermer » button that opens the return URL (classroom or portal).
  *
- * Tout vient de l'environnement du conteneur, pose par le `podman run` du
- * portail (`src/engine/index.ts`) :
- *   CODESPACE_DEADLINE         echeance ISO 8601  (optionnelle : sans elle, pas de compte a rebours)
- *   CODESPACE_RETURN_URL       URL de retour      (optionnelle : sans elle, pas de bouton)
- *   CODESPACE_ASSIGNMENT_NAME  titre du devoir    (optionnel, affiche dans l'infobulle)
+ * Everything comes from the container environment, set by the portal's
+ * `podman run` (`src/engine/index.ts`):
+ *   CODESPACE_DEADLINE         ISO 8601 deadline  (optional: without it, no countdown)
+ *   CODESPACE_RETURN_URL       return URL         (optional: without it, no button)
+ *   CODESPACE_ASSIGNMENT_NAME  assignment title   (optional, shown in the tooltip)
  *
- * L'hote d'extensions de code-server herite de l'environnement du serveur :
- * `ExtensionHostConnection#buildUserEnvironment` construit `{...process.env, ...}`
- * (verifie dans le paquet embarque, voir ../README.md).
+ * The code-server extension host inherits the server's environment:
+ * `ExtensionHostConnection#buildUserEnvironment` builds `{...process.env, ...}`
+ * (checked in the bundled package, see ../README.md).
  *
- * Aucun acces reseau, aucune telemetrie, aucune dependance : le conteneur
- * etudiant n'a ni resolveur ni sortie (invariants 1 et 2).
+ * No network access, no telemetry, no dependency: the student container has
+ * neither a resolver nor a way out (invariants 1 and 2).
  */
 "use strict";
 
@@ -25,15 +25,15 @@ const os = require("node:os");
 const path = require("node:path");
 const vscode = require("vscode");
 
-/** Periode de rafraichissement du compte a rebours. */
+/** Refresh period of the countdown. */
 const TICK_MS = 30_000;
-/** En dessous de ce reste, l'element passe en couleur d'avertissement. */
+/** Below this remaining time, the item switches to the warning colour. */
 const WARN_MS = 10 * 60 * 1000;
 /**
- * Fichier temoin ecrit a l'activation. Il ne sert qu'a constater, depuis
- * l'hote, que l'hote d'extensions a bien recu l'environnement du conteneur
- * (images/c-dev/test.sh, et verification manuelle apres ouverture de
- * l'editeur). Il ne contient aucun secret : seules les trois variables.
+ * Witness file written at activation. It only serves to check, from the host,
+ * that the extension host really received the container environment
+ * (images/c-dev/test.sh, and a manual check after the editor is opened). It
+ * contains no secret: only the three variables.
  */
 const WITNESS = path.join(os.tmpdir(), "codespace-statusbar.json");
 
@@ -65,12 +65,12 @@ const STRINGS = {
   },
 };
 
-/** Francais des que la langue de l'interface commence par « fr ». */
+/** French as soon as the interface language starts with "fr". */
 function pickStrings(language) {
   return String(language || "en").toLowerCase().startsWith("fr") ? STRINGS.fr : STRINGS.en;
 }
 
-/** Texte du compte a rebours pour un reste en millisecondes. */
+/** Countdown text for a remaining time in milliseconds. */
 function formatRemaining(remainingMs, t) {
   if (remainingMs <= 0) return t.overdue;
   const totalMinutes = Math.floor(remainingMs / 60_000);
@@ -78,7 +78,7 @@ function formatRemaining(remainingMs, t) {
   return t.remaining(Math.floor(totalMinutes / 60), totalMinutes % 60);
 }
 
-/** Date-heure locale du conteneur (TZ=Europe/Zurich dans l'image). */
+/** Local date and time of the container (TZ=Europe/Zurich in the image). */
 function formatDeadline(deadline, fr) {
   try {
     return deadline.toLocaleString(fr ? "fr-CH" : "en-GB", {
@@ -90,7 +90,7 @@ function formatDeadline(deadline, fr) {
   }
 }
 
-/** `undefined` plutot qu'une chaine vide : une variable vide vaut absente. */
+/** `undefined` rather than an empty string: an empty variable means absent. */
 function readEnv(name) {
   const value = process.env[name];
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
@@ -100,7 +100,7 @@ function writeWitness(payload) {
   try {
     fs.writeFileSync(WITNESS, JSON.stringify(payload, null, 2), { encoding: "utf8" });
   } catch {
-    // Le temoin est un confort de test, jamais une condition de marche.
+    // The witness is a testing convenience, never a condition of operation.
   }
 }
 
@@ -124,7 +124,7 @@ function activate(context) {
     assignmentName: assignmentName ?? null,
   });
 
-  // --- 1. compte a rebours -------------------------------------------------
+  // --- 1. countdown --------------------------------------------------------
   if (deadline) {
     const countdown = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     const tooltipLines = [`${t.deadline} : ${formatDeadline(deadline, fr)}`];
@@ -146,17 +146,17 @@ function activate(context) {
     context.subscriptions.push(countdown, { dispose: () => clearInterval(timer) });
   }
 
-  // --- 2. bouton « Fermer » ------------------------------------------------
-  // La commande est toujours enregistree (elle est declaree par le manifeste,
-  // donc visible dans la palette) ; l'element de barre d'etat, lui, n'existe
-  // que si le portail a transmis une URL de retour.
+  // --- 2. « Fermer » button ------------------------------------------------
+  // The command is always registered (it is declared by the manifest, so it is
+  // visible in the palette); the status bar item, though, only exists if the
+  // portal passed a return URL.
   context.subscriptions.push(
     vscode.commands.registerCommand("codespace.close", async () => {
       if (!returnUrl) {
         await vscode.window.showInformationMessage(t.noReturnUrl);
         return;
       }
-      // `openExternal` ouvre un nouvel onglet du navigateur (voir README).
+      // `openExternal` opens a new browser tab (see README).
       await vscode.env.openExternal(vscode.Uri.parse(returnUrl));
     }),
   );

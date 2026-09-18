@@ -52,7 +52,7 @@ const GATEWAY = "10.77.0.254";
 const GIT_PORT = 9418;
 /** Fixed address for the test container; the portal assigns these in V1. */
 const CONTAINER_IP = "10.77.0.42";
-/** Image étudiante (P1) : elle porte git et vit sur le réseau clos. */
+/** Student image (P1): it carries git and lives on the closed network. */
 const GIT_IMAGE = process.env["CODESPACE_IMAGE"] ?? "codespace/c-dev:4.137.0";
 
 /** `.env` at the repository root; git-ignored, holds the Forgejo token. */
@@ -112,7 +112,7 @@ async function waitFor<T>(
     }
     await new Promise((r) => setTimeout(r, 250));
   }
-  throw new Error(`délai dépassé en attendant ${what}${last ? ` (${String(last)})` : ""}`);
+  throw new Error(`timed out waiting for ${what}${last ? ` (${String(last)})` : ""}`);
 }
 
 // --- fixture ----------------------------------------------------------------
@@ -168,21 +168,21 @@ async function inContainer(script: string, name: string): Promise<string> {
   );
 }
 
-const IDENTITY = "-c user.name=etudiant -c user.email=etudiant@codespace.local";
+const IDENTITY = "-c user.name=student -c user.email=student@codespace.local";
 
 beforeAll(async () => {
   if (!(await podmanOk("version"))) {
-    skipReason = "socket Podman rootful indisponible";
+    skipReason = "rootful Podman socket unavailable";
     return;
   }
   if (!FORGE_TOKEN) {
-    skipReason = "FORGE_TOKEN absent de .env (voir src/git/README.md)";
+    skipReason = "FORGE_TOKEN missing from .env (see src/git/README.md)";
     return;
   }
   if (!(await forgeReachable())) {
     await podmanOk("start", FORGE_CONTAINER);
     if (!(await waitFor("Forgejo", forgeReachable, 30_000).catch(() => false))) {
-      skipReason = `Forgejo injoignable sur ${FORGE_URL} (voir src/git/README.md)`;
+      skipReason = `Forgejo unreachable at ${FORGE_URL} (see src/git/README.md)`;
       return;
     }
   }
@@ -202,16 +202,16 @@ beforeAll(async () => {
     );
   }
   if (!(await podmanOk("network", "exists", NETWORK))) {
-    skipReason = `réseau ${NETWORK} indisponible`;
+    skipReason = `network ${NETWORK} unavailable`;
     return;
   }
 
   base = await tempDir("p3-integration-");
   volumesRoot = join(base, "volumes");
   const template = await makeSourceRepo({
-    dir: join(base, "modele"),
-    files: { "main.c": "int main(void) { return 0; }\n", "README.md": "# TP pointeurs\n" },
-    message: "modèle de l'enseignant",
+    dir: join(base, "template"),
+    files: { "main.c": "int main(void) { return 0; }\n", "README.md": "# Pointers lab\n" },
+    message: "teacher's template",
   });
   for (const session of [LAB, EXAM]) {
     await ensureStagingRepo({
@@ -250,7 +250,7 @@ beforeAll(async () => {
   // 10.77.0.254 are permanent), 0.0.0.0 as the fallback. Either way the
   // source-address check is what authenticates.
   const started = await waitFor(
-    "le port 9418 (un autre agent peut l'occuper)",
+    "port 9418 (another agent may be holding it)",
     async () =>
       startGitServer({
         sessions,
@@ -288,25 +288,25 @@ afterAll(async () => {
   if (base) await rm(base, { recursive: true, force: true });
 }, 120_000);
 
-describe("canal Git, conteneur sur le réseau codespace", () => {
-  it("dépendances disponibles", () => {
-    if (!available) console.warn(`P3 intégration ignorée : ${skipReason}`);
-    else console.info(`P3 intégration : service Git lié à ${boundHost}:${GIT_PORT}`);
+describe("Git channel, container on the codespace network", () => {
+  it("dependencies available", () => {
+    if (!available) console.warn(`P3 integration skipped: ${skipReason}`);
+    else console.info(`P3 integration: Git service bound to ${boundHost}:${GIT_PORT}`);
     expect(available || skipReason.length > 0).toBe(true);
   });
 
-  it("clone, commit, push depuis le conteneur ; PushEvent puis Forgejo en moins de 10 s", async () => {
+  it("clone, commit, push from the container; PushEvent then Forgejo in under 10 s", async () => {
     if (!available) return;
     await forge.ensureRepo(LAB.targetRepo as RepoRef);
 
     const out = await inContainer(
       [
         "set -e",
-        `git clone -q http://portal.internal:${GIT_PORT}/git/${LAB.sessionId} /tmp/depot`,
-        "cd /tmp/depot",
+        `git clone -q http://portal.internal:${GIT_PORT}/git/${LAB.sessionId} /tmp/repo`,
+        "cd /tmp/repo",
         "printf 'int main(void) { return 42; }\\n' > main.c",
         "git add -A",
-        `git ${IDENTITY} commit -q -m "rendu de l'étudiant"`,
+        `git ${IDENTITY} commit -q -m "student submission"`,
         "git push -q origin HEAD:main",
         'echo "SHA=$(git rev-parse HEAD)"',
       ].join("\n"),
@@ -316,7 +316,7 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
 
     const started = Date.now();
-    const rows = await waitFor("le PushEvent", async () => {
+    const rows = await waitFor("the PushEvent", async () => {
       const found = await store.bySession(LAB.sessionId);
       return found.length > 0 ? found : null;
     });
@@ -324,7 +324,7 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     expect(rows[0]?.sha).toBe(sha);
 
     await waitFor(
-      "le commit dans Forgejo",
+      "the commit in Forgejo",
       async () => {
         const url = `${FORGE_URL}/api/v1/repos/${LAB.targetRepo?.owner}/${LAB.targetRepo?.name}/git/commits/${sha}`;
         const r = await fetch(url, { headers: { Authorization: `token ${FORGE_TOKEN}` } });
@@ -334,18 +334,18 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     );
     expect(Date.now() - started).toBeLessThan(10_000);
 
-    const relayed = await waitFor("l'état relayed", async () => {
+    const relayed = await waitFor("the relayed state", async () => {
       const found = await store.bySession(LAB.sessionId);
       return found.every((r) => r.state === "relayed") ? found : null;
     });
     expect(relayed.every((r) => r.state === "relayed")).toBe(true);
   }, 120_000);
 
-  it("le même push depuis l'hôte (IP hors session) reçoit 403", async () => {
+  it("the same push from the host (IP outside the session) gets a 403", async () => {
     if (!available) return;
-    const local = join(base, "depuis-hote");
+    const local = join(base, "from-host");
     await git(["init", "--initial-branch=main", local], { env: FIXTURE_ENV });
-    await git(["-C", local, "commit", "--allow-empty", "-m", "depuis l'hôte"], {
+    await git(["-C", local, "commit", "--allow-empty", "-m", "from the host"], {
       env: FIXTURE_ENV,
     });
     // Whatever address the listener took, the host reaches it from its own
@@ -353,10 +353,10 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     // bridge, but not this session's container). Both are 403.
     const hostSide = boundHost === "0.0.0.0" ? "127.0.0.1" : boundHost;
     const remote = `http://${hostSide}:${GIT_PORT}/git/${LAB.sessionId}`;
-    const failure = await git(["-C", local, "push", remote, "HEAD:refs/heads/pirate"], {
+    const failure = await git(["-C", local, "push", remote, "HEAD:refs/heads/rogue"], {
       env: FIXTURE_ENV,
     }).then(
-      () => "le push a été accepté",
+      () => "the push was accepted",
       (err: Error) => err.message,
     );
     expect(failure).toMatch(/403/);
@@ -364,37 +364,37 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     // …and the staging repository is untouched.
     const response = await fetch(`${remote}/info/refs?service=git-receive-pack`);
     expect(response.status).toBe(403);
-    expect(await response.text()).toMatch(/adresse source/);
+    expect(await response.text()).toMatch(/source address/);
   }, 60_000);
 
-  it("Forgejo arrêté : le push réussit, l'événement reste pending, puis relayed au retour", async () => {
+  it("Forgejo stopped: the push succeeds, the event stays pending, then relayed when it is back", async () => {
     if (!available) return;
     await podman("stop", "-t", "2", FORGE_CONTAINER);
-    await waitFor("l'arrêt de Forgejo", async () => !(await forgeReachable()), 30_000);
+    await waitFor("Forgejo to stop", async () => !(await forgeReachable()), 30_000);
 
     const before = (await store.bySession(LAB.sessionId)).length;
     const out = await inContainer(
       [
         "set -e",
-        `git clone -q http://portal.internal:${GIT_PORT}/git/${LAB.sessionId} /tmp/depot`,
-        "cd /tmp/depot",
+        `git clone -q http://portal.internal:${GIT_PORT}/git/${LAB.sessionId} /tmp/repo`,
+        "cd /tmp/repo",
         "printf 'int main(void) { return 7; }\\n' > main.c",
         "git add -A",
-        `git ${IDENTITY} commit -q -m "rendu pendant la panne de la forge"`,
+        `git ${IDENTITY} commit -q -m "submission during the forge outage"`,
         "git push -q origin HEAD:main",
         'echo "SHA=$(git rev-parse HEAD)"',
       ].join("\n"),
-      `p3-panne-${run}`,
+      `p3-outage-${run}`,
     );
     const sha = /SHA=([0-9a-f]{40})/.exec(out)?.[1];
     expect(sha).toMatch(/^[0-9a-f]{40}$/);
 
     // The submission is recorded even though the forge is unreachable.
-    const rows = await waitFor("le PushEvent de la panne", async () => {
+    const rows = await waitFor("the PushEvent of the outage", async () => {
       const found = (await store.bySession(LAB.sessionId)).filter((r) => r.sha === sha);
       return found.length > 0 ? found : null;
     });
-    const pending = await waitFor("au moins une tentative de relais échouée", async () => {
+    const pending = await waitFor("at least one failed relay attempt", async () => {
       const row = (await store.bySession(LAB.sessionId)).find((r) => r.id === rows[0]?.id);
       return row && row.attempts > 0 ? row : null;
     }, 20_000);
@@ -402,10 +402,10 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     expect(pending.lastError).toBeTruthy();
 
     await podman("start", FORGE_CONTAINER);
-    await waitFor("le retour de Forgejo", forgeReachable, 60_000);
+    await waitFor("Forgejo to come back", forgeReachable, 60_000);
 
     const relayed = await waitFor(
-      "le passage à relayed",
+      "the transition to relayed",
       async () => {
         const row = (await store.bySession(LAB.sessionId)).find((r) => r.id === rows[0]?.id);
         return row?.state === "relayed" ? row : null;
@@ -415,34 +415,34 @@ describe("canal Git, conteneur sur le réseau codespace", () => {
     expect(relayed.state).toBe("relayed");
   }, 240_000);
 
-  it("devoir uploadpack:false : le clone est refusé proprement, le push fonctionne", async () => {
+  it("assignment with uploadpack:false: the clone is refused cleanly, the push works", async () => {
     if (!available) return;
     const fetchAttempt = await inContainer(
       `git clone http://portal.internal:${GIT_PORT}/git/${EXAM.sessionId} /tmp/exam 2>&1 || true`,
-      `p3-fetch-refuse-${run}`,
+      `p3-fetch-refused-${run}`,
     );
-    expect(fetchAttempt).toMatch(/désactivée pour ce devoir|403/);
+    expect(fetchAttempt).toMatch(/disabled for this assignment|403/);
 
     // The push, which is the submission, is never refused.
     const out = await inContainer(
       [
         "set -e",
-        "mkdir -p /tmp/rendu && cd /tmp/rendu",
+        "mkdir -p /tmp/submission && cd /tmp/submission",
         "git init -q --initial-branch=main .",
-        "printf 'reponse\\n' > reponse.txt",
+        "printf 'answer\\n' > answer.txt",
         "git add -A",
-        `git ${IDENTITY} commit -q -m "rendu d'examen"`,
-        `git push -q http://portal.internal:${GIT_PORT}/git/${EXAM.sessionId} HEAD:refs/heads/rendu`,
+        `git ${IDENTITY} commit -q -m "exam submission"`,
+        `git push -q http://portal.internal:${GIT_PORT}/git/${EXAM.sessionId} HEAD:refs/heads/submission`,
         'echo "SHA=$(git rev-parse HEAD)"',
       ].join("\n"),
       `p3-exam-push-${run}`,
     );
     const sha = /SHA=([0-9a-f]{40})/.exec(out)?.[1];
-    const rows = await waitFor("le PushEvent d'examen", async () => {
+    const rows = await waitFor("the exam PushEvent", async () => {
       const found = await store.bySession(EXAM.sessionId);
       return found.length > 0 ? found : null;
     });
-    expect(rows.map((r) => r.ref)).toContain("refs/heads/rendu");
-    expect(rows.find((r) => r.ref === "refs/heads/rendu")?.sha).toBe(sha);
+    expect(rows.map((r) => r.ref)).toContain("refs/heads/submission");
+    expect(rows.find((r) => r.ref === "refs/heads/submission")?.sha).toBe(sha);
   }, 120_000);
 });

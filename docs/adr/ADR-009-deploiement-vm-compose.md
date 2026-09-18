@@ -1,49 +1,49 @@
-# ADR-009 — Déploiement sur VM unique, Docker Compose, Caddy, sauvegardes SWITCH
+# ADR-009 — Deployment on a single VM, Docker Compose, Caddy, SWITCH backups
 
-## Statut
+## Status
 
-Accepté (2026-07-03, phase 3).
+Accepted (2026-07-03, phase 3).
 
-## Contexte
+## Context
 
-Disponibilité cible 99 % pendant les semestres (NFR-08), sonde externe sur `/healthz`,
-sauvegarde quotidienne avec RPO 24 h et RTO 4 h testés chaque semestre (NFR-16). Données
-personnelles d'étudiants suisses : la LPD s'applique (NFR-07, H11) et l'hébergement en
-Suisse évite toute question de transfert transfrontalier. L'exploitant est un enseignant.
+The availability target is 99 % during semesters (NFR-08), with an external probe on
+`/healthz`, a daily backup with RPO 24 h and RTO 4 h tested every semester (NFR-16). Personal
+data of Swiss students: the Swiss data protection act applies (NFR-07, H11) and hosting in
+Switzerland avoids any cross-border transfer question. The operator is a teacher.
 
-## Décision
+## Decision
 
-1. **Une VM applicative HEIG** (4 vCPU / 8 Go / 60 Go, Debian stable), **Docker Compose**,
-   trois services : `caddy` (TLS automatique Let's Encrypt, HSTS, seul port exposé),
-   `app` (image unique, front inclus, `restart: always`), `postgres` (volume local, non
-   exposé). Les webhooks sont une route du monolithe derrière Caddy ; en dev, `smee.io` ou
-   `cloudflared tunnel`.
-2. Déploiement par `docker compose pull && up -d`, migrations au démarrage (avec lock),
-   image versionnée par tag git, rollback par tag précédent.
-3. **Sauvegardes** : `pg_dump -Fc` quotidien via conteneur cron sidecar, copie hors VM vers
-   le **stockage objet institutionnel suisse** (SWITCH ou HEIG, transfert chiffré),
-   rétention 30 jours. Test de restauration **chronométré** une fois par semestre.
-4. **Observabilité orientée exigences** : `/healthz` (DB, pg-boss, horloge) sondé à 60 s ;
-   `/metrics` Prometheus exposant l'âge du plus vieux webhook non traité, le lag de la file,
-   les jobs en dead-letter, le quota GitHub restant et le retard du ticker ; écran
-   d'administration technique minimal (dead-letter avec relance).
+1. **One HEIG application VM** (4 vCPU / 8 GB / 60 GB, Debian stable), **Docker Compose**,
+   three services: `caddy` (automatic Let's Encrypt TLS, HSTS, the only exposed port),
+   `app` (a single image, front end included, `restart: always`), `postgres` (local volume,
+   not exposed). Webhooks are a route of the monolith behind Caddy; in development,
+   `smee.io` or `cloudflared tunnel`.
+2. Deployment by `docker compose pull && up -d`, migrations at startup (under a lock), image
+   versioned by git tag, rollback to the previous tag.
+3. **Backups**: a daily `pg_dump -Fc` through a sidecar cron container, copied off the VM to
+   **Swiss institutional object storage** (SWITCH or HEIG, encrypted transfer), with 30-day
+   retention. A **timed** restore test once per semester.
+4. **Requirements-driven observability**: `/healthz` (DB, pg-boss, clock) probed every 60 s;
+   a Prometheus `/metrics` endpoint exposing the age of the oldest unprocessed webhook, the
+   queue lag, dead-lettered jobs, the remaining GitHub quota and the ticker lag; a minimal
+   technical administration screen (dead letters with replay).
 
-## Conséquences
+## Consequences
 
-- Trois conteneurs, un fichier compose, un Caddyfile de quinze lignes : le déploiement
-  complet se reconstruit de zéro en moins d'une heure.
-- La restauration suit le runbook : VM neuve, dépôt d'infra, secrets depuis le coffre
-  (ADR-010), `pg_restore`, DNS, réconciliation GH-62 — les crons résorbent la fenêtre
-  perdue (ADR-011). RTO 4 h validé par le test semestriel.
-- Données et sauvegardes en Suisse : argumentaire LPD clos.
+- Three containers, one compose file, a fifteen-line Caddyfile: the whole deployment can be
+  rebuilt from scratch in under an hour.
+- Restoring follows the runbook: fresh VM, infrastructure repository, secrets from the vault
+  (ADR-010), `pg_restore`, DNS, GH-62 reconciliation — the cron jobs absorb the lost window
+  (ADR-011). RTO 4 h validated by the semester test.
+- Data and backups in Switzerland: the data protection argument is settled.
 
-## Alternatives rejetées
+## Rejected alternatives
 
-1. **Hébergeur cloud étranger ou stockage de sauvegarde hors Suisse** (Backblaze cité par la
-   proposition robustesse) : défendable chiffré, mais ouvre une question LPD de transfert
-   évitable — le stockage institutionnel l'élimine.
-2. **Kubernetes, PaaS managé** : capacité d'exploitation disproportionnée, dépendances
-   externes et coûts récurrents sans gain sur les NFR.
-3. **Sonde et métriques minimales seulement** (proposition simplicité initiale) : la revue a
-   retenu l'observabilité de la proposition robustesse — sans elle, le diagnostic d'une
-   rafale de deadline se ferait au SQL brut dans les tables pg-boss.
+1. **A foreign cloud host or backup storage outside Switzerland** (Backblaze, cited by the
+   robustness proposal): defensible when encrypted, but it opens an avoidable question of
+   cross-border transfer — institutional storage removes it.
+2. **Kubernetes or a managed PaaS**: disproportionate operational capacity, external
+   dependencies and recurring costs with no gain on the NFRs.
+3. **A minimal probe and minimal metrics only** (initial simplicity proposal): the review
+   kept the observability from the robustness proposal — without it, diagnosing a deadline
+   burst would mean raw SQL in the pg-boss tables.

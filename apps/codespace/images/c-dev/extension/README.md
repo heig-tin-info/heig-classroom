@@ -1,11 +1,12 @@
 # heig.codespace-statusbar
 
-Extension cuite dans l'image etudiante `codespace/c-dev` du projet
-heig-codespace. Elle ajoute a droite de la barre d'etat le temps restant
-jusqu'a l'echeance du devoir et un bouton « Fermer » qui ramene au portail.
+Extension baked into the `codespace/c-dev` student image of the heig-codespace
+project. It adds, at the right of the status bar, the time left until the
+assignment deadline and a « Fermer » button that takes the student back to the
+portal.
 
-Tout vient de l'environnement du conteneur (`CODESPACE_DEADLINE`,
-`CODESPACE_RETURN_URL`, `CODESPACE_ASSIGNMENT_NAME`), pose par le `podman run`
-du portail. Aucun acces reseau, aucune telemetrie, aucune dependance.
+Everything comes from the container environment (`CODESPACE_DEADLINE`,
+`CODESPACE_RETURN_URL`, `CODESPACE_ASSIGNMENT_NAME`), set by the portal's
+`podman run`. No network access, no telemetry, no dependency.
 
-Documentation complete : `images/c-dev/README.md` du depot heig-classroom.
+Full documentation: `images/c-dev/README.md` of the heig-classroom repository.

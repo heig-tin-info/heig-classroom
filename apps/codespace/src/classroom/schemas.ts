@@ -1,12 +1,12 @@
 /**
- * Validation Zod des messages de `packages/contracts/src/codespace.ts`.
+ * Zod validation of the messages of `packages/contracts/src/codespace.ts`.
  *
- * Le contrat partagé est écrit en types TypeScript, pas en schémas Zod : il
- * est lu par les deux applications et `packages/contracts` n'a `zod` qu'en
- * `peerDependencies`. Les schémas vivent donc ici, du côté qui *reçoit*, et
- * les fonctions d'assertion en bas de fichier font échouer la compilation si
- * l'un s'écarte de l'autre. Si un champ manque au contrat, il se corrige dans
- * `packages/contracts`, jamais ici.
+ * The shared contract is written in TypeScript types, not in Zod schemas: it is
+ * read by both applications and `packages/contracts` only has `zod` in
+ * `peerDependencies`. The schemas therefore live here, on the *receiving* side,
+ * and the assertion functions at the bottom of the file make compilation fail
+ * if one drifts from the other. If a field is missing from the contract, it is
+ * fixed in `packages/contracts`, never here.
  */
 import type {
   CodespaceAssignmentSync,
@@ -17,9 +17,9 @@ import type {
 import { z } from "zod";
 
 /**
- * Un identifiant de devoir ou d'étudiant nomme aussi un répertoire sous
- * `VOLUMES_ROOT` (`git/staging.ts`, `SAFE_ID`). Le refuser ici donne un 400
- * lisible plutôt qu'une exception au premier démarrage de session.
+ * An assignment or student id also names a directory under `VOLUMES_ROOT`
+ * (`git/staging.ts`, `SAFE_ID`). Refusing it here gives a readable 400 rather
+ * than an exception at the first session start.
  */
 export const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
@@ -27,20 +27,20 @@ export function isSafeId(value: string): boolean {
   return SAFE_ID.test(value) && value !== "." && value !== "..";
 }
 
-/** Date ISO 8601 relisible par `Date.parse` ; le contrat n'en dit pas plus. */
+/** ISO 8601 date readable by `Date.parse`; the contract says no more. */
 const IsoDate = z
   .string()
   .min(1)
-  .refine((v) => !Number.isNaN(Date.parse(v)), "date ISO 8601 attendue");
+  .refine((v) => !Number.isNaN(Date.parse(v)), "ISO 8601 date expected");
 
 const RepoRefSchema = z.object({
-  /** `<owner>/<name>` sur la forge. */
-  fullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/, "dépôt attendu sous la forme owner/name"),
+  /** `<owner>/<name>` on the forge. */
+  fullName: z.string().regex(/^[^/\s]+\/[^/\s]+$/, "repository expected in the form owner/name"),
   defaultBranch: z.string().min(1),
 });
 
 export const AssignmentSyncSchema = z.object({
-  id: z.string().refine(isSafeId, "identifiant de devoir impropre à un chemin"),
+  id: z.string().refine(isSafeId, "assignment id unsuitable for a path"),
   slug: z.string().min(1),
   name: z.string().min(1),
   classroomId: z.string().min(1),
@@ -63,7 +63,7 @@ export const LaunchClaimsSchema = z.object({
   iat: z.number(),
   exp: z.number(),
   jti: z.string().min(1),
-  sub: z.string().refine(isSafeId, "sujet impropre à un chemin de volume"),
+  sub: z.string().refine(isSafeId, "subject unsuitable for a volume path"),
   email: z.string().min(1),
   displayName: z.string(),
   githubLogin: z.string().nullable(),
@@ -73,9 +73,9 @@ export const LaunchClaimsSchema = z.object({
 
 export type LaunchClaims = z.infer<typeof LaunchClaimsSchema>;
 
-// --- Concordance avec le contrat partagé, vérifiée à la compilation --------
-// Chaque fonction échoue à compiler si le schéma s'écarte du type. Elles ne
-// sont jamais appelées ; leur seul effet est sur `tsc`.
+// --- Agreement with the shared contract, checked at compile time -----------
+// Each function fails to compile if the schema drifts from the type. They are
+// never called; their only effect is on `tsc`.
 
 /* eslint-disable @typescript-eslint/no-unused-vars */
 const _syncMatchesContract = (v: AssignmentSyncBody): CodespaceAssignmentSync => v;

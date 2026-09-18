@@ -1,27 +1,27 @@
 /**
- * Reprise d'une session existante sur le portail déployé, depuis le poste.
+ * Resuming an existing session on the deployed portal, from the workstation.
  *
- * Il n'y a pas de « bouton Démarrer » en production : `OIDC_ISSUER` est vide et
- * l'étudiant arrive toujours par `GET /launch?token=…` (docs/deploy.md § 4).
- * Ce script joue donc le rôle de classroom — il signe lui-même un jeton de
- * lancement avec le secret partagé, comme `deploy/smoke.ts` et `scripts/e2e.ts`
- * § 9 — mais pour une session **qui existe déjà** : même `sub`, même devoir,
- * même dépôt que ceux qui sont en base.
+ * There is no "Start" button in production: `OIDC_ISSUER` is empty and the
+ * student always arrives through `GET /launch?token=…` (docs/deploy.md § 4).
+ * So this script plays classroom's part — it signs a launch token itself with
+ * the shared secret, like `deploy/smoke.ts` and `scripts/e2e.ts` § 9 — but
+ * for a session that **already exists**: same `sub`, same assignment, same
+ * repository as the ones held in the database.
  *
- * À quoi ça sert : reprendre une session dont l'espace de travail n'a pas pu
- * être amorcé (dépôt de transit sans référence), après avoir posé la GitHub
- * App. Le portail réamorce alors et complète `work/` (docs/deploy.md § 5).
+ * What it is for: resuming a session whose workspace could not be bootstrapped
+ * (staging repository with no reference), after the GitHub App has been put
+ * in place. The portal then bootstraps again and fills `work/` (docs/deploy.md § 5).
  *
  *   CODESPACE_LAUNCH_SECRET="$(ssh root@code.chevallier.io \
  *       sed -n 's/^CODESPACE_LAUNCH_SECRET=//p' /etc/codespace/env)" \
  *     pnpm --filter @hgc/codespace exec tsx deploy/resume.ts \
- *       --student <sub classroom> --assignment <id> \
- *       --repo <owner/nom> --branch <branche par défaut>
+ *       --student <classroom sub> --assignment <id> \
+ *       --repo <owner/name> --branch <default branch>
  *
- * Les quatre valeurs se lisent en base sur la VM (table `sessions`, colonnes
- * `student`, `assignment_id`, `target_repo`). Le script ne crée rien qui
- * n'existe pas : si le couple (étudiant, devoir) n'a pas de session, le portail
- * en ouvre une neuve, ce qui est le comportement normal de `/launch`.
+ * The four values are read from the database on the VM (table `sessions`,
+ * columns `student`, `assignment_id`, `target_repo`). The script creates
+ * nothing that does not exist: if the (student, assignment) pair has no
+ * session, the portal opens a fresh one, the normal behaviour of `/launch`.
  */
 import { randomBytes } from "node:crypto";
 
@@ -43,8 +43,8 @@ const email = arg("email") ?? `${student}@heig-vd.ch`;
 
 if (SECRET.length < 32 || !student || !assignment || !repo) {
   console.error(
-    "usage : CODESPACE_LAUNCH_SECRET=… tsx deploy/resume.ts " +
-      "--student <sub> --assignment <id> --repo <owner/nom> [--branch <b>] [--email <a>]",
+    "usage: CODESPACE_LAUNCH_SECRET=… tsx deploy/resume.ts " +
+      "--student <sub> --assignment <id> --repo <owner/name> [--branch <b>] [--email <a>]",
   );
   process.exit(2);
 }
@@ -71,12 +71,12 @@ const started = Date.now();
 const res = await fetch(`${BASE}/launch?token=${token}`, { redirect: "manual" });
 const body = await res.text();
 const location = res.headers.get("location");
-console.log(`statut     : ${res.status}`);
-console.log(`redirection: ${location ?? "(aucune)"}`);
-console.log(`durée      : ${((Date.now() - started) / 1000).toFixed(2)} s`);
+console.log(`status     : ${res.status}`);
+console.log(`redirect   : ${location ?? "(none)"}`);
+console.log(`duration   : ${((Date.now() - started) / 1000).toFixed(2)} s`);
 if (res.status !== 303) {
-  // Une page de refus est en français et tient en quelques lignes : on la rend
-  // lisible plutôt que de la recracher telle quelle.
+  // A refusal page is in French and only a few lines long: we make it
+  // readable instead of spitting it back out as is.
   const text = body
     .replace(/<style[\s\S]*?<\/style>/g, "")
     .replace(/<[^>]+>/g, " ")

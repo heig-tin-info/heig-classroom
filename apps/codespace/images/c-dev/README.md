@@ -1,147 +1,172 @@
-# images/c-dev — image étudiante durcie (tâche P1)
+# images/c-dev — hardened student image (task P1)
 
-Environnement de travail d'un étudiant : chaîne C complète, `gdb` réellement
-utilisable (ASLR désactivable), code-server sans réseau, sans galerie
-d'extensions et sans écriture possible hors du volume de travail.
+The working environment of a student: a complete C toolchain, a `gdb` that is really
+usable (ASLR can be disabled), code-server without network, without an extension
+gallery and unable to write anywhere outside the work volume.
 
-Cadre : [docs/jalon-0.md](../../docs/jalon-0.md) § P1,
-[docs/analyse.md](../../docs/analyse.md) § 3.2, 3.4, 3.5 et 4.3,
-invariants 1 et 3 de [CLAUDE.md](../../CLAUDE.md).
+Framework: [docs/jalon-0.md](../../docs/jalon-0.md) § P1,
+[docs/analyse.md](../../docs/analyse.md) § 3.2, 3.4, 3.5 and 4.3,
+invariants 1 and 3 of [CLAUDE.md](../../CLAUDE.md).
 
-## Fichiers
+## Files
 
-| Fichier | Rôle |
+| File | Role |
 | --- | --- |
 | `Containerfile` | image `codespace/c-dev` |
-| `entrypoint.sh` | copie des réglages machine dans le `user-data-dir` tmpfs, puis `code-server` |
-| `settings.json` | réglages machine, installés en `/etc/code-server/settings.json` |
-| `resolv.conf` | résolveur vide, installé en `/etc/resolv.conf` |
-| `extension/` | source de `heig.codespace-statusbar`, empaquetée en `.vsix` au build |
-| `run-hardened.sh` | `podman run` avec le durcissement obligatoire |
-| `test.sh` | test d'acceptation P1 (41 assertions) |
-| `../../infra/seccomp/codespace.json` | profil seccomp du projet |
+| `entrypoint.sh` | copies the machine settings into the tmpfs `user-data-dir`, then `code-server` |
+| `settings.json` | machine settings, installed as `/etc/code-server/settings.json` |
+| `resolv.conf` | empty resolver, installed as `/etc/resolv.conf` |
+| `extension/` | source of `heig.codespace-statusbar`, packaged into a `.vsix` at build time |
+| `run-hardened.sh` | `podman run` with the mandatory hardening |
+| `test.sh` | P1 acceptance test (46 assertions) |
+| `../../infra/seccomp/codespace.json` | seccomp profile of the project |
 
-## Versions épinglées
+## Pinned versions
 
-| Élément | Version | Épinglage |
+| Item | Version | Pinning |
 | --- | --- | --- |
-| Base | Debian 13.6 « trixie » slim | empreinte `sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f` |
-| code-server | **4.137.0** (VS Code 1.137.0, commit `b11dabda`) | `ARG CS_VERSION`, `.deb` de la release GitHub `coder/code-server` |
-| gcc | 14.2.0 (Debian 14.2.0-19) | dépôt Debian stable |
-| gdb | 16.3 (Debian 16.3-1) | dépôt Debian stable |
-| clangd | 19.1.7 | paquet `clangd` |
-| git | 2.47.3 | dépôt Debian stable |
-| `llvm-vs-code-extensions.vscode-clangd` | 0.6.0 | Open VSX, résolue au build |
-| `webfreak.debug` | 0.27.0 | Open VSX, résolue au build |
-| `heig.codespace-statusbar` | 0.1.0 | source locale `extension/`, empaquetée au build |
-| `@vscode/vsce` (empaquetage seulement) | 4.0.0 | `ARG VSCE_VERSION`, `npx` dans l'étape `vsix` |
-| Node de l'étape d'empaquetage | `node:22-slim` | empreinte `sha256:4d676821dff059fd00d277ee4261ef34ea712317fed0737c03941481b5760c96` |
+| Base | Debian 13.6 "trixie" slim | digest `sha256:abc9cb88a5587630d7f915f47b23b0668fe250fbfc6457aa4d52b534c1bbf73f` |
+| code-server | **4.137.0** (VS Code 1.137.0, commit `b11dabda`) | `ARG CS_VERSION`, `.deb` from the GitHub release `coder/code-server` |
+| gcc | 14.2.0 (Debian 14.2.0-19) | Debian stable repository |
+| gdb | 16.3 (Debian 16.3-1) | Debian stable repository |
+| clangd | 19.1.7 | package `clangd` |
+| git | 2.47.3 | Debian stable repository |
+| `llvm-vs-code-extensions.vscode-clangd` | 0.6.0 | Open VSX, resolved at build time |
+| `webfreak.debug` | 0.27.0 | Open VSX, resolved at build time |
+| `heig.codespace-statusbar` | 0.1.0 | local source `extension/`, packaged at build time |
+| `@vscode/vsce` (packaging only) | 4.0.0 | `ARG VSCE_VERSION`, `npx` in the `vsix` stage |
+| Node of the packaging stage | `node:22-slim` | digest `sha256:4d676821dff059fd00d277ee4261ef34ea712317fed0737c03941481b5760c96` |
 
-Les deux extensions sont épinglées par identifiant seulement : Open VSX ne
-garantit pas la disponibilité d'une version ancienne. La version effectivement
-retenue au build est écrite dans `/etc/code-server/extensions.lock` **dans
-l'image**, et le build échoue si l'une des deux manque. Aucun `.vsix` n'a eu à
-être téléchargé à la main : `code-server --install-extension <id>` depuis Open
-VSX (galerie par défaut de code-server) a fonctionné pour les deux.
+The two Open VSX extensions are pinned by identifier only: Open VSX does not
+guarantee that an old version stays available. The version actually
+selected at build time is written into `/etc/code-server/extensions.lock` **inside
+the image**, and the build fails if either of the two is missing. No `.vsix` had to
+be downloaded by hand: `code-server --install-extension <id>` from Open
+VSX (code-server's default gallery) worked for both.
 
-## Construction et lancement
+## Building and running
+
+From `apps/codespace`, as in [CLAUDE.md](../../CLAUDE.md):
 
 ```bash
-podman --remote --url unix:///run/podman/podman.sock \
-  build -t codespace/c-dev:4.137.0 -t codespace/c-dev:latest images/c-dev
+podman build -t codespace/c-dev:4.137.0 images/c-dev
 
 CTR_NAME=cdev-p1 VOL_DIR=/srv/codespace/volumes/demo images/c-dev/run-hardened.sh
 images/c-dev/test.sh
 ```
 
-`run-hardened.sh` accepte `CTR_NAME`, `VOL_DIR`, `IMAGE`, `NETWORK`,
-`SECCOMP`, `PODMAN_URL`, `EXTRA_ARGS`. Il écrit l'identifiant du conteneur sur
-la sortie standard. `NETWORK` vaut `none` pour P1 ; P2 le lancera avec
+`podman` here must be the rootful remote one: either through the
+`alias podman='podman --remote'` of [docs/setup-poste.md](../../docs/setup-poste.md),
+or spelled out as `podman --remote --url unix:///run/podman/podman.sock build …`.
+Without `--remote` the binary silently falls back to local rootless mode and builds
+into another store. Add `-t codespace/c-dev:latest` to get the floating tag as
+well, which is what `deploy/push.sh` does.
+
+`run-hardened.sh` accepts `CTR_NAME`, `VOL_DIR`, `IMAGE`, `NETWORK`,
+`SECCOMP`, `PODMAN_URL`, `EXTRA_ARGS`. It writes the container identifier on
+standard output. `NETWORK` is `none` for P1; P2 will start it with
 `NETWORK=codespace`.
 
-## Mesures (2026-09-17, WSL2, 24 cœurs, Podman 5.7 rootful, crun, overlay)
+## Modifying the image
 
-| Mesure | Valeur |
+- **Add an apt package**: add it to the `apt-get install` list of the `Containerfile` (step 1), add its binary to the presence assertion of `test.sh` § 7 (`test -x /usr/bin/…`), and add a row to the pinned-versions table above.
+- **Add an extension**: one `ARG` for its identifier, one `--install-extension` in the same `RUN`, one `grep -qi "^<id>@"` against `/etc/code-server/extensions.lock` so that the build fails if it is missing, its id in `extensions.allowed` of `settings.json`, the exact expected list asserted in `test.sh` § 3 (three ids, sorted), and a row in the pinned-versions table.
+- **Bump code-server**: `ARG CS_VERSION` in the `Containerfile`, then the tag `codespace/c-dev:4.137.0` wherever it is hard-coded — `.env.example` (`CODESPACE_IMAGE`, `CODESPACE_DEFAULT_IMAGE`), `src/auth/config.ts` (the defaults of those same two), `images/c-dev/run-hardened.sh`, `images/c-dev/test.sh`, `deploy/push.sh`, `deploy/bootstrap.sh`, `seed/assignments.yaml`, `CLAUDE.md`, `docs/deploy.md`, `docs/integration-classroom.md`, `src/git/README.md`, this README, and the tests that state it (`src/engine/index.test.ts`, `src/sessions/sessions.test.ts`, `src/sessions/containerEnv.test.ts`, `src/sessions/workspace.test.ts`, `src/proxy/proxy.test.ts`, `src/web/pages.test.ts`, `src/git/channel.integration.test.ts`).
+- **Deploy**: `deploy/push.sh --rebuild-image` rebuilds the image on the VM; without the flag it is only built there when the tag is missing.
+- **Run `images/c-dev/test.sh`**: prerequisites are rootful Podman on `unix:///run/podman/podman.sock`, the image built, `python3` on the host (it fabricates the fake `.vsix`); no sudo. Its ten sections prove, in order:
+  - § 0 the container starts under `run-hardened.sh` and answers `/healthz` (prints `MESURE_DEMARRAGE_SECONDES`);
+  - § 1 `gdb` runs a program and produces a backtrace, with no "Operation not permitted";
+  - § 2 `personality(ADDR_NO_RANDOMIZE)` passes the project seccomp profile, and the control container on the default profile still varies;
+  - § 3 no extension can be installed, and the server knows exactly the three baked-in ones;
+  - § 4 the root filesystem is read-only, `CapEff` is zero, `NoNewPrivs` is 1 and the seccomp filter is loaded;
+  - § 5 uid 1000 inside, host UID outside 0–65535, and two containers side by side get different host UIDs;
+  - § 6 a fork bomb is capped by `--pids-limit 256`, the host and the neighbouring container are intact;
+  - § 7 code-server: machine settings copied, `extensions.allowed`, the settings found in the embedded package, the font-prompt chain, neutralised gallery, no uncaught exception, toolchain binaries and man pages present;
+  - § 8 `/etc/resolv.conf` comes from the image, with no nameserver, and resolution fails in under two seconds;
+  - § 9 the container carries the seven portal variables and nothing else, the git identity works without a configuration file, and the VS Code server inherits the environment.
+
+## Measurements (2026-09-17, WSL2, 24 cores, Podman 5.7 rootful, crun, overlay)
+
+| Measurement | Value |
 | --- | --- |
-| Build complet `--no-cache` | **45 – 51 s** (dont ~25 s de téléchargement du `.deb` de 233 Mo) |
-| Build avec cache de couches | 4,0 s |
-| Taille d'image | **1,50 Go** (1 499 111 868 octets) |
-| `podman run` (retour de la commande) | 0,18 s |
-| `podman run` → `/healthz` 200 | **0,61 – 0,76 s** à chaud, **1,0 s** au premier lancement après build (cache de pages froid). Mesure imprimée par `test.sh` : `MESURE_DEMARRAGE_SECONDES` |
-| `podman run` → `GET /` (poste de travail HTML servi) | 0,95 – 1,01 s |
+| Full `--no-cache` build | **45 – 51 s** (of which ~25 s downloading the 233 MB `.deb`) |
+| Build with layer cache | 4.0 s |
+| Image size | **1.50 GB** (1,499,111,868 bytes) |
+| `podman run` (command returns) | 0.18 s |
+| `podman run` → `/healthz` 200 | **0.61 – 0.76 s** warm, **1.0 s** on the first start after a build (cold page cache). Measurement printed by `test.sh`: `MESURE_DEMARRAGE_SECONDES` |
+| `podman run` → `GET /` (workbench HTML served) | 0.95 – 1.01 s |
 
-Lecture pour la décision « pool préchauffé » de
-[docs/analyse.md § 3.4](../../docs/analyse.md) : le démarrage du conteneur
-n'est pas le poste coûteux. Une seconde entre `podman run` et un poste de
-travail servi, sur une image déjà locale, laisse plus de neuf secondes pour
-l'authentification, la création du volume, l'amorçage du dépôt de transit et
-le chargement du navigateur. **Rien dans cette mesure ne justifie de
-construire un pool préchauffé.** À remesurer au jalon 1 avec vingt conteneurs
-simultanés : la mesure ci-dessus est mono-conteneur, et le coût d'un
-`--userns=auto` est en `chown` sur les couches, pas en `run`.
+Reading for the "pre-warmed pool" decision of
+[docs/analyse.md § 3.4](../../docs/analyse.md): starting the container
+is not the expensive part. One second between `podman run` and a workbench
+served, on an image that is already local, leaves more than nine seconds for
+authentication, volume creation, seeding of the staging repository and
+loading of the browser. **Nothing in this measurement justifies
+building a pre-warmed pool.** To be measured again at milestone 1 with twenty simultaneous
+containers: the measurement above is single-container, and the cost of a
+`--userns=auto` is in the `chown` over the layers, not in the `run`.
 
-## Options de code-server : vérifiées dans `code-server --help` de la 4.137.0
+## code-server options: checked in `code-server --help` of 4.137.0
 
-Toutes les options exigées par jalon-0 § P1 existent dans la version épinglée.
-Vérification faite en exécutant `code-server --help` dans l'image construite.
+Every option required by jalon-0 § P1 exists in the pinned version.
+Verification done by running `code-server --help` inside the built image.
 
-| Option | Présente en 4.137.0 |
+| Option | Present in 4.137.0 |
 | --- | --- |
-| `--auth none` | oui |
-| `--bind-addr 0.0.0.0:8080` | oui |
-| `--disable-file-downloads` | oui |
-| `--disable-file-uploads` | oui |
-| `--disable-workspace-trust` | oui |
-| `--disable-update-check` | oui |
-| `--disable-getting-started-override` | oui |
-| `--extensions-dir` | oui |
-| `--user-data-dir` | oui |
-| `--install-extension`, `--list-extensions`, `--force` | oui (build) |
+| `--auth none` | yes |
+| `--bind-addr 0.0.0.0:8080` | yes |
+| `--disable-file-downloads` | yes |
+| `--disable-file-uploads` | yes |
+| `--disable-workspace-trust` | yes |
+| `--disable-update-check` | yes |
+| `--disable-getting-started-override` | yes |
+| `--extensions-dir` | yes |
+| `--user-data-dir` | yes |
+| `--install-extension`, `--list-extensions`, `--force` | yes (build) |
 
 `EXTENSIONS_GALLERY='{"serviceUrl":"","itemUrl":"","resourceUrlTemplate":""}'`
-est pris en compte : le journal de démarrage affiche `Using custom extensions
-gallery`, et `test.sh` en fait une assertion.
+is taken into account: the start-up log shows `Using custom extensions
+gallery`, and `test.sh` makes an assertion out of it.
 
-## Réglages machine
+## Machine settings
 
-`/etc/code-server/settings.json` est copié par le point d'entrée dans
-`/run/code-server/User/settings.json` **et** `/run/code-server/Machine/settings.json`
-(le `user-data-dir` est un tmpfs, donc remis à neuf à chaque démarrage de
-conteneur).
+`/etc/code-server/settings.json` is copied by the entry point into
+`/run/code-server/User/settings.json` **and** `/run/code-server/Machine/settings.json`
+(the `user-data-dir` is a tmpfs, hence reset on every container start).
 
-Les sept clés demandées sont présentes et leur nom existe bien dans le paquet
-VS Code 1.137.0 embarqué (recherche littérale dans
-`/usr/lib/code-server/lib/vscode/out`) :
+The seven required keys are present and their names really do exist in the
+embedded VS Code 1.137.0 package (literal search in
+`/usr/lib/code-server/lib/vscode/out`):
 
 `files.autoSave: afterDelay`, `files.autoSaveDelay: 1000`,
 `extensions.autoUpdate: false`, `update.mode: none`,
 `telemetry.telemetryLevel: off`, `chat.disableAIFeatures: true`,
-`extensions.allowed` restreint à `llvm-vs-code-extensions.vscode-clangd` et
-`webfreak.debug` (avec `"*": false`).
+`extensions.allowed` restricted to `llvm-vs-code-extensions.vscode-clangd`,
+`webfreak.debug` and `heig.codespace-statusbar` (with `"*": false`).
 
-S'y ajoutent, non demandés mais cohérents : `extensions.autoCheckUpdates`,
+Added on top, not required but consistent: `extensions.autoCheckUpdates`,
 `update.showReleaseNotes`, `workbench.startupEditor`,
-`security.workspace.trust.enabled`, et `clangd.path: /usr/bin/clangd` +
-`clangd.checkUpdates: false` — sans quoi l'extension clangd tente de
-télécharger son binaire et échoue, réseau coupé (docs/analyse.md § 3.5).
+`security.workspace.trust.enabled`, and `clangd.path: /usr/bin/clangd` +
+`clangd.checkUpdates: false` — without which the clangd extension tries to
+download its binary and fails, the network being cut off (docs/analyse.md § 3.5).
 
-### Les deux réglages ajoutés après le premier essai réel (2026-09-18)
+### The two settings added after the first real trial (2026-09-18)
 
-Retours 1 et 2 de [docs/pistes.md](../../docs/pistes.md), « Retours du premier
-essai réel ». Les deux noms ont été **cherchés dans le paquet embarqué**, pas
-retenus de mémoire : `grep` littéral dans
+Feedback 1 and 2 of [docs/pistes.md](../../docs/pistes.md), "Feedback from the first
+real trial". Both names were **looked up in the embedded package**, not
+recalled from memory: literal `grep` in
 `/usr/lib/code-server/lib/vscode/out/vs/workbench/workbench.web.main.internal.js`
-de l'image construite. `test.sh` § 7 rejoue les deux recherches, et sur la
-déclaration complète, de sorte qu'un changement de version casse le test
-plutôt que le comportement.
+of the built image. `test.sh` § 7 replays both searches, and over the
+complete declaration, so that a change of version breaks the test
+rather than the behaviour.
 
-**1. Barre latérale secondaire masquée au démarrage.**
+**1. Secondary side bar hidden at start-up.**
 
 ```json
 "workbench.secondarySideBar.defaultVisibility": "hidden"
 ```
 
-Preuve, telle qu'elle sort du paquet (minifié, tronqué) :
+Proof, as it comes out of the package (minified, truncated):
 
 ```js
 "workbench.secondarySideBar.defaultVisibility":{type:"string",
@@ -149,20 +174,20 @@ Preuve, telle qu'elle sort du paquet (minifié, tronqué) :
  default:"visibleInWorkspace", …}
 ```
 
-Le défaut amont est `visibleInWorkspace` : c'est bien lui qui ouvrait une barre
-vide, la vue de chat qui l'habitait étant désactivée par
-`chat.disableAIFeatures`. `hidden` est la première valeur de l'énumération
-déclarée. Les clés voisines relevées au passage, non utilisées :
-`workbench.secondarySideBar.forceMaximized` (marquée `experimental`) et
+The upstream default is `visibleInWorkspace`: that is indeed what opened an empty
+bar, the chat view that used to live in it being disabled by
+`chat.disableAIFeatures`. `hidden` is the first value of the declared
+enumeration. Neighbouring keys noticed along the way, not used:
+`workbench.secondarySideBar.forceMaximized` (marked `experimental`) and
 `workbench.secondarySideBar.showLabels`.
 
-**2. Raccourcis indépendants de la disposition clavier détectée.**
+**2. Keybindings independent of the detected keyboard layout.**
 
 ```json
 "keyboard.dispatch": "keyCode"
 ```
 
-Preuve :
+Proof:
 
 ```js
 {id:"keyboard",order:15,type:"object",title:…,properties:{
@@ -171,45 +196,45 @@ Preuve :
  "keyboard.mapAltGrToCtrlAlt":{…,included:jo===1}}}
 ```
 
-et, à l'usage :
+and, in use:
 
 ```js
 function Dwn(s){let o=s.getValue("keyboard"),e=o?.dispatch==="keyCode"?1:0; …}
 ```
 
-VS Code Web n'a pas de disposition suisse romande ; il détecte « Swiss German »
-et en déduit des raccourcis faux. `keyCode` fait dispatcher les raccourcis sur
-le code de touche brut, donc indépendamment de la disposition détectée.
+VS Code Web has no French-Swiss layout; it detects "Swiss German"
+and derives wrong keybindings from it. `keyCode` makes keybindings dispatch on
+the raw key code, hence independently of the detected layout.
 
-**La frappe n'est pas affectée.** Les caractères que l'étudiant tape viennent
-du navigateur et de la disposition du système d'exploitation ; VS Code les
-reçoit tels quels. `keyboard.dispatch` ne touche qu'à la résolution des
-raccourcis clavier. Un `é`, un `à` ou un `<` continuent de s'écrire comme
-ailleurs sur le poste.
+**Typing is not affected.** The characters the student types come
+from the browser and from the operating system layout; VS Code receives them
+as they are. `keyboard.dispatch` only touches the resolution of
+keybindings. An `é`, an `à` or a `<` keep being typed just as
+anywhere else on the machine.
 
-### Le réglage ajouté après les sessions réelles du 2026-09-18
+### The setting added after the real sessions of 2026-09-18
 
-**Invite « Use the fonts on your computer » à l'ouverture de l'éditeur.**
+**"Use the fonts on your computer" prompt when opening the editor.**
 
 ```json
 "terminal.integrated.stickyScroll.enabled": false
 ```
 
-Même méthode que les deux précédents : la cause a été **cherchée dans le
-paquet embarqué**, pas devinée. La chaîne relevée, en quatre maillons :
+Same method as the two previous ones: the cause was **looked up in the
+embedded package**, not guessed. The chain, in four links:
 
-1. l'appel qui déclenche l'invite du navigateur (permission *Local Font
-   Access*) est `window.queryLocalFonts()`, dans
-   `node_modules/@xterm/addon-ligatures/lib/addon-ligatures.js` :
+1. the call that triggers the browser prompt (*Local Font
+   Access* permission) is `window.queryLocalFonts()`, in
+   `node_modules/@xterm/addon-ligatures/lib/addon-ligatures.js`:
 
    ```js
    else if("undefined"!=typeof window&&"queryLocalFonts"in window){
      const e={};try{const t=await window.queryLocalFonts(); …
    ```
 
-2. le **défilement collant du terminal** charge cet addon **sans condition** —
-   il ne consulte pas `terminal.integrated.fontLigatures.enabled`. Relevé dans
-   le constructeur de la surcouche, `workbench.web.main.internal.js` :
+2. the **terminal sticky scroll** loads that addon **unconditionally** —
+   it does not consult `terminal.integrated.fontLigatures.enabled`. Found in
+   the constructor of the overlay, `workbench.web.main.internal.js`:
 
    ```js
    this._stickyScrollOverlay.open(this._element),
@@ -218,11 +243,11 @@ paquet embarqué**, pas devinée. La chaîne relevée, en quatre maillons :
      this._ligaturesAddon=new c,this._stickyScrollOverlay.loadAddon(this._ligaturesAddon) …
    ```
 
-   C'est le deuxième des deux appels à `importAddon("ligatures")` du paquet ;
-   l'autre, dans `_refreshLigaturesAddon()`, est bien gardé
-   (`if(e?.enabled){…}`) et n'est donc pas la cause.
+   It is the second of the two calls to `importAddon("ligatures")` in the package;
+   the other one, in `_refreshLigaturesAddon()`, is properly guarded
+   (`if(e?.enabled){…}`) and is therefore not the cause.
 
-3. la surcouche n'existe que si le réglage est vrai. `_shouldBeEnabled()` :
+3. the overlay only exists if the setting is true. `_shouldBeEnabled()`:
 
    ```js
    _shouldBeEnabled(){let e=this._ctx.instance.capabilities.get(2);
@@ -230,20 +255,20 @@ paquet embarqué**, pas devinée. La chaîne relevée, en quatre maillons :
        &&e&&e.hasRichCommandDetection&&this._xterm?.raw?.element)}
    ```
 
-4. et son défaut amont est **vrai** :
+4. and its upstream default is **true**:
 
    ```js
    "terminal.integrated.stickyScroll.enabled":{markdownDescription:d(18525,…),
      type:"boolean",default:!0}
    ```
 
-D'où l'invite à l'ouverture, dès que l'intégration shell a détecté une
-commande, sans que personne n'ait demandé de ligatures. `false` supprime la
-surcouche, donc l'import, donc l'appel.
+Hence the prompt on opening, as soon as the shell integration has detected a
+command, without anyone having asked for ligatures. `false` removes the
+overlay, hence the import, hence the call.
 
-**Le second appelant de `queryLocalFonts` ne s'exécute pas en web.** C'est la
-liste de polices proposée par l'éditeur de réglages pour `editor.fontFamily` et
-`terminal.integrated.fontFamily` :
+**The second caller of `queryLocalFonts` does not run on the web.** It is the
+list of fonts offered by the settings editor for `editor.fontFamily` and
+`terminal.integrated.fontFamily`:
 
 ```js
 fTn=async()=>{try{return[...await ut.queryLocalFonts()].map(t=>t.family)}
@@ -251,365 +276,370 @@ fTn=async()=>{try{return[...await ut.queryLocalFonts()].map(t=>t.family)}
 mNt=async()=>Vhe?(await fTn()).map(e=>({body:`${e}`})):[];
 ```
 
-`Vhe` est l'`isElectron` du module de plate-forme minifié
-(`Ti=eZe,yt=tZe,Fr=ZJe,HSi=Ago,Ls=Ngo,Vhe=Ogo,Bt=FSi,…`, soit
+`Vhe` is the `isElectron` of the minified platform module
+(`Ti=eZe,yt=tZe,Fr=ZJe,HSi=Ago,Ls=Ngo,Vhe=Ogo,Bt=FSi,…`, that is
 `isWindows, isMacintosh, isLinux, isLinuxSnap, isNative, isElectron, isWeb`).
-Dans un navigateur il vaut faux et `mNt()` rend une liste vide sans rien
-demander. Aucun réglage ne le gouverne, et il n'y en a pas besoin.
+In a browser it is false and `mNt()` returns an empty list without asking
+anything. No setting governs it, and none is needed.
 
-**Ajouté aussi, par prudence et non parce qu'il corrige quoi que ce soit :**
+**Also added, out of caution and not because it fixes anything:**
 
 ```json
 "terminal.integrated.fontLigatures.enabled": false
 ```
 
-C'est déjà le défaut amont (`default:!1`), vérifié ; le poser explicitement
-ferme le premier chemin (`_refreshLigaturesAddon`) même si ce défaut changeait.
+It is already the upstream default (`default:!1`), verified; setting it explicitly
+closes the first path (`_refreshLigaturesAddon`) even if that default were to change.
 
-`test.sh` § 7 rejoue les cinq recherches : les deux déclarations avec leur
-défaut amont, l'import inconditionnel du défilement collant, l'appel dans
-l'addon, et la liste complète des fichiers du paquet qui mentionnent
-`queryLocalFonts` — toute nouvelle famille de fichiers fait échouer le test
-plutôt que réapparaître l'invite.
+`test.sh` § 7 replays the five searches: the two declarations with their
+upstream default, the unconditional import of the sticky scroll, the call in
+the addon, and the complete list of the files of the package that mention
+`queryLocalFonts` — any new family of files makes the test fail
+rather than making the prompt reappear.
 
-## Extension de barre d'état `heig.codespace-statusbar`
+## Status bar extension `heig.codespace-statusbar`
 
-Retour 3 de [docs/pistes.md](../../docs/pistes.md). Éditeur `heig`, nom
-`codespace-statusbar`, version `0.1.0`. Source dans `extension/` :
-JavaScript pur, deux fichiers utiles (`package.json`, `extension.js`), **aucune
-dépendance, aucun bundler, aucun accès réseau, aucune télémétrie**.
+Feedback 3 of [docs/pistes.md](../../docs/pistes.md). Publisher `heig`, name
+`codespace-statusbar`, version `0.1.0`. Source in `extension/`:
+plain JavaScript, two useful files (`package.json`, `extension.js`), **no
+dependency, no bundler, no network access, no telemetry**.
 
-### Ce qu'elle affiche
+### What it displays
 
-Deux éléments à droite de la barre d'état :
+Two items on the right of the status bar:
 
-1. **le temps restant** jusqu'à l'échéance du devoir — « 1 h 23 min restantes »,
-   rafraîchi toutes les 30 s, couleur d'avertissement
-   (`statusBarItem.warningBackground`) sous dix minutes, « Échéance dépassée »
-   au-delà. L'infobulle porte la date-heure locale du conteneur
-   (`TZ=Europe/Zurich`) et le titre du devoir ;
-2. **« Fermer »** — commande `codespace.close`, qui ouvre l'URL de retour avec
+1. **the remaining time** until the assignment deadline — "1 h 23 min left",
+   refreshed every 30 s, warning colour
+   (`statusBarItem.warningBackground`) under ten minutes, "Deadline passed"
+   beyond it. The tooltip carries the local date and time of the container
+   (`TZ=Europe/Zurich`) and the title of the assignment;
+2. **"Close"** — command `codespace.close`, which opens the return URL with
    `vscode.env.openExternal`.
 
-Français dès que `vscode.env.language` commence par `fr`, anglais sinon.
+French as soon as `vscode.env.language` starts with `fr`, English otherwise.
 
-### Ce qu'elle lit
+### What it reads
 
-Trois des sept variables d'environnement que le portail pose au `podman run`
-(`src/sessions/manager.ts`, `CONTAINER_ENV_KEYS`, puis `src/engine/index.ts`) :
+Three of the seven environment variables that the portal sets at `podman run` time
+(`src/sessions/manager.ts`, `CONTAINER_ENV_KEYS`, then `src/engine/index.ts`):
 
-| Variable | Contenu | Absente |
+| Variable | Contents | Absent |
 | --- | --- | --- |
-| `CODESPACE_DEADLINE` | échéance ISO 8601 (`deadlineAt` de classroom, colonne `assignments.closes_at`) | pas de compte à rebours |
-| `CODESPACE_RETURN_URL` | `${CLASSROOM_URL}/` pour une session née d'un jeton de lancement, `${PUBLIC_URL}/` sinon | pas de bouton « Fermer » |
-| `CODESPACE_ASSIGNMENT_NAME` | titre du devoir | infobulle sans le titre |
+| `CODESPACE_DEADLINE` | ISO 8601 deadline (`deadlineAt` from classroom, column `assignments.closes_at`) | no countdown |
+| `CODESPACE_RETURN_URL` | `${CLASSROOM_URL}/` for a session born from a launch token, `${PUBLIC_URL}/` otherwise | no "Close" button |
+| `CODESPACE_ASSIGNMENT_NAME` | title of the assignment | tooltip without the title |
 
-**Aucun secret n'y entre** (invariant 1). Un test unitaire
-(`src/sessions/containerEnv.test.ts`) affirme que le portail ne pose jamais de
-clé hors de `CONTAINER_ENV_KEYS`, et `test.sh` § 9 compare l'environnement d'un
-conteneur lancé par le portail à celui d'un conteneur nu : exactement sept
-lignes d'écart, toutes en `CODESPACE_` ou `GIT_`.
+**No secret goes in there** (invariant 1). A unit test
+(`src/sessions/containerEnv.test.ts`) asserts that the portal never sets a
+key outside `CONTAINER_ENV_KEYS`, and `test.sh` § 9 compares the environment of a
+container started by the portal with that of a bare container: exactly seven
+lines of difference, all of them in `CODESPACE_` or `GIT_`.
 
-## Identité git de l'étudiant
+## Git identity of the student
 
-Retour des sessions réelles du 2026-09-18 : un étudiant n'a pas pu commiter
-depuis VS Code, son conteneur n'ayant aucune identité git (`git config
-user.name` vide), alors que le portail connaît son nom et son adresse
-académique (table `users`, alimentée par le jeton de lancement de classroom).
+Feedback from the real sessions of 2026-09-18: a student could not commit
+from VS Code, their container having no git identity (`git config
+user.name` empty), whereas the portal knows their name and their academic
+address (table `users`, fed by the classroom launch token).
 
-Le portail pose donc quatre variables de plus au `podman run` :
+The portal therefore sets four more variables at `podman run` time:
 
 | Variable | Source |
 | --- | --- |
-| `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME` | `users.display_name`, à défaut `users.login` |
+| `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME` | `users.display_name`, failing that `users.login` |
 | `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_EMAIL` | `users.email` |
 
-**Tout ou rien** : sans adresse exploitable, aucune des quatre n'est posée —
-une moitié d'identité ferait tomber git sur sa détection automatique
-(`student@<nom du conteneur>`), ce qui est pire qu'une absence franche. Ce ne
-sont pas des secrets : l'étudiant lit déjà les deux dans classroom.
+**All or nothing**: without a usable address, none of the four is set —
+half an identity would make git fall back on its automatic detection
+(`student@<container name>`), which is worse than a clean absence. These are
+not secrets: the student already reads both of them in classroom.
 
-### Pourquoi les variables suffisent, et ce qui est écrit en plus
+### Why the variables are enough, and what is written on top
 
-Git honore `GIT_AUTHOR_*` / `GIT_COMMITTER_*` **sans aucun fichier de
-configuration** : `test.sh` § 9 fait un vrai `git commit` dans le conteneur et
-vérifie que `%an|%ae|%cn|%ce` porte les quatre valeurs, avec un
-`git config --local --get user.name` resté vide.
+Git honours `GIT_AUTHOR_*` / `GIT_COMMITTER_*` **without any configuration
+file**: `test.sh` § 9 makes a real `git commit` inside the container and
+checks that `%an|%ae|%cn|%ce` carries the four values, with a
+`git config --local --get user.name` that stayed empty.
 
-L'extension git de VS Code s'en contente aussi. Relevé dans
-`extensions/git/dist/main.js` de l'image : elle ne lit `user.name` /
-`user.email` que **dans la branche d'erreur**, pour qualifier un `git commit`
-qui a déjà échoué —
+The VS Code git extension is satisfied with them too. Found in
+`extensions/git/dist/main.js` of the image: it only reads `user.name` /
+`user.email` **in the error branch**, to qualify a `git commit`
+that has already failed —
 
 ```js
 try{await this.exec(["config","--get-all","user.name"])}
 catch(t){throw t.gitErrorCode=X.NoUserNameConfigured,t}
 ```
 
-— et elle lance git avec `process.env` en base, sans le filtrer :
+— and it launches git with `process.env` as its base, without filtering it:
 
 ```js
 t.env=Sm({},process.env,this.env,t.env||{},
   {VSCODE_GIT_COMMAND:e[0],LANGUAGE:"en",LC_ALL:"en_US.UTF-8",LANG:"en_US.UTF-8",GIT_PAGER:"cat"});
 ```
 
-Le portail écrit **en plus** `user.name` / `user.email` dans
-`work/.git/config`, parce qu'un étudiant qui tape `git config user.name` doit
-lire quelque chose. C'est fait depuis l'hôte tant que `work/` lui appartient
-(avant le premier `:U`), et par `engine.exec` ensuite — même contrainte, et
-même mécanisme, que l'achèvement de l'espace de travail. Une identité déjà
-posée par l'étudiant n'est **jamais** écrasée.
+The portal writes `user.name` / `user.email` into
+`work/.git/config` **on top of that**, because a student who types `git config user.name` must
+read something. It is done from the host as long as `work/` belongs to it
+(before the first `:U`), and through `engine.exec` afterwards — same constraint, and
+same mechanism, as the completion of the workspace. An identity already
+set by the student is **never** overwritten.
 
-### Comment elle reçoit cet environnement
+### How it receives that environment
 
-L'hôte d'extensions de code-server est un processus Node **du serveur**, pas du
-navigateur : l'extension déclare `"extensionKind": ["workspace"]` pour s'y
-exécuter, et y lit `process.env`. L'héritage se fait en deux temps, tous deux
-vérifiés par `test.sh` § 9 :
+The code-server extension host is a Node process **of the server**, not of the
+browser: the extension declares `"extensionKind": ["workspace"]` in order to run there,
+and reads `process.env` there. The inheritance happens in two steps, both
+verified by `test.sh` § 9:
 
-1. `code-server` (pid 1, qui porte les `-e` du `podman run`) engendre le
-   serveur VS Code (`out/node/entry`) ; le test lit
-   `/proc/<pid du serveur>/environ` et y retrouve les trois variables ;
-2. ce serveur fork l'hôte d'extensions en construisant son environnement à
-   partir du sien. Relevé littéralement dans `server-main.js` de l'image :
+1. `code-server` (pid 1, which carries the `-e` of the `podman run`) spawns the
+   VS Code server (`out/node/entry`); the test reads
+   `/proc/<pid of the server>/environ` and finds the three variables there;
+2. that server forks the extension host, building its environment
+   from its own. Found literally in `server-main.js` of the image:
 
    ```js
    …catch(g){o.error("ExtensionHostConnection#buildUserEnvironment resolving shell environment failed",g)}
    let c={...process.env, …, VSCODE_ESM_ENTRYPOINT:"vs/workbench/api/node/extensionHostProcess", …}
    ```
 
-### Empaquetage et installation
+### Packaging and installation
 
-Le `.vsix` est fabriqué dans une **étape multi-stage** du `Containerfile`
+The `.vsix` is built in a **multi-stage step** of the `Containerfile`
 (`FROM node:22-slim AS vsix`, `npx @vscode/vsce@4.0.0 package
---allow-missing-repository`) ; seul le `.vsix` entre dans l'image finale, pas
-Node ni `vsce`. `--allow-missing-repository` est nécessaire : l'extension n'est
-pas publiée et n'a pas de dépôt propre.
+--allow-missing-repository`); only the `.vsix` goes into the final image, not
+Node nor `vsce`. `--allow-missing-repository` is necessary: the extension is
+not published and has no repository of its own.
 
-Elle est ensuite installée par `code-server --install-extension` **comme les
-deux autres**, dans le même répertoire en lecture seule. Elle apparaît donc
-dans `code-server --list-extensions` et dans `/etc/code-server/extensions.lock`
-(le build échoue si elle en est absente), et elle est ajoutée à
-`extensions.allowed` des réglages machine.
+It is then installed by `code-server --install-extension` **like the
+two others**, into the same read-only directory. It therefore appears
+in `code-server --list-extensions` and in `/etc/code-server/extensions.lock`
+(the build fails if it is missing from it), and it is added to
+`extensions.allowed` of the machine settings.
 
-Le durcissement est intact : `test.sh` § 3 continue de vérifier qu'aucun
-`.vsix` apporté par l'étudiant ne s'installe, et que le répertoire d'extensions
-— celui de l'extension de barre d'état compris — n'est pas inscriptible.
+The hardening is intact: `test.sh` § 3 keeps checking that no
+`.vsix` brought by the student installs, and that the extensions directory
+— including that of the status bar extension — is not writable.
 
-### Limites
+### Limits
 
-- **`openExternal` ouvre un nouvel onglet.** En travaux pratiques, le bouton
-  « Fermer » ne ferme rien : il ouvre classroom (ou le portail) dans un onglet
-  de plus et laisse l'éditeur derrière. C'est le comportement de
-  `vscode.env.openExternal` dans VS Code Web, qui n'a aucun moyen de fermer
-  l'onglet courant. Une vraie sortie demanderait une page du portail
-  (« terminer la session ») ; c'est la piste 2 de docs/pistes.md, hors
-  périmètre ici.
-- **Le compte à rebours est indicatif.** Il ne ferme pas la session, ne bloque
-  rien, et l'heure est celle du conteneur. Le portail ne s'en sert pas : la
-  fenêtre d'ouverture d'un devoir reste décidée côté serveur
+- **`openExternal` opens a new tab.** In lab mode, the
+  "Close" button closes nothing: it opens classroom (or the portal) in one more
+  tab and leaves the editor behind. That is the behaviour of
+  `vscode.env.openExternal` in VS Code Web, which has no way of closing
+  the current tab. A real exit would require a portal page
+  ("finish the session"); that is lead 2 of docs/pistes.md, out of
+  scope here.
+- **The countdown is indicative.** It does not close the session, does not block
+  anything, and the time is that of the container. The portal does not use it: the
+  opening window of an assignment stays decided on the server side
   (`sessions/store.ts`, `isOpen`).
-- **Le titre de la commande dans la palette reste en français.** Les chaînes
-  affichées par l'extension (barre d'état, infobulles, message d'erreur) sont
-  choisies à l'exécution sur `vscode.env.language` ; le titre déclaré par le
-  manifeste, lui, est statique. Le localiser demanderait `package.nls.json` +
-  `package.nls.fr.json`, mécanisme correct mais non vérifiable sans navigateur ;
-  écarté pour un titre que l'étudiant n'a pas besoin de lire, le bouton étant
-  dans la barre d'état.
-- **Un témoin d'activation** est déposé dans `/tmp/codespace-statusbar.json`
-  (tmpfs) à l'activation, avec les trois variables telles qu'elles ont été
-  lues. Il ne sert qu'au diagnostic ; il ne contient aucun secret et disparaît
-  avec le conteneur.
+- **The title of the command in the palette stays in French.** The strings
+  displayed by the extension (status bar, tooltips, error message) are
+  chosen at run time from `vscode.env.language`; the title declared by the
+  manifest, on the other hand, is static. Localising it would require `package.nls.json` +
+  `package.nls.fr.json`, a correct mechanism but one that cannot be verified without a browser;
+  ruled out for a title the student does not need to read, the button being
+  in the status bar.
+- **An activation witness** is dropped into `/tmp/codespace-statusbar.json`
+  (tmpfs) on activation, with the three variables as they were
+  read. It is only there for diagnosis; it contains no secret and disappears
+  with the container.
 
-## Résolveur : `/etc/resolv.conf` livré par l'image
+## Resolver: `/etc/resolv.conf` shipped by the image
 
-Constat venu de P2 : avec `--dns=none` Podman n'écrit aucun `/etc/resolv.conf`,
-et la libc retombe alors sur `127.0.0.1` avec **cinq secondes d'attente par
-tentative**. Toute résolution ratée — `curl`, `git`, un téléchargement tenté par
-clangd — fait patienter l'étudiant cinq secondes au lieu d'échouer tout de
-suite.
+A finding that came from P2: with `--dns=none` Podman writes no `/etc/resolv.conf`,
+and libc then falls back on `127.0.0.1` with **five seconds of waiting per
+attempt**. Any failed resolution — `curl`, `git`, a download attempted by
+clangd — makes the student wait five seconds instead of failing right
+away.
 
-L'image livre donc un `/etc/resolv.conf` statique **sans aucun `nameserver`**,
-avec `options timeout:1 attempts:1`. Comme la racine est en lecture seule, ce
-fichier vient de l'image et l'étudiant ne peut pas le remplacer : c'est le but.
+The image therefore ships a static `/etc/resolv.conf` **without any `nameserver`**,
+with `options timeout:1 attempts:1`. Since the root filesystem is read-only, this
+file comes from the image and the student cannot replace it: that is the point.
 
-Détail qui compte : le fichier est posé par `COPY`, **pas** par `RUN`. Pendant
-un `RUN`, buildah monte son propre `/etc/resolv.conf` par-dessus ; un
-`printf > /etc/resolv.conf` dans un `RUN` écrit dans le montage et disparaît
-avec lui. Première tentative faite ainsi, image livrée sans le fichier, erreur
-détectée en comparant le contenu à l'exécution.
+A detail that matters: the file is placed by `COPY`, **not** by `RUN`. During
+a `RUN`, buildah mounts its own `/etc/resolv.conf` over it; a
+`printf > /etc/resolv.conf` inside a `RUN` writes into the mount and disappears
+with it. The first attempt was made that way, the image shipped without the file, the error
+detected by comparing the contents at run time.
 
-Mesuré sur la version épinglée (Podman 5.7.0) :
+Measured on the pinned version (Podman 5.7.0):
 
-| Lancement | `/etc/resolv.conf` vu dans le conteneur | `getent hosts example.invalid` |
+| Launch | `/etc/resolv.conf` seen in the container | `getent hosts example.invalid` |
 | --- | --- | --- |
-| `--network none` (P1) | celui de l'image | échoue en ~2 ms |
-| `--dns=none` (P2) | celui de l'image | échoue en ~2 ms |
-| pont par défaut, sans `--dns` | réécrit par Podman avec le résolveur de l'hôte | résout |
+| `--network none` (P1) | the one from the image | fails in ~2 ms |
+| `--dns=none` (P2) | the one from the image | fails in ~2 ms |
+| default bridge, without `--dns` | rewritten by Podman with the host resolver | resolves |
 
-Autrement dit `--dns=none` **n'écrase pas** le fichier de l'image, et
-`--network none` non plus. `test.sh` § 8 en fait deux assertions : absence de
-`nameserver` dans le fichier vu à l'exécution, et échec de
-`getent hosts example.invalid` en moins de deux secondes (mesuré : 0,16 s de
-bout en bout, appel `podman exec` compris).
+In other words `--dns=none` **does not overwrite** the file of the image, and
+neither does `--network none`. `test.sh` § 8 makes two assertions out of it: absence of
+`nameserver` in the file seen at run time, and failure of
+`getent hosts example.invalid` in less than two seconds (measured: 0.16 s end
+to end, including the `podman exec` call).
 
-## Profil seccomp : `infra/seccomp/codespace.json`
+## Seccomp profile: `infra/seccomp/codespace.json`
 
-Source : `/usr/share/containers/seccomp.json` du poste (paquet
-`containers-common`, cohérent avec Podman 5.7.0). **Une seule entrée ajoutée**,
-rien d'autre modifié, ni retiré, ni réordonné hors insertion :
+Source: `/usr/share/containers/seccomp.json` of the workstation (package
+`containers-common`, consistent with Podman 5.7.0). **A single entry added**,
+nothing else modified, nothing removed, nothing reordered apart from the insertion:
 
 ```json
 {
   "names": ["personality"],
   "action": "SCMP_ACT_ALLOW",
   "args": [{ "index": 0, "value": 262144, "valueTwo": 0, "op": "SCMP_CMP_EQ" }],
-  "comment": "ADDR_NO_RANDOMIZE (0x40000) : requis par gdb set disable-randomization on (heig-codespace P1)",
+  "comment": "ADDR_NO_RANDOMIZE (0x40000): required by gdb set disable-randomization on (heig-codespace P1)",
   "includes": {},
   "excludes": {}
 }
 ```
 
-Les cinq valeurs de `personality` déjà autorisées par le profil amont sont
-conservées : `0`, `8`, `131072` (0x20000), `131080` (0x20008), `4294967295`
-(0xffffffff). L'entrée ajoutée est insérée juste après elles. Diff vérifié par
-comparaison ensembliste des 40 entrées amont → 41 entrées projet : une ajoutée,
-zéro supprimée, zéro modifiée, clés de tête (`defaultAction`, `architectures`,
-`archMap`) identiques.
+The five `personality` values already allowed by the upstream profile are
+kept: `0`, `8`, `131072` (0x20000), `131080` (0x20008), `4294967295`
+(0xffffffff). The added entry is inserted right after them. Diff verified by
+set comparison of the 40 upstream entries → 41 project entries: one added,
+zero removed, zero modified, head keys (`defaultAction`, `architectures`,
+`archMap`) identical.
 
-Régression couverte par `test.sh` § 2 : un conteneur témoin lancé avec le
-profil **par défaut** donne trois adresses de `main` différentes sur trois
-exécutions sous gdb ; avec le profil du projet l'adresse est stable à
-`0x555555555139`. Si le témoin cessait de varier, `test.sh` échouerait plutôt
-que de valider une assertion vide.
+Regression covered by `test.sh` § 2: a control container started with the
+**default** profile gives three different addresses for `main` over three
+runs under gdb; with the project profile the address is stable at
+`0x555555555139`. If the control stopped varying, `test.sh` would fail rather
+than validate an empty assertion.
 
-## Écarts assumés par rapport à la lettre de jalon-0 § P1
+## Deviations accepted from the letter of jalon-0 § P1
 
-Aucun n'affaiblit le durcissement ; tous sont vérifiés par `test.sh`.
+None of them weakens the hardening; all of them are checked by `test.sh`.
 
-1. **`--dns=none` n'est pas posé quand `--network none`.** Podman 5.7 refuse la
-   combinaison : `Error: conflicting options: dns and the network mode: none`.
-   `run-hardened.sh` ajoute `--dns=none` dès que `NETWORK != none`, donc P2 le
-   verra. Avec `--network none` il n'y a de toute façon aucun résolveur.
-2. **`--tmpfs /run` et `--tmpfs /home/student/.cache` portent `mode=1777`.**
-   Podman monte `/run` en `mode=755 root:root` et les tmpfs nommés sans `mode`
-   héritent de `root:root` ; le conteneur tourne en uid 1000 et ne pouvait
-   écrire ni son `user-data-dir` ni son cache (échec observé :
+1. **`--dns=none` is not set when `--network none` is.** Podman 5.7 refuses the
+   combination: `Error: conflicting options: dns and the network mode: none`.
+   `run-hardened.sh` adds `--dns=none` as soon as `NETWORK != none`, so P2 will
+   see it. With `--network none` there is no resolver anyway.
+2. **`--tmpfs /run` and `--tmpfs /home/student/.cache` carry `mode=1777`.**
+   Podman mounts `/run` as `mode=755 root:root` and named tmpfs without `mode`
+   inherit `root:root`; the container runs as uid 1000 and could write
+   neither its `user-data-dir` nor its cache (observed failure:
    `mkdir: cannot create directory '/run/code-server': Permission denied`).
-   `uid=`/`gid=` ne sont pas des options `--tmpfs` acceptées par Podman
-   (`unknown mount option "uid=1000"`), et `tmpcopyup` ne transporte pas la
-   propriété. Les autres drapeaux (`rw,nosuid,nodev`) sont ceux de Podman.
-3. **Paquets ajoutés à la liste de jalon-0** : `libc6-dev`, `binutils`
-   (dépendances réelles de la chaîne C), `curl` + `ca-certificates` (téléchargement
-   du `.deb` au build, et assertion `/healthz` du test), `procps`, `less`.
-4. **`/home/student/.local/share/code-server/coder-logs` est un lien
-   symbolique vers `/run/code-server/logs`.** Sans lui, code-server lève une
-   exception non rattrapée au démarrage en tentant d'écrire ses journaux sur la
-   racine en lecture seule. Le reste de `~/.local/share/code-server` reste sur
-   la racine en lecture seule, donc le répertoire d'extensions **par défaut**
-   n'est pas inscriptible — c'est le point de docs/analyse.md § 3.2 et
-   `test.sh` en fait une assertion.
-5. **`XDG_CONFIG_HOME` est redirigé vers le tmpfs, mais seulement dans
-   `entrypoint.sh`**, jamais dans un `ENV` de l'image. Le shell de l'étudiant
-   garde les valeurs par défaut : son `code-server --install-extension` vise
-   bien un répertoire d'extensions en lecture seule.
-6. **`/etc/resolv.conf` est livré par l'image** (section précédente), ce que
-   jalon-0 § P1 ne demandait pas : sans lui, `--dns=none` coûte cinq secondes à
-   chaque résolution ratée.
-7. **`/etc/dpkg/dpkg.cfg.d/heig-man-pages`** réactive `/usr/share/man` avant
-   l'installation des paquets : l'image `slim` l'exclut par dpkg et
-   `manpages-dev` s'installait sans ses pages. Les autres exclusions de l'image
-   slim (doc, locale, info) sont conservées.
+   `uid=`/`gid=` are not `--tmpfs` options accepted by Podman
+   (`unknown mount option "uid=1000"`), and `tmpcopyup` does not carry ownership over.
+   The other flags (`rw,nosuid,nodev`) are Podman's own.
+3. **Packages added to the list of jalon-0**: `libc6-dev`, `binutils`
+   (real dependencies of the C toolchain), `curl` + `ca-certificates` (download
+   of the `.deb` at build time, and the `/healthz` assertion of the test), `procps`, `less`.
+4. **`/home/student/.local/share/code-server/coder-logs` is a symbolic
+   link to `/run/code-server/logs`.** Without it, code-server raises an
+   uncaught exception at start-up while trying to write its logs onto the
+   read-only root. The rest of `~/.local/share/code-server` stays on
+   the read-only root, so the **default** extensions directory
+   is not writable — that is the point of docs/analyse.md § 3.2, and
+   `test.sh` makes an assertion out of it.
+5. **`XDG_CONFIG_HOME` is redirected to the tmpfs, but only in
+   `entrypoint.sh`**, never in an `ENV` of the image. The student's shell
+   keeps the default values: their `code-server --install-extension` does target
+   a read-only extensions directory.
+6. **`/etc/resolv.conf` is shipped by the image** (previous section), which
+   jalon-0 § P1 did not ask for: without it, `--dns=none` costs five seconds on
+   every failed resolution.
+7. **`/etc/dpkg/dpkg.cfg.d/heig-man-pages`** re-enables `/usr/share/man` before
+   the packages are installed: the `slim` image excludes it through dpkg and
+   `manpages-dev` was installed without its pages. The other exclusions of the
+   slim image (doc, locale, info) are kept.
 
 ## TODO(verify)
 
-Marqués selon la convention de CLAUDE.md : version concernée entre parenthèses.
-Aucun réglage n'a été retiré ; ceux dont l'effet n'a pas pu être constaté sont
-listés ici.
+Marked according to the convention of CLAUDE.md: version concerned in parentheses.
+No setting has been removed; those whose effect could not be observed are
+listed here.
 
-- `TODO(verify)` **code-server 4.137.0 / VS Code 1.137.0** — `extensions.allowed` :
-  la clé existe dans le paquet embarqué, mais son effet (refus d'une extension
-  hors liste) n'a pas été constaté. Le test ne vérifie que sa présence dans les
-  réglages copiés. La barrière qui tient est le répertoire d'extensions en
-  lecture seule, elle, mesurée. À vérifier quand une session réelle sera
-  ouverte dans un navigateur.
-- `TODO(verify)` **code-server 4.137.0 / VS Code 1.137.0** — `chat.disableAIFeatures` :
-  idem, clé présente dans le paquet, effet non constaté. Aucune extension de
-  chat n'est installée, donc l'impact est nul en l'état.
-- `TODO(verify)` **code-server 4.137.0** — portée réelle du fichier
-  `Machine/settings.json` : seuls les réglages de portée `MACHINE` ou
-  `APPLICATION` y sont honorés, et le classement de chacune des sept clés n'a
-  pas été relevé dans le code minifié. Conséquence pratique à connaître :
-  **un étudiant peut modifier ces réglages depuis l'interface pendant sa
-  session** ; ils sont remis à neuf au démarrage de conteneur suivant puisque
-  le `user-data-dir` est un tmpfs. Une immuabilité stricte demanderait un
-  support de « policy » que code-server 4.137.0 n'expose pas.
-- `TODO(verify)` **code-server 4.137.0** — `--disable-file-downloads` et
-  `--disable-file-uploads` sont bien présentes dans `--help` mais leur effet
-  (glisser-déposer et « Télécharger » du clic droit) demande un navigateur ;
-  c'est une vérification manuelle du jalon 1, à consigner avec la preuve B.
-  Seconde couche déjà prévue : `allowDownUploads: false` côté SEB
+- `TODO(verify)` **code-server 4.137.0 / VS Code 1.137.0** — `extensions.allowed`:
+  the key exists in the embedded package, but its effect (refusal of an extension
+  outside the list) has not been observed. The test only checks that it is present in
+  the copied settings. The barrier that holds is the read-only extensions directory,
+  and that one is measured. To be checked when a real session is
+  opened in a browser.
+- `TODO(verify)` **code-server 4.137.0 / VS Code 1.137.0** — `chat.disableAIFeatures`:
+  likewise, key present in the package, effect not observed. No chat
+  extension is installed, so the impact is nil as things stand.
+- `TODO(verify)` **code-server 4.137.0** — actual scope of the
+  `Machine/settings.json` file: only settings with `MACHINE` or
+  `APPLICATION` scope are honoured there, and the classification of each of the seven keys has
+  not been collected from the minified code. Practical consequence to know:
+  **a student can modify these settings from the interface during their
+  session**; they are reset at the next container start since
+  the `user-data-dir` is a tmpfs. Strict immutability would require
+  "policy" support that code-server 4.137.0 does not expose.
+- `TODO(verify)` **code-server 4.137.0** — `--disable-file-downloads` and
+  `--disable-file-uploads` are indeed present in `--help` but their effect
+  (drag and drop and "Download" in the context menu) requires a browser;
+  that is a manual verification for milestone 1, to be recorded together with proof B.
+  Second layer already planned: `allowDownUploads: false` on the SEB side
   (docs/analyse.md § 4.3).
-- `TODO(verify)` **clangd 19.1.7 + extension 0.6.0** — le serveur de langage
-  démarre-t-il sans `compile_commands.json` et sans réseau ? La configuration
-  par défaut est déposée aux deux chemins que clangd lit réellement
-  (`/home/student/.config/clangd/config.yaml` dans l'image, et
-  `$XDG_CONFIG_HOME/clangd/config.yaml` recopié par le point d'entrée, dont
-  hérite l'hôte d'extensions), mais son effet n'a pas été constaté faute de
-  session dans un navigateur. À reprendre au jalon 1.
-- `TODO(verify)` **webfreak.debug 0.27.0** — aucune configuration de lancement
-  gdb n'est fournie dans l'image. À décider au jalon 1 : `launch.json` déposé
-  dans le dépôt modèle de l'enseignant, ou fichier machine.
+- `TODO(verify)` **clangd 19.1.7 + extension 0.6.0** — does the language server
+  start without `compile_commands.json` and without network? The default
+  configuration is placed at both paths that clangd actually reads
+  (`/home/student/.config/clangd/config.yaml` in the image, and
+  `$XDG_CONFIG_HOME/clangd/config.yaml` copied by the entry point, which
+  the extension host inherits), but its effect has not been observed for lack of a
+  session in a browser. To be taken up again at milestone 1.
+- **Settled** (was a `TODO(verify)` for **webfreak.debug 0.27.0**) — no gdb launch
+  configuration is shipped in the image, and that is the decision: the
+  `launch.json` lives in the teacher's template repository, not in a machine file.
+  It is there in both seed templates
+  (`seed/templates/tp-pointeurs/.vscode/launch.json`,
+  `seed/templates/exam-c/.vscode/launch.json`), as asked for by
+  [docs/jalon-0.md](../../docs/jalon-0.md) § V1 and as observed by the
+  end-to-end test ([docs/v1.md](../../docs/v1.md) § 2, step 3).
 - `TODO(verify)` **VS Code 1.137.0** — `workbench.secondarySideBar.defaultVisibility:
-  hidden` : la clé, l'énumération et le défaut amont sont relevés dans le
-  paquet embarqué, mais l'effet (barre absente à l'ouverture) demande un
-  navigateur. À constater à la prochaine session réelle.
-- `TODO(verify)` **VS Code 1.137.0** — `keyboard.dispatch: keyCode` : la
-  déclaration porte `included: jo===2||jo===3`, où `jo` est le système
-  d'exploitation détecté (`var jo = … ? 2 : … ? 1 : 3`, soit macOS / Windows /
-  Linux). La clé n'est donc **enregistrée** que pour macOS et Linux ; sur un
-  poste Windows elle reste une clé inconnue du registre de configuration. Le
-  lecteur (`s.getValue("keyboard")?.dispatch === "keyCode"`) lit la
-  configuration brute et devrait la voir quand même, mais cela n'a pas été
-  constaté. À vérifier sur un poste Windows, qui est la plateforme de la salle
-  d'examen.
-- `TODO(verify)` **code-server 4.137.0** — l'hôte d'extensions n'a pas pu être
-  démarré sans navigateur. `test.sh` § 9 mesure l'héritage jusqu'au **serveur**
-  VS Code, qui est le processus qui fork l'hôte d'extensions, et relève dans le
-  paquet que ce fork part de `{...process.env}`. Le maillon final se constate
-  en ouvrant l'éditeur : le compte à rebours affiché **est** la preuve, et
-  `podman exec <conteneur> cat /tmp/codespace-statusbar.json` la rend lisible.
-  Deux tentatives de pilotage par Chromium sans interface (chrome-headless-shell
-  et Chrome for Testing 153) se sont arrêtées sur la connexion de gestion, sans
-  jamais atteindre la connexion d'hôte d'extensions.
-- `TODO(verify)` **heig.codespace-statusbar 0.1.0 sous SEB** — en mode examen,
-  `vscode.env.openExternal` demande au navigateur d'ouvrir une URL. Sous Safe
-  Exam Browser, le filtre d'URL peut refuser l'ouverture, ou l'ouvrir dans une
-  fenêtre supplémentaire que l'étudiant ne saura pas fermer. Comportement à
-  observer à la première répétition en salle. Le domaine de classroom est déjà
-  autorisé par le filtre (`sebAllowedHosts`), donc le refus, s'il arrive,
-  viendra de la politique de fenêtres de SEB, pas du filtre d'hôtes.
+  hidden`: the key, the enumeration and the upstream default are collected from the
+  embedded package, but the effect (bar absent on opening) requires a
+  browser. To be observed at the next real session.
+- `TODO(verify)` **VS Code 1.137.0** — `keyboard.dispatch: keyCode`: the
+  declaration carries `included: jo===2||jo===3`, where `jo` is the operating
+  system that was detected (`var jo = … ? 2 : … ? 1 : 3`, that is macOS / Windows /
+  Linux). The key is therefore only **registered** for macOS and Linux; on a
+  Windows machine it stays a key unknown to the configuration registry. The
+  reader (`s.getValue("keyboard")?.dispatch === "keyCode"`) reads the raw
+  configuration and should see it anyway, but that has not been
+  observed. To be checked on a Windows machine, which is the platform of the exam
+  room.
+- `TODO(verify)` **code-server 4.137.0** — the extension host could not be
+  started without a browser. `test.sh` § 9 measures the inheritance up to the **server**
+  of VS Code, which is the process that forks the extension host, and collects from
+  the package the fact that this fork starts from `{...process.env}`. The final link is observed
+  by opening the editor: the countdown displayed **is** the proof, and
+  `podman exec <container> cat /tmp/codespace-statusbar.json` makes it readable.
+  Two attempts at driving a headless Chromium (chrome-headless-shell
+  and Chrome for Testing 153) stopped at the management connection, without
+  ever reaching the extension host connection.
+- `TODO(verify)` **heig.codespace-statusbar 0.1.0 under SEB** — in exam mode,
+  `vscode.env.openExternal` asks the browser to open a URL. Under Safe Exam
+  Browser, the URL filter may refuse the opening, or open it in an
+  extra window that the student will not know how to close. Behaviour to be
+  observed at the first rehearsal in the exam room. The classroom domain is already
+  allowed by the filter (`sebAllowedHosts`), so the refusal, if it happens,
+  will come from SEB's window policy, not from the host filter.
 
 - `TODO(verify)` **VS Code 1.137.0** —
-  `terminal.integrated.stickyScroll.enabled: false` : la chaîne de cause est
-  relevée dans le paquet embarqué et rejouée par `test.sh`, mais la disparition
-  effective de l'invite « Use the fonts on your computer » demande un
-  navigateur. À constater à la prochaine session réelle. Effet de bord assumé :
-  l'étudiant perd le rappel de la commande en cours en haut du terminal.
-- `TODO(verify)` **code-server 4.137.0** — l'identité git vue **par l'extension
-  git de VS Code** : la lecture du paquet dit que `process.env` est transmis
-  tel quel au `git commit` de l'extension, et `test.sh` § 9 mesure le commit en
-  ligne de commande. Le bouton « Valider » de l'interface, lui, demande un
-  navigateur ; à constater à la prochaine session réelle.
+  `terminal.integrated.stickyScroll.enabled: false`: the chain of causes is
+  collected from the embedded package and replayed by `test.sh`, but the effective
+  disappearance of the "Use the fonts on your computer" prompt requires a
+  browser. To be observed at the next real session. Accepted side effect:
+  the student loses the reminder of the running command at the top of the terminal.
+- `TODO(verify)` **code-server 4.137.0** — the git identity as seen **by the VS Code
+  git extension**: reading the package says that `process.env` is passed
+  as it is to the extension's `git commit`, and `test.sh` § 9 measures the commit on
+  the command line. The "Commit" button of the interface, on the other hand, requires a
+  browser; to be observed at the next real session.
 
-## Ce qui n'est pas couvert par P1
+## What P1 does not cover
 
-- Le réseau : `run-hardened.sh` lance en `--network none`. Le réseau clos
-  `codespace`, les règles nftables et `--add-host portal.internal` sont la
-  tâche P2. `test.sh` ne mesure donc aucune propriété réseau.
-- `CAP_SYS_PTRACE` reste retirée (docs/analyse.md § 3.5) : `gdb ./prog`
-  fonctionne, `gdb -p <pid>` sur un processus d'un autre terminal ne
-  fonctionnera pas. C'est la décision, pas un défaut.
-- La taille d'image (1,5 Go) est dominée par code-server (723 Mo installés).
-  Aucun effort de réduction n'a été fait : l'image est locale, le `podman run`
-  ne la transfère pas.
+- The network: `run-hardened.sh` starts with `--network none`. The closed
+  `codespace` network, the nftables rules and `--add-host portal.internal` are
+  task P2. `test.sh` therefore measures no network property.
+- `CAP_SYS_PTRACE` stays dropped (docs/analyse.md § 3.5): `gdb ./prog`
+  works, `gdb -p <pid>` on a process from another terminal will not
+  work. That is the decision, not a defect.
+- The image size (1.5 GB) is dominated by code-server (723 MB installed).
+  No effort at reduction has been made: the image is local, the `podman run`
+  does not transfer it.

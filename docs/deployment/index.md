@@ -26,14 +26,16 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
    at the repository root.
 2. **DNS** — point the portal's hostname at the VM (A/AAAA records).
 3. **Clone and configure** — clone the repository into `/opt/heig-classroom`,
-   copy `.env.example` to `.env.prod` and fill it in: PostgreSQL password,
+   copy `.env.prod.example` to `.env.prod` and fill it in: PostgreSQL password,
    cookie secret, OIDC provider (SWITCH edu-ID in production), super-admin
    e-mail, Scaleway TEM credentials for e-mail, session TTL.
 4. **Create the GitHub App** — once, globally. Follow
    [the GitHub App page](github-app.md); the App ID, private key, slug,
    webhook secret and OAuth client land in `.env.prod` and `secrets/`.
-5. **First start** —
-   `docker compose -f compose.prod.yml --env-file .env.prod up -d --build`.
+5. **First start** — the image is never built on the VM, it is pulled from
+   GHCR:
+   `docker compose -f compose.prod.yml --env-file .env.prod pull app` then
+   `docker compose -f compose.prod.yml --env-file .env.prod up -d`.
    Migrations run at boot (`MIGRATE_ON_START=1`); check
    `https://<host>/healthz` returns `database: up, jobs: up`.
 6. **Backups** — the compose `backup` service does a daily `pg_dump` with 30
@@ -42,10 +44,20 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
 
 ## Updating
 
+Every push to `main` builds the image in CI and deploys it automatically; the
+manual equivalent on the VM is:
+
 ```bash
-cd /opt/heig-classroom && git pull
-docker compose -f compose.prod.yml --env-file .env.prod up -d --build
+cd /opt/heig-classroom && git pull --ff-only
+docker compose -f compose.prod.yml --env-file .env.prod pull app
+docker compose -f compose.prod.yml --env-file .env.prod up -d
 ```
 
-Rollback = `git checkout <previous-tag>` and the same command. Migrations are
-additive; when in doubt, restore the previous night's dump.
+Rollback = redeploy an earlier image by its commit sha, which stays on GHCR
+(`deploy.md` §7):
+
+```bash
+IMAGE_TAG=<commit-sha> docker compose -f compose.prod.yml --env-file .env.prod up -d
+```
+
+Migrations are additive; when in doubt, restore the previous night's dump.

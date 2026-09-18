@@ -1,16 +1,15 @@
 /**
- * Session de connexion au portail : jeton autoporteur signé en HMAC-SHA256,
- * pas de table.
+ * Portal login session: self-contained token signed with HMAC-SHA256, no table.
  *
- * Choix assumé, et c'est pourquoi le cadrage compte quatre entités et non
- * cinq : ce que porte le cookie (identifiant interne, identifiant
- * institutionnel, rôle, échéance) est déjà connu du navigateur, et la
- * révocation immédiate d'une connexion n'est pas une exigence de v0. La
- * session *de codespace*, elle, est bien une ligne en base (`sessions`),
- * parce qu'elle a un conteneur, un volume et un cycle de vie.
+ * A deliberate choice, and this is why the framing counts four entities and not
+ * five: what the cookie carries (internal id, institutional login, role,
+ * expiry) is already known to the browser, and immediate revocation of a login
+ * is not a v0 requirement. The *codespace* session, on the other hand, really
+ * is a row in the database (`sessions`), because it has a container, a volume
+ * and a lifecycle.
  *
- * Le format est celui de `seb/examSession.ts`, volontairement : un seul
- * format de jeton signé à relire dans tout le portail.
+ * The format is that of `seb/examSession.ts`, deliberately: a single signed
+ * token format to read back across the whole portal.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
 
@@ -22,7 +21,7 @@ export interface AuthClaims {
   readonly userId: string;
   readonly login: string;
   readonly role: Role;
-  /** Échéance en millisecondes depuis l'époque. */
+  /** Expiry in milliseconds since the epoch. */
   readonly expiresAt: number;
 }
 
@@ -44,7 +43,7 @@ function equal(a: string, b: string): boolean {
 }
 
 export function issueAuthCookie(claims: AuthClaims, secret: string): string {
-  if (secret.length < 16) throw new Error("COOKIE_SECRET trop court");
+  if (secret.length < 16) throw new Error("COOKIE_SECRET too short");
   const payload = Buffer.from(JSON.stringify(claims), "utf8").toString("base64url");
   return `${payload}.${sign(payload, secret)}`;
 }

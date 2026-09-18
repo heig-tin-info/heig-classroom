@@ -20,11 +20,11 @@ nav = [
   ] },
   { "Development" = [
     "development/index.md",
-    { "Needs analysis (FR)" = "00-analyse-besoins.md" },
-    { "Requirements (FR)" = "01-cahier-des-charges.md" },
-    { "Functional specifications (FR)" = "02-specs-fonctionnelles.md" },
-    { "Architecture (FR)" = "03-architecture.md" },
-    { "Spike S2: provisioning (FR)" = "spikes/S2-rapport.md" },
+    { "Needs analysis" = "00-analyse-besoins.md" },
+    { "Requirements" = "01-cahier-des-charges.md" },
+    { "Functional specifications" = "02-specs-fonctionnelles.md" },
+    { "Architecture" = "03-architecture.md" },
+    { "Spike S2: provisioning" = "spikes/S2-rapport.md" },
   ] },
 ]
 

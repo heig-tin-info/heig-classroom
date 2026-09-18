@@ -1,15 +1,16 @@
 /**
- * Greffon Fastify du volet examen : servir le `.seb` et vérifier le démarrage.
+ * Fastify plugin of the exam side: serving the `.seb` file and verifying the
+ * start.
  *
- * Deux routes, aucune dépendance à `server.ts`. Tout ce qui vient de
- * l'extérieur — les devoirs, le vérificateur, la création de session — passe
- * par les options, pour que le greffon se teste seul.
+ * Two routes, no dependency on `server.ts`. Everything that comes from the
+ * outside — the assignments, the verifier, the session creation — goes through
+ * the options, so that the plugin can be tested on its own.
  *
- * Le cookie est lu et posé à la main plutôt qu'avec `@fastify/cookie` : ce
- * greffon doit pouvoir s'enregistrer dans une instance qui a déjà, ou pas
- * encore, enregistré le greffon de cookies, sans provoquer de collision de
- * décorateur. La valeur émise par `issueExamCookie` est en base64url, donc
- * sans caractère à échapper.
+ * The cookie is read and set by hand rather than with `@fastify/cookie`: this
+ * plugin has to be registrable in an instance that has already registered the
+ * cookie plugin, or has not registered it yet, without causing a decorator
+ * collision. The value `issueExamCookie` emits is base64url, therefore free of
+ * characters that would need escaping.
  */
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
@@ -24,26 +25,26 @@ import {
 import { SEB_CONTENT_TYPE, renderSebFile } from "./sebFile.js";
 import type { SebRefusal, SebVerifier } from "./verify.js";
 
-/** Ce que le portail sait d'un devoir en mode examen. */
+/** What the portal knows about an assignment in exam mode. */
 export interface SebAssignment {
   readonly id: string;
-  /** Config Key de la configuration servie, cf. sebFile.ts. */
+  /** Config Key of the configuration that is served, see sebFile.ts. */
   readonly configKey: string;
-  /** Un BEK par couple (plateforme, version). Liste, pas scalaire. */
+  /** One BEK per (platform, version) pair. A list, not a scalar. */
   readonly beks: readonly string[];
-  /** URL absolue de la route de démarrage, celle inscrite dans le `.seb`. */
+  /** Absolute URL of the start route, the one written into the `.seb` file. */
   readonly startUrl: string;
   readonly quitUrl: string;
   readonly examKeySalt: string;
   readonly extraAllowedHosts?: readonly string[];
 }
 
-/** Source des devoirs. Une `Map` en test, la base en V1. */
+/** Source of the assignments. A `Map` in tests, the database in V1. */
 export interface AssignmentLookup {
   find(assignmentId: string): Promise<SebAssignment | undefined> | SebAssignment | undefined;
 }
 
-/** Fabrique une source à partir d'une `Map`, pour les tests et les graines. */
+/** Builds a source from a `Map`, for tests and seeds. */
 export function mapLookup(assignments: ReadonlyMap<string, SebAssignment>): AssignmentLookup {
   return { find: (id) => assignments.get(id) };
 }
@@ -55,24 +56,24 @@ export interface StartContext {
 }
 
 export interface StartOutcome {
-  /** Identifiant de session, inscrit dans le cookie. */
+  /** Session identifier, written into the cookie. */
   readonly sessionId: string;
-  /** Où rediriger, typiquement `/s/<sessionId>/`. */
+  /** Where to redirect to, typically `/s/<sessionId>/`. */
   readonly redirectTo: string;
 }
 
 export interface SebRoutesOptions {
   readonly lookup: AssignmentLookup;
   readonly verifier: SebVerifier;
-  /** Secret HMAC du cookie d'examen. */
+  /** HMAC secret of the exam cookie. */
   readonly cookieSecret: string;
-  /** `Secure` sur le cookie : faux seulement en développement en clair. */
+  /** `Secure` on the cookie: false only in cleartext development. */
   readonly cookieSecure?: boolean;
   readonly cookieMaxAgeMs?: number;
   /**
-   * Appelé après une vérification réussie : crée ou reprend la session et
-   * renvoie où aller. Injecté pour que ce greffon n'ait pas à connaître
-   * `sessions/` ni `engine/`.
+   * Called after a successful verification: creates or resumes the session and
+   * returns where to go. Injected so that this plugin does not have to know
+   * about `sessions/` nor `engine/`.
    */
   onStart(ctx: StartContext): Promise<StartOutcome> | StartOutcome;
 }
@@ -97,7 +98,7 @@ function escapeHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Page 403 « session hors SEB ». Volontairement peu bavarde côté étudiant. */
+/** The 403 "session outside SEB" page. Deliberately terse on the student side. */
 export function outsideSebPage(detail: string): string {
   return `<!doctype html>
 <html lang="fr">
@@ -115,9 +116,9 @@ pas depuis un autre navigateur.</p>
 }
 
 /**
- * Refus de démarrage d'épreuve pour une cause qui n'est pas SEB : l'énoncé n'a
- * pas pu être mis dans l'espace de travail. On ne redirige pas l'étudiant vers
- * une salle vide — on appelle le surveillant.
+ * Refusal to start an exam for a cause that has nothing to do with SEB: the
+ * statement could not be placed in the workspace. The student is not
+ * redirected to an empty room — the invigilator is called.
  */
 export function workspacePage(detail: string): string {
   return `<!doctype html>
@@ -151,7 +152,7 @@ function serialiseCookie(
     `${name}=${value}`,
     "Path=/",
     "HttpOnly",
-    // `Lax` : SEB arrive sur /start par une navigation de premier niveau.
+    // `Lax`: SEB reaches /start through a top-level navigation.
     "SameSite=Lax",
     `Max-Age=${Math.floor(options.maxAgeMs / 1000)}`,
   ];
@@ -201,9 +202,9 @@ async function sebRoutesPlugin(app: FastifyInstance, options: SebRoutesOptions):
       );
 
       if (!verdict.ok) {
-        // Journalisation de la raison, jamais d'un BEK ni d'un en-tête SEB :
-        // les en-têtes reçus sont des hachés du secret partagé, et la liste
-        // des BEK acceptés ne doit apparaître nulle part dans les journaux.
+        // The reason is logged, never a BEK nor a SEB header: the headers
+        // received are hashes of the shared secret, and the list of accepted
+        // BEKs must not appear anywhere in the logs.
         request.log.warn(
           {
             seb: {
@@ -214,7 +215,7 @@ async function sebRoutesPlugin(app: FastifyInstance, options: SebRoutesOptions):
               url: verdict.url,
             },
           },
-          "démarrage d'examen refusé",
+          "exam start refused",
         );
         return reply
           .code(403)
@@ -230,16 +231,16 @@ async function sebRoutesPlugin(app: FastifyInstance, options: SebRoutesOptions):
           request,
         });
       } catch (err) {
-        // Un `onStart` peut refuser pour une raison qui n'a rien de SEB :
-        // l'espace de travail n'a pas pu être préparé (`sessions/manager.ts`,
-        // `WorkspaceBootstrapError`). Le volet examen ne connaît pas ce
-        // module — la cause courte est lue par forme, pas par type, ce qui
-        // garde la frontière.
+        // An `onStart` may refuse for a reason that has nothing to do with
+        // SEB: the workspace could not be prepared (`sessions/manager.ts`,
+        // `WorkspaceBootstrapError`). The exam side does not know that module
+        // — the short cause is read structurally, not by type, which keeps the
+        // boundary intact.
         const cause = (err as { shortCause?: unknown } | null)?.shortCause;
         if (typeof cause !== "string") throw err;
         request.log.warn(
           { seb: { assignmentId: assignment.id, clientAddress: request.ip }, cause },
-          "démarrage d'examen refusé : espace de travail impossible à préparer",
+          "exam start refused: workspace could not be prepared",
         );
         return reply
           .code(503)
@@ -270,7 +271,7 @@ async function sebRoutesPlugin(app: FastifyInstance, options: SebRoutesOptions):
             clientAddress: request.ip,
           },
         },
-        "démarrage d'examen accepté",
+        "exam start accepted",
       );
 
       return reply
@@ -286,9 +287,9 @@ export const sebRoutes = fp(sebRoutesPlugin, {
 });
 
 /**
- * Vérification que le proxy `/s/<session>/*` appellera. Elle ne regarde
- * **aucun** en-tête SEB (invariant 5) : uniquement le cookie et l'adresse.
- * Exportée ici pour que `proxy/` n'ait pas à réapprendre le format du cookie.
+ * The check the `/s/<session>/*` proxy will call. It looks at **no** SEB header
+ * (invariant 5): only at the cookie and the address. Exported here so that
+ * `proxy/` does not have to learn the cookie format again.
  */
 export function checkExamRequest(
   request: FastifyRequest,
@@ -302,7 +303,7 @@ export function checkExamRequest(
   });
 }
 
-/** Réponse 403 unique du proxy, pour que le message ne varie pas selon la route. */
+/** The proxy's single 403 response, so that the message does not vary with the route. */
 export function replyOutsideSeb(reply: FastifyReply, verdict: ExamCookieVerdict): FastifyReply {
   const detail =
     verdict.ok === false && verdict.reason === "address-mismatch"

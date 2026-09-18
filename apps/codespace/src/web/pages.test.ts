@@ -26,12 +26,12 @@ const session = {
   sebVerified: false,
 } as SessionRow;
 
-describe("échappement", () => {
-  it("neutralise le HTML d'un titre de devoir", () => {
+describe("escaping", () => {
+  it("neutralizes the HTML of an assignment title", () => {
     expect(escapeHtml('<script>"&')).toBe("&lt;script&gt;&quot;&amp;");
   });
 
-  it("un titre hostile ne sort pas balise", () => {
+  it("a hostile title does not come out as a tag", () => {
     const html = homePage(
       { login: "s", displayName: "S", role: "student" },
       [{ assignment: { ...lab, title: "<img onerror=x>" }, session: null }],
@@ -41,8 +41,8 @@ describe("échappement", () => {
   });
 });
 
-describe("page d'accueil", () => {
-  it("offre le bouton Démarrer d'un devoir de travaux pratiques", () => {
+describe("home page", () => {
+  it("offers the Start button of a lab assignment", () => {
     const html = homePage({ login: "s", displayName: "S", role: "student" }, [
       { assignment: lab, session: null },
     ]);
@@ -50,7 +50,7 @@ describe("page d'accueil", () => {
     expect(html).toContain("Démarrer");
   });
 
-  it("n'offre pas de bouton Démarrer pour une épreuve (invariant 5)", () => {
+  it("does not offer a Start button for an exam (invariant 5)", () => {
     const html = homePage({ login: "s", displayName: "S", role: "student" }, [
       { assignment: exam, session: null },
     ]);
@@ -58,31 +58,31 @@ describe("page d'accueil", () => {
     expect(html).toContain("/exam/exam-c.seb");
   });
 
-  it("propose de rejoindre une session déjà ouverte", () => {
+  it("offers to join an already open session", () => {
     const html = homePage({ login: "s", displayName: "S", role: "student" }, [
       { assignment: lab, session },
     ]);
     expect(html).toContain('href="/s/s1/"');
   });
 
-  it("ne montre le lien enseignant qu'aux enseignants", () => {
+  it("shows the teacher link only to teachers", () => {
     const asStudent = homePage({ login: "s", displayName: "S", role: "student" }, []);
     const asTeacher = homePage({ login: "t", displayName: "T", role: "teacher" }, []);
     expect(asStudent).not.toContain("/teacher/sessions");
     expect(asTeacher).toContain("/teacher/sessions");
   });
 
-  it("dit clairement qu'il n'y a rien plutôt que d'afficher un vide", () => {
+  it("says clearly that there is nothing rather than showing a void", () => {
     expect(homePage({ login: "s", displayName: "S", role: "student" }, [])).toContain(
       "Aucun devoir ouvert",
     );
   });
 });
 
-describe("tableau des sessions", () => {
+describe("sessions dashboard", () => {
   const now = new Date("2026-06-01T10:00:00Z");
 
-  it("montre l'étudiant, l'état, le battement, le dernier push et le bouton Fermer", () => {
+  it("shows the student, the state, the heartbeat, the last push and the Close button", () => {
     const html = teacherSessionsPage(
       [
         {
@@ -102,7 +102,7 @@ describe("tableau des sessions", () => {
     expect(html).toContain('action="/teacher/sessions/s1/close"');
   });
 
-  it("n'offre pas de bouton Fermer sur une session déjà fermée", () => {
+  it("does not offer a Close button on an already closed session", () => {
     const html = teacherSessionsPage(
       [
         {
@@ -118,7 +118,7 @@ describe("tableau des sessions", () => {
     expect(html).toContain("—");
   });
 
-  it("signale une session née d'une vérification SEB", () => {
+  it("flags a session born from an SEB verification", () => {
     const html = teacherSessionsPage(
       [
         {

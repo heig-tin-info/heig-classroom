@@ -1,23 +1,23 @@
 /**
- * Greffon d'authentification : les trois routes OIDC, la résolution de
- * l'utilisateur à chaque requête, et les deux gardes d'autorisation.
+ * Authentication plugin: the three OIDC routes, the resolution of the user on
+ * every request, and the two authorization guards.
  *
- * Les gardes sont **explicites par route** (`preHandler: app.requireStudent`),
- * jamais un crochet global qui protégerait « tout sauf » : une liste
- * d'exceptions se trompe en silence, une garde posée route par route se lit.
+ * The guards are **explicit per route** (`preHandler: app.requireStudent`),
+ * never a global hook that would protect "everything but": a list of exceptions
+ * goes wrong silently, a guard placed route by route can be read.
  *
- * ## `OIDC_ISSUER` vide : connexion autonome désactivée
+ * ## Empty `OIDC_ISSUER`: standalone login disabled
  *
- * Un déploiement peut n'avoir pas encore d'IdP — c'est le cas du portail tant
- * que Switch edu-ID n'est pas déclaré, les étudiants arrivant par le jeton de
- * lancement de classroom (`/launch`, `classroom/routes.ts`). `OIDC_ISSUER`
- * vide dit exactement cela : **aucune** route de connexion n'est enregistrée,
- * `/auth/login` et `/auth/callback` répondent 404, et les pages qui exigent
- * un utilisateur répondent 503 avec un message qui nomme la cause.
+ * A deployment may not have an IdP yet — this is the case of the portal as long
+ * as Switch edu-ID is not declared, the students arriving through classroom's
+ * launch token (`/launch`, `classroom/routes.ts`). An empty `OIDC_ISSUER` says
+ * exactly that: **no** login route is registered, `/auth/login` and
+ * `/auth/callback` answer 404, and the pages that require a user answer 503
+ * with a message that names the cause.
  *
- * Ce n'est pas un raccourci d'identité (invariant 4) : il n'existe toujours
- * qu'une seule façon de devenir `request.user` par ce chemin, la connexion
- * OIDC réelle. Vide, elle n'est pas remplacée : elle est absente.
+ * This is not an identity shortcut (invariant 4): there is still only one way
+ * to become `request.user` through this path, the real OIDC login. Empty, it is
+ * not replaced: it is absent.
  */
 import { randomUUID } from "node:crypto";
 
@@ -50,13 +50,13 @@ export interface AuthPluginOptions {
 }
 
 /**
- * Création ou mise à jour à chaque connexion ; le rôle est recalculé depuis
- * les revendications, jamais lu en base.
+ * Created or updated at every login; the role is recomputed from the claims,
+ * never read from the database.
  *
- * La ligne est retrouvée par son sujet OIDC, puis, à défaut, par son `login` :
- * `db/seed.ts` préinscrit des comptes avec un `oidc_sub` en `pending:<login>`
- * et la première connexion les adopte. Sans cela, l'index unique sur `login`
- * ferait échouer la connexion du premier étudiant préinscrit.
+ * The row is found by its OIDC subject, then, failing that, by its `login`:
+ * `db/seed.ts` pre-registers accounts with an `oidc_sub` of `pending:<login>`
+ * and the first login adopts them. Without this, the unique index on `login`
+ * would make the login of the first pre-registered student fail.
  */
 export async function upsertUser(db: Db, claims: OidcClaims): Promise<UserRow> {
   const now = new Date();
@@ -77,7 +77,7 @@ export async function upsertUser(db: Db, claims: OidcClaims): Promise<UserRow> {
       .where(eq(users.id, existing.id))
       .returning()
       .all();
-    if (!row) throw new Error("Mise à jour de l'utilisateur sans ligne");
+    if (!row) throw new Error("User update returned no row");
     return row;
   }
   const [row] = db
@@ -94,7 +94,7 @@ export async function upsertUser(db: Db, claims: OidcClaims): Promise<UserRow> {
     })
     .returning()
     .all();
-  if (!row) throw new Error("Création de l'utilisateur sans ligne");
+  if (!row) throw new Error("User creation returned no row");
   return row;
 }
 
@@ -103,7 +103,7 @@ function wantsHtml(req: FastifyRequest): boolean {
   return accept.includes("text/html");
 }
 
-/** Page servie quand le portail n'a pas d'IdP déclaré. */
+/** Page served when the portal has no declared IdP. */
 function noIdpPage(): string {
   return (
     "<!doctype html><html lang=fr><meta charset=utf-8><title>Connexion indisponible</title>" +
@@ -128,7 +128,7 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
     req.user = row ?? null;
   });
 
-  /** Sans IdP, rediriger vers `/auth/login` mènerait à un 404 : on le dit. */
+  /** Without an IdP, redirecting to `/auth/login` would lead to a 404: we say so. */
   const unauthenticated = (req: FastifyRequest, reply: FastifyReply): FastifyReply => {
     if (!oidcEnabled) {
       if (wantsHtml(req)) {
@@ -159,12 +159,12 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
   });
 
   if (!oidcEnabled) {
-    // Aucune route de connexion n'est enregistrée : 404, et non une page qui
-    // échouerait plus loin sur `new URL("")`. `/launch` reste entier.
+    // No login route is registered: 404, rather than a page that would fail
+    // further on at `new URL("")`. `/launch` stays whole.
     app.log.warn(
       {},
-      "OIDC_ISSUER absent : connexion autonome désactivée (/auth/* en 404). " +
-        "Les sessions s'ouvrent par le jeton de lancement de classroom.",
+      "OIDC_ISSUER missing: standalone login disabled (/auth/* answer 404). " +
+        "Sessions are opened through classroom's launch token.",
     );
     return;
   }
@@ -199,7 +199,7 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
     try {
       claims = await provider.completeLogin(callbackUrl, stash);
     } catch (err) {
-      req.log.warn({ err }, "échange OIDC refusé");
+      req.log.warn({ err }, "OIDC exchange refused");
       return reply.code(401).send({ error: "oidc" });
     }
     const user = await upsertUser(db, claims);
@@ -218,12 +218,12 @@ async function authPluginImpl(app: FastifyInstance, opts: AuthPluginOptions): Pr
         expires: new Date(expiresAt),
       },
     );
-    req.log.info({ login: user.login, role: user.role }, "connexion OIDC acceptée");
+    req.log.info({ login: user.login, role: user.role }, "OIDC login accepted");
     return reply.redirect("/", 303);
   });
 
-  // Le « sélecteur d'utilisateur en dev » de jalon-0 : un lien de
-  // déconnexion, Keycloak fait le reste.
+  // The "dev user selector" of jalon-0: a logout link, Keycloak does the
+  // rest.
   app.get("/auth/logout", async (_req, reply) => {
     reply.clearCookie(AUTH_COOKIE, { path: "/" });
     return reply.redirect("/", 303);
