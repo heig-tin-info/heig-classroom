@@ -153,7 +153,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ notify, toast }}>
       {children}
-      <div className={`pointer-events-none fixed bottom-4 right-4 ${Z.toast} flex flex-col items-end gap-2`}>
+      {/* One polite live region around the stack: a toast appearing is
+          announced, and the dismiss buttons stay reachable with the keyboard
+          (the wrapper is click-through, each toast is not). */}
+      <div
+        aria-live="polite"
+        aria-relevant="additions"
+        className={`pointer-events-none fixed bottom-4 right-4 ${Z.toast} flex flex-col items-end gap-2`}
+      >
         {toasts.map((t) => {
           const Icon = t.icon;
           return (
@@ -169,7 +176,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <span className="text-fg">{t.message}</span>
               <button
                 type="button"
-                aria-label="Dismiss"
+                aria-label="Dismiss notification"
                 onClick={() => dismiss(t.id)}
                 className="ml-1 rounded-full p-1 text-fg-faint transition-colors hover:bg-surface-2 hover:text-fg"
               >

@@ -1,16 +1,20 @@
 import { CircleHelp, X } from "lucide-react";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useId, useRef, useState, type ReactNode } from "react";
 
 import { useI18n } from "./i18n";
 import { Markdown } from "./markdown";
-import { Tip, Z } from "./ui";
+import { Tip, useLayer, Z } from "./ui";
 
 /**
  * Contextual help: small "?" icons on the main components open a drawer on
  * the right with the description of that component. Content lives in
  * editable Markdown files under `src/help/*.md`, loaded at build time; a
  * `<topic>.<locale>.md` variant overrides the English default when present.
- * The drawer is hidden unless summoned and closes on any outside click.
+ * The drawer is hidden unless summoned and closes on any outside click, on
+ * Escape or on its own close button. While open it is a modal dialog: the
+ * focus moves into it, Tab cycles inside it, and closing it gives the focus
+ * back to the "?" icon that summoned it — including when it slides over a
+ * dialog, which stays open underneath.
  */
 const SOURCES = import.meta.glob("./help/*.md", {
   query: "?raw",
@@ -49,16 +53,9 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const { t, locale } = useI18n();
   const [topic, setTopic] = useState<string | null>(null);
   const source = topic ? helpSource(topic, locale) : null;
-
-  // Any outside click (or Escape) collapses the drawer.
-  useEffect(() => {
-    if (!topic) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTopic(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [topic]);
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useLayer(panel, () => setTopic(null), { enabled: topic != null });
 
   return (
     <HelpContext.Provider value={{ open: setTopic }}>
@@ -68,18 +65,25 @@ export function HelpProvider({ children }: { children: ReactNode }) {
           its backdrop — and closing the help must not close the dialog. */}
       {topic ? <div className={`fixed inset-0 ${Z.helpBackdrop}`} onClick={() => setTopic(null)} /> : null}
       <div
-        className={`fixed inset-y-0 right-0 ${Z.help} w-[340px] max-w-full transform border-l border-line bg-surface shadow-sheet transition-transform duration-200 ease-out-emphasized ${
+        ref={panel}
+        className={`fixed inset-y-0 right-0 ${Z.help} w-[340px] max-w-full transform border-l border-line bg-surface shadow-sheet transition-transform duration-200 ease-out-emphasized focus:outline-none ${
           source ? "translate-x-0" : "translate-x-full"
         }`}
-        role="complementary"
-        aria-label={t("help.title")}
+        {...(source
+          ? { role: "dialog" as const, "aria-modal": true, "aria-labelledby": titleId }
+          : // Closed: the panel is still in the DOM for the slide animation, so
+            // it must be neither a dialog nor reachable.
+            { "aria-hidden": true })}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         {source ? (
           <div className="flex h-full flex-col">
             <div className="flex items-center gap-2 border-b border-line px-5 py-4">
               <CircleHelp className="size-4 text-accent" />
-              <h2 className="text-[15px] font-bold tracking-tight">{t("help.title")}</h2>
+              <h2 id={titleId} className="text-[15px] font-bold tracking-tight">
+                {t("help.title")}
+              </h2>
               <span className="flex-1" />
               <button
                 type="button"

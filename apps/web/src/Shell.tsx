@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ClipboardList, Eye, Menu as MenuIcon, School, Settings as SettingsIcon, ShieldCheck, X } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 
 import type { ClassroomSummary, Me } from "@hgc/contracts";
 
@@ -8,7 +8,7 @@ import { api } from "./api";
 import { Logo, UserMenu } from "./Header";
 import { useT } from "./i18n";
 import type { Route } from "./router";
-import { Button, cx, IconButton, OrgAvatar, Z, type IconType } from "./ui";
+import { Button, cx, IconButton, OrgAvatar, useLayer, Z, type IconType } from "./ui";
 
 /**
  * Application frame: a 240 px sidebar on desktop (navigation, the teacher's
@@ -74,7 +74,9 @@ function Nav({
   const currentRoom =
     route.view === "classroom" ? route.id : route.view === "assignment" ? route.classroomId : null;
   return (
-    <nav className="flex flex-1 flex-col gap-6 overflow-y-auto px-3 py-2">
+    // min-h-0 + overflow-y-auto: with thirty classrooms the list scrolls on its
+    // own inside the sticky sidebar instead of pushing the account row out.
+    <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-2">
       <div className="space-y-0.5">
         <NavItem
           icon={teacherUi ? School : ClipboardList}
@@ -142,23 +144,23 @@ export function Shell({
 }) {
   const t = useT();
   const [drawer, setDrawer] = useState(false);
-  useEffect(() => {
-    if (!drawer) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setDrawer(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [drawer]);
+  const drawerPanel = useRef<HTMLDivElement>(null);
+  const drawerTitleId = useId();
+  // The mobile drawer is a modal dialog: focus moves in, Tab cycles inside,
+  // Escape closes it and the "Open menu" button gets the focus back.
+  useLayer(drawerPanel, () => setDrawer(false), { enabled: drawer });
 
-  const brand = (
+  /** `titleId` names the drawer through its own brand line. */
+  const brand = (titleId?: string) => (
     <button
       type="button"
       onClick={() => navigate({ view: "home" })}
       className="flex items-center gap-2.5 rounded-[10px] px-2 py-1 text-left transition-opacity hover:opacity-80"
     >
       <Logo />
-      <span className="text-[15px] font-bold tracking-tight">HEIG Classroom</span>
+      <span id={titleId} className="text-[15px] font-bold tracking-tight">
+        HEIG Classroom
+      </span>
     </button>
   );
   const userMenu = (compact: boolean) => (
@@ -175,7 +177,7 @@ export function Shell({
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-line bg-canvas lg:flex">
-        <div className="px-3 pb-2 pt-4">{brand}</div>
+        <div className="px-3 pb-2 pt-4">{brand()}</div>
         <Nav me={me} route={route} navigate={navigate} teacherUi={teacherUi} />
         <div className="border-t border-line p-2">{userMenu(false)}</div>
       </aside>
@@ -184,9 +186,16 @@ export function Shell({
       {drawer ? (
         <div className={`fixed inset-0 ${Z.modal} lg:hidden`}>
           <div className="layer-backdrop absolute inset-0 bg-fg/30" onClick={() => setDrawer(false)} />
-          <div className="absolute inset-y-0 left-0 flex w-72 flex-col border-r border-line bg-canvas shadow-overlay">
+          <div
+            ref={drawerPanel}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={drawerTitleId}
+            tabIndex={-1}
+            className="absolute inset-y-0 left-0 flex w-72 flex-col border-r border-line bg-canvas shadow-overlay focus:outline-none"
+          >
             <div className="flex items-center justify-between px-3 pb-2 pt-4">
-              {brand}
+              {brand(drawerTitleId)}
               <IconButton label="Close menu" onClick={() => setDrawer(false)}>
                 <X />
               </IconButton>
@@ -206,10 +215,15 @@ export function Shell({
       <div className="min-w-0 flex-1">
         {/* Mobile top bar */}
         <div className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-line bg-canvas/90 px-3 backdrop-blur lg:hidden">
-          <IconButton label="Open menu" onClick={() => setDrawer(true)}>
+          <IconButton
+            label="Open menu"
+            aria-haspopup="dialog"
+            aria-expanded={drawer}
+            onClick={() => setDrawer(true)}
+          >
             <MenuIcon />
           </IconButton>
-          {brand}
+          {brand()}
           <span className="flex-1" />
           {userMenu(true)}
         </div>

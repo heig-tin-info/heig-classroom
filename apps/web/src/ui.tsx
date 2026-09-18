@@ -11,9 +11,19 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  cloneElement,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, ReactNode, RefObject } from "react";
 
 import type { DateFormat, Me } from "@hgc/contracts";
 
@@ -58,16 +68,112 @@ export function useNow(intervalMs = 30_000): number {
   return now;
 }
 
-/** Calls `onEscape` on the Escape key while mounted (dialogs, sheets, menus). */
-export function useEscape(onEscape: () => void, enabled = true) {
+/*
+ * Floating layers keep a stack. Only the topmost one answers Escape and traps
+ * Tab, so the help drawer opened from a dialog (or a menu opened inside a
+ * sheet) closes on its own instead of taking everything underneath with it.
+ */
+const layers: object[] = [];
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Tabbable descendants of `root`, in document order, skipping hidden ones. */
+export function focusableIn(root: HTMLElement): HTMLElement[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+    (el) => el.offsetWidth > 0 || el.offsetHeight > 0 || el === document.activeElement,
+  );
+}
+
+/**
+ * Registers one open floating layer (dialog, sheet, drawer, menu):
+ * - Escape calls `onClose`, but only while this layer is the topmost one;
+ * - with `trap` (the default), focus moves into `panel` on open, Tab and
+ *   Shift+Tab cycle inside it, and the element that opened the layer gets the
+ *   focus back on close.
+ * `panel` must carry `tabIndex={-1}` so it can hold the focus by itself when
+ * it has no focusable child.
+ */
+export function useLayer(
+  panel: RefObject<HTMLElement | null>,
+  onClose: () => void,
+  { trap = true, enabled = true }: { trap?: boolean; enabled?: boolean } = {},
+) {
+  // Latest callback without re-arming the listener on every render.
+  const close = useRef(onClose);
+  close.current = onClose;
+  // Element to give the focus back to, captured during the render that opens
+  // the layer: an `autoFocus` inside the panel lands during the commit, before
+  // effects run, so reading it from the effect would capture a node the layer
+  // is about to unmount.
+  const opener = useRef<HTMLElement | null>(null);
+  if (!enabled) opener.current = null;
+  else opener.current ??= document.activeElement as HTMLElement | null;
+  // Giving the focus back is deferred by one frame and cancelled if the layer
+  // mounts again right away: that is exactly the mount/cleanup/mount StrictMode
+  // replays in development, and restoring there would undo an `autoFocus`
+  // inside the panel.
+  const restore = useRef<number | null>(null);
   useEffect(() => {
     if (!enabled) return;
+    const token = {};
+    layers.push(token);
+    const onTop = () => layers[layers.length - 1] === token;
+    if (restore.current != null) {
+      cancelAnimationFrame(restore.current);
+      restore.current = null;
+    }
+    const restoreTo = opener.current;
+    if (trap && panel.current && !panel.current.contains(document.activeElement)) {
+      (focusableIn(panel.current)[0] ?? panel.current).focus();
+    }
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onEscape();
+      if (!onTop()) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        close.current();
+        return;
+      }
+      if (!trap || e.key !== "Tab" || !panel.current) return;
+      const items = focusableIn(panel.current);
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (!first || !last) {
+        e.preventDefault();
+        panel.current.focus();
+        return;
+      }
+      const active = document.activeElement as HTMLElement | null;
+      if (!active || !panel.current.contains(active)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onEscape, enabled]);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      const i = layers.lastIndexOf(token);
+      if (i >= 0) layers.splice(i, 1);
+      if (trap && restoreTo) {
+        restore.current = requestAnimationFrame(() => {
+          restore.current = null;
+          if (restoreTo.isConnected) restoreTo.focus();
+        });
+      }
+    };
+  }, [enabled, trap, panel]);
+}
+
+/** Escape-only layer, for a floating element with no panel to trap. */
+export function useEscape(onEscape: () => void, enabled = true) {
+  const none = useRef<HTMLElement>(null);
+  useLayer(none, onEscape, { trap: false, enabled });
 }
 
 /** Locks the page scroll while a floating layer is open. */
@@ -164,6 +270,8 @@ export function SortHeader<K extends string>({
  * anchor near the top edge and clamped to the viewport. Wraps any element;
  * keep the accessible name (`aria-label`) on the control itself — the bubble
  * is aria-hidden. A nullish label renders the child untouched.
+ * The bubble never takes the focus (portal, `pointer-events-none`, no
+ * tabindex) and Escape dismisses it (WCAG 1.4.13).
  */
 export function Tip({
   label,
@@ -176,6 +284,22 @@ export function Tip({
 }) {
   const [tip, setTip] = useState<{ x: number; y: number; below: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Escape hides the bubble without moving the hover or the focus. Deliberately
+  // not part of the layer stack: a tooltip never owns the Escape key.
+  useEffect(() => {
+    if (!tip) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setTip(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tip]);
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
   if (!label) return <>{children}</>;
   const arm = (el: HTMLElement) => {
     if (timer.current) clearTimeout(timer.current);
@@ -244,11 +368,11 @@ export type ButtonVariant = "primary" | "secondary" | "subtle" | "ghost" | "dang
 export type ButtonSize = "sm" | "md" | "lg";
 
 const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-white hover:bg-accent-hover",
+  primary: "bg-accent text-on-fill hover:bg-accent-hover",
   secondary: "border border-line-strong bg-surface text-fg hover:bg-surface-2",
   subtle: "bg-surface-3 text-fg hover:bg-line-strong/70",
   ghost: "text-fg-muted hover:bg-surface-2 hover:text-fg",
-  danger: "bg-danger text-white hover:opacity-90",
+  danger: "bg-danger text-on-fill hover:opacity-90",
 };
 const BUTTON_SIZES: Record<ButtonSize, string> = {
   sm: "h-7 px-3 text-[13px] [&_svg]:size-3.5",
@@ -367,7 +491,7 @@ export function Avatar({ me, className = "size-16 text-xl" }: { me: Me; classNam
     `${me.givenName.charAt(0)}${me.familyName.charAt(0)}`.toUpperCase() || "?";
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-white ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-on-fill ${className}`}
     >
       {initials}
     </span>
@@ -488,25 +612,31 @@ export function Modal({
   /** Actions row, right-aligned, on its own hairline. */
   footer?: ReactNode;
 }) {
-  useEscape(onClose);
   useScrollLock();
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useLayer(panel, onClose);
   const width = { sm: "max-w-[420px]", md: "max-w-[520px]", lg: "max-w-[760px]" }[size];
   return createPortal(
     <div
       className={`layer-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-fg/30 p-4 backdrop-blur-[2px] sm:items-center`}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
     >
       <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={cx(
-          "dialog-panel mt-8 w-full rounded-sheet border border-line bg-surface shadow-overlay sm:mt-0",
+          "dialog-panel mt-8 w-full rounded-sheet border border-line bg-surface shadow-overlay focus:outline-none sm:mt-0",
           width,
         )}
       >
         <div className="flex items-start gap-3 px-5 pt-5">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+            <h2 id={titleId} className="text-lg font-bold tracking-tight">
+              {title}
+            </h2>
             {subtitle ? <p className="mt-0.5 text-sm text-fg-muted">{subtitle}</p> : null}
           </div>
           <LayerClose onClose={onClose} />
@@ -546,24 +676,28 @@ export function Sheet({
   /** Children own the padding (full-bleed sections separated by hairlines). */
   flush?: boolean;
 }) {
-  useEscape(onClose);
   useScrollLock();
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useLayer(panel, onClose);
   return createPortal(
-    <div
-      className={`layer-backdrop fixed inset-0 ${Z.modal} flex justify-end bg-fg/30 backdrop-blur-[2px]`}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
+    <div className={`layer-backdrop fixed inset-0 ${Z.modal} flex justify-end bg-fg/30 backdrop-blur-[2px]`}>
       <div
+        ref={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
         className={cx(
-          "sheet-panel flex h-full w-full flex-col border-l border-line bg-surface shadow-sheet",
+          "sheet-panel flex h-full w-full flex-col border-l border-line bg-surface shadow-sheet focus:outline-none",
           width === "lg" ? "sm:max-w-[760px]" : "sm:max-w-[600px]",
         )}
       >
         <div className="flex items-start gap-3 border-b border-line px-6 pb-4 pt-5">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+            <h2 id={titleId} className="text-lg font-bold tracking-tight">
+              {title}
+            </h2>
             {subtitle ? <p className="mt-0.5 text-sm text-fg-muted">{subtitle}</p> : null}
           </div>
           <LayerClose onClose={onClose} />
@@ -594,10 +728,47 @@ export interface MenuItem {
   separator?: boolean;
 }
 
+/** Height assumed for the panel when deciding to flip it upward. */
+const MENU_FLIP_MARGIN = 280;
+
+export interface MenuPlacement {
+  top?: number;
+  bottom?: number;
+  left: number;
+  /** The panel opens above the trigger. */
+  up: boolean;
+}
+
+/**
+ * Fixed coordinates of the menu panel from the trigger rectangle. The panel
+ * drops under the trigger, and flips above it when the trigger sits low on a
+ * short viewport (the sidebar account row). `align="end"` anchors the panel's
+ * right edge on the trigger's right; the caller applies the translation.
+ * Pure on purpose: this is the part worth unit-testing.
+ */
+export function menuPosition(
+  rect: { top: number; bottom: number; left: number; right: number },
+  viewport: { width: number; height: number },
+  align: "start" | "end",
+  panelHeight = MENU_FLIP_MARGIN,
+): MenuPlacement {
+  const up = rect.bottom + panelHeight > viewport.height && rect.top > viewport.height / 2;
+  return {
+    ...(up ? { bottom: viewport.height - rect.top + 6 } : { top: rect.bottom + 6 }),
+    left: align === "end" ? rect.right : rect.left,
+    up,
+  };
+}
+
 /**
  * Overflow menu for tertiary actions. Positioned in a portal from the
  * trigger's rectangle (so it escapes overflow-hidden cards and tables) and
  * closes on outside click, Escape, scroll or selection.
+ *
+ * Keyboard (WAI-ARIA menu button): Enter, Space or ArrowDown on the trigger
+ * opens the menu on its first item, ArrowUp opens it on the last; arrows move
+ * with wrap, Home/End jump to the ends, Escape closes and hands the focus back
+ * to the trigger, Tab closes and lets the browser carry on from the trigger.
  */
 export function Menu({
   items,
@@ -612,18 +783,36 @@ export function Menu({
   align?: "start" | "end";
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<MenuPlacement | null>(null);
+  /** Index of the focused item in `items`; -1 when the menu was opened by mouse. */
+  const [active, setActive] = useState(-1);
   const anchor = useRef<HTMLSpanElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  useEscape(() => setOpen(false), open);
+  const itemRefs = useRef<(HTMLElement | null)[]>([]);
+  const menuId = useId();
+
+  /** Indexes of the items the keyboard may land on (disabled ones are skipped). */
+  const reachable = useMemo(
+    () => items.map((it, i) => (it.disabled ? -1 : i)).filter((i) => i >= 0),
+    [items],
+  );
+
+  const close = useCallback((restoreFocus: boolean) => {
+    setOpen(false);
+    setActive(-1);
+    if (restoreFocus) anchor.current?.querySelector<HTMLElement>("button, a")?.focus();
+  }, []);
+
+  useLayer(panel, () => close(true), { trap: false, enabled: open });
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as Node;
       if (anchor.current?.contains(t) || panel.current?.contains(t)) return;
-      setOpen(false);
+      close(false);
     };
-    const onScroll = () => setOpen(false);
+    const onScroll = () => close(false);
     document.addEventListener("mousedown", onDown);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", onScroll);
@@ -632,42 +821,94 @@ export function Menu({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", onScroll);
     };
-  }, [open]);
-  const toggle = () => {
-    if (!open && anchor.current) {
-      const r = anchor.current.getBoundingClientRect();
-      // Open upward when the trigger sits near the bottom edge (sidebar account row).
-      const up = r.bottom + 280 > window.innerHeight && r.top > window.innerHeight / 2;
-      setPos({
-        ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }),
-        left: align === "end" ? r.right : r.left,
-        up,
-      });
-    }
-    setOpen((v) => !v);
+  }, [open, close]);
+
+  // The panel is portalled, so the focus can only move once it is on screen.
+  useEffect(() => {
+    if (open && active >= 0) itemRefs.current[active]?.focus();
+  }, [open, active]);
+
+  const openAt = (index: number) => {
+    if (!anchor.current) return;
+    const r = anchor.current.getBoundingClientRect();
+    setPos(menuPosition(r, { width: window.innerWidth, height: window.innerHeight }, align));
+    setActive(index);
+    setOpen(true);
   };
+
+  const onTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (open) return;
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+      // preventDefault also swallows the click the browser would synthesize.
+      e.preventDefault();
+      openAt(reachable[0] ?? -1);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      openAt(reachable[reachable.length - 1] ?? -1);
+    }
+  };
+
+  const onPanelKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Tab") {
+      // Hand the focus back to the trigger first: the browser's own Tab then
+      // continues from there instead of restarting at the top of the document.
+      close(true);
+      return;
+    }
+    if (reachable.length === 0) return;
+    const at = reachable.indexOf(active);
+    const go = (next: number) => {
+      e.preventDefault();
+      setActive(reachable[(next + reachable.length) % reachable.length] ?? -1);
+    };
+    if (e.key === "ArrowDown") go(at + 1);
+    else if (e.key === "ArrowUp") go(at < 0 ? reachable.length - 1 : at - 1);
+    else if (e.key === "Home") go(0);
+    else if (e.key === "End") go(reachable.length - 1);
+  };
+
+  const triggerProps = {
+    "aria-haspopup": "menu" as const,
+    "aria-expanded": open,
+    "aria-controls": open ? menuId : undefined,
+  };
+  const triggerNode = trigger ? (
+    // Clone so the ARIA state lands on the caller's real button.
+    isValidElement<Record<string, unknown>>(trigger) ? (
+      cloneElement(trigger, triggerProps)
+    ) : (
+      trigger
+    )
+  ) : (
+    <IconButton label={label} {...triggerProps}>
+      <Ellipsis />
+    </IconButton>
+  );
+
   return (
     <>
       <span
         ref={anchor}
         className="inline-flex"
+        onKeyDown={onTriggerKeyDown}
         onClick={(e) => {
           e.stopPropagation();
-          toggle();
+          if (open) close(false);
+          else openAt(-1);
         }}
       >
-        {trigger ?? (
-          <IconButton label={label} aria-haspopup="menu" aria-expanded={open}>
-            <Ellipsis />
-          </IconButton>
-        )}
+        {triggerNode}
       </span>
       {open && pos
         ? createPortal(
             <div
               ref={panel}
+              id={menuId}
               role="menu"
-              className={`menu-panel fixed ${Z.popover} min-w-44 rounded-menu border border-line bg-surface p-1 shadow-popover`}
+              aria-label={label}
+              tabIndex={-1}
+              onKeyDown={onPanelKeyDown}
+              className={`menu-panel fixed ${Z.popover} min-w-44 rounded-menu border border-line bg-surface p-1 shadow-popover focus:outline-none`}
               style={{
                 top: pos.top,
                 bottom: pos.bottom,
@@ -696,27 +937,38 @@ export function Menu({
                   </>
                 );
                 return (
-                  <div key={i}>
-                    {it.separator ? <div className="my-1 border-t border-line" /> : null}
+                  <div key={i} role="none">
+                    {it.separator ? <div className="my-1 border-t border-line" role="none" /> : null}
                     {it.href ? (
                       <a
+                        ref={(el) => {
+                          itemRefs.current[i] = el;
+                        }}
                         role="menuitem"
+                        tabIndex={-1}
                         href={it.href}
                         target={it.href.startsWith("http") ? "_blank" : undefined}
                         rel="noreferrer"
                         className={cls}
-                        onClick={() => setOpen(false)}
+                        onClick={() => close(true)}
                       >
                         {body}
                       </a>
                     ) : (
                       <button
+                        ref={(el) => {
+                          itemRefs.current[i] = el;
+                        }}
                         type="button"
                         role="menuitem"
+                        tabIndex={-1}
                         className={cls}
                         disabled={it.disabled}
+                        aria-disabled={it.disabled}
                         onClick={() => {
-                          setOpen(false);
+                          // Focus first, so a layer opened by the item captures
+                          // the trigger as the element to come back to.
+                          close(true);
                           it.onSelect?.();
                         }}
                       >
@@ -988,29 +1240,65 @@ export function Stat({
   );
 }
 
-/** Text tabs with an ink underline; counts sit in `fg-faint`. */
+/**
+ * Text tabs with an ink underline; counts sit in `fg-faint`.
+ * Roving tabindex: only the selected tab is in the Tab order, ArrowLeft and
+ * ArrowRight move and select with wrap, Home and End jump to the ends.
+ * Give `idPrefix` to wire the tabs to their panels: each tab then carries
+ * `id="<prefix>-tab-<value>"` and `aria-controls="<prefix>-panel-<value>"`,
+ * and the panel is expected to carry the matching id.
+ */
 export function Tabs<V extends string>({
   value,
   onChange,
   items,
   className = "",
+  idPrefix,
+  label,
 }: {
   value: V;
   onChange: (v: V) => void;
   items: { value: V; label: string; count?: number; icon?: IconType }[];
   className?: string;
+  idPrefix?: string;
+  /** Accessible name of the tablist when the surrounding heading is not enough. */
+  label?: string;
 }) {
+  const refs = useRef<Partial<Record<V, HTMLButtonElement | null>>>({});
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
+    if (!keys.includes(e.key) || items.length === 0) return;
+    e.preventDefault();
+    const i = items.findIndex((it) => it.value === value);
+    const next =
+      e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : items.length - 1;
+    const target = items[(next + items.length) % items.length];
+    if (!target) return;
+    onChange(target.value);
+    refs.current[target.value]?.focus();
+  };
   return (
-    <div role="tablist" className={cx("flex gap-1 overflow-x-auto border-b border-line", className)}>
+    <div
+      role="tablist"
+      aria-label={label}
+      onKeyDown={onKeyDown}
+      className={cx("flex gap-1 overflow-x-auto border-b border-line", className)}
+    >
       {items.map((it) => {
         const Icon = it.icon;
         const active = it.value === value;
         return (
           <button
             key={it.value}
+            ref={(el) => {
+              refs.current[it.value] = el;
+            }}
             type="button"
             role="tab"
+            id={idPrefix ? `${idPrefix}-tab-${it.value}` : undefined}
+            aria-controls={idPrefix ? `${idPrefix}-panel-${it.value}` : undefined}
             aria-selected={active}
+            tabIndex={active ? 0 : -1}
             onClick={() => onChange(it.value)}
             className={cx(
               "relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
@@ -1154,7 +1442,7 @@ export function Checkbox({
     <label className={cx("inline-flex cursor-pointer items-center gap-2.5 text-sm", props.disabled && "opacity-50", className)}>
       <span className="relative inline-flex size-4 shrink-0">
         <input type="checkbox" {...props} className="peer size-4 appearance-none rounded-[5px] border border-line-strong bg-surface transition-colors checked:border-accent checked:bg-accent" />
-        <Check className="pointer-events-none absolute inset-0 m-auto size-3 text-white opacity-0 peer-checked:opacity-100" strokeWidth={3} />
+        <Check className="pointer-events-none absolute inset-0 m-auto size-3 text-on-fill opacity-0 peer-checked:opacity-100" strokeWidth={3} />
       </span>
       {label}
     </label>
@@ -1393,7 +1681,7 @@ export function RangeCalendar({
                       "h-8 w-8 text-[13px] tabular-nums transition-colors",
                       (mode === "range" && day === start) || day === end
                         ? cx(
-                            "bg-accent font-semibold text-white",
+                            "bg-accent font-semibold text-on-fill",
                             mode === "single" || !bandEnd || start === bandEnd
                               ? "rounded-full"
                               : day === start
@@ -1403,7 +1691,7 @@ export function RangeCalendar({
                         : bandEnd !== "" && day > start && day < bandEnd && mode === "range"
                           ? "bg-accent-soft text-fg"
                           : day === bandEnd && picking
-                            ? "rounded-r-full bg-accent/70 text-white"
+                            ? "rounded-r-full bg-accent/70 text-on-fill"
                             : cx(
                                 "rounded-full hover:bg-surface-3",
                                 day === today && "font-bold text-accent",

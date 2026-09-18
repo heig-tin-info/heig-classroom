@@ -18,13 +18,17 @@
   --line-strong: #d3cfc7;
   --fg: #1a1917;
   --fg-muted: #67635b;
-  --fg-faint: #9a958b;
+  --fg-faint: #8f8a80;
   --accent: #b41f24;
   --accent-hover: #9a1b1f;
   --accent-soft: #fbebeb;
+  /* Ink laid on a saturated fill (accent, danger, success button, avatar,
+     checkbox tick): white here, near-black in dark mode where the fills are
+     light. One token so no component needs a `dark:` variant. */
+  --on-fill: #ffffff;
   --success: #1f7a4d;
   --success-soft: #e7f4ec;
-  --warning: #a85c12;
+  --warning: #a35810;
   --warning-soft: #fdf1e2;
   --danger: #c2242a;
   --danger-soft: #fbe9e9;
@@ -42,9 +46,10 @@ html.dark {
   --fg: #ecebe7;
   --fg-muted: #a39e94;
   --fg-faint: #6e6961;
-  --accent: #e0484e;
-  --accent-hover: #ea5c61;
-  --accent-soft: rgb(224 72 78 / 0.14);
+  --accent: #e85f64;
+  --accent-hover: #f0787c;
+  --accent-soft: rgb(232 95 100 / 0.10);
+  --on-fill: #131211;
   --success: #4cc38a;
   --success-soft: rgb(76 195 138 / 0.14);
   --warning: #f0a04b;
@@ -72,6 +77,7 @@ html.dark {
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+  --color-on-fill: var(--on-fill);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);

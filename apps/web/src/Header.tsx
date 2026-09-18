@@ -21,7 +21,7 @@ import { Avatar, cx, GithubIcon, Menu, type MenuItem } from "./ui";
 
 export function Logo({ className = "size-5" }: { className?: string }) {
   return (
-    <span className="inline-flex shrink-0 items-center justify-center rounded-[10px] bg-accent p-1.5 text-white">
+    <span className="inline-flex shrink-0 items-center justify-center rounded-[10px] bg-accent p-1.5 text-on-fill">
       <GraduationCap className={className} />
     </span>
   );

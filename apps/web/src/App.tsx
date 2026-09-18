@@ -19,21 +19,38 @@ const AssignmentPage = lazy(() =>
   import("./AssignmentDetail").then((m) => ({ default: m.AssignmentPage })),
 );
 
+/*
+ * Signed-out page. The four decisions, so the door looks like the house:
+ * - Type: the page-title step (28 px / 700 / -0.02em) over the 16 px step for
+ *   the tagline, the same 2x jump every page header uses. Nothing at 32 px:
+ *   the landing is not louder than a classroom.
+ * - Color: one accent, the sign-in button. The mark keeps the red square it
+ *   has in the sidebar; everything else is fg / fg-muted / fg-faint.
+ * - Space: 20 between the mark and the name, 12 between the name and the
+ *   tagline (one group), 32 before the action, 48 down to the footer.
+ * - Finish: a sheet of paper (`surface` + hairline + card radius) on the warm
+ *   canvas. No shadow: it sits in the page flow.
+ */
 function Landing() {
   const t = useT();
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-8 px-4">
-      <div className="flex flex-col items-center gap-5 text-center">
+    <main className="flex min-h-dvh flex-col items-center justify-center px-4 py-10">
+      <div className="w-full max-w-[460px] rounded-card border border-line bg-surface px-8 py-10 text-center">
         <Logo className="size-7" />
-        <div>
-          <h1 className="text-[32px] font-bold tracking-[-0.02em]">{t("app.title")}</h1>
-          <p className="mx-auto mt-3 max-w-md text-fg-muted">{t("landing.tagline")}</p>
-        </div>
-        <LinkButton href="/app/auth/login" variant="primary" size="lg">
+        <h1 className="mt-5 text-[28px] font-bold leading-tight tracking-[-0.02em]">
+          {t("app.title")}
+        </h1>
+        <p className="mt-3 text-[16px] leading-relaxed text-fg-muted">{t("landing.tagline")}</p>
+        <LinkButton
+          href="/app/auth/login"
+          variant="primary"
+          size="lg"
+          className="mt-8 w-full"
+        >
           {t("landing.signin")}
         </LinkButton>
       </div>
-      <p className="text-xs text-fg-faint">{t("landing.footer")}</p>
+      <p className="mt-12 text-xs text-fg-faint">{t("landing.footer")}</p>
     </main>
   );
 }
