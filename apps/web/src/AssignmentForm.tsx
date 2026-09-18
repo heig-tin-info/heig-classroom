@@ -10,7 +10,6 @@ import {
   Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
 
 import type { Assignment, OrgRepo, RepoTree, WorkMode } from "@hgc/contracts";
 
@@ -18,18 +17,26 @@ import { api, ApiError, apiErrorMessage, useMe } from "./api";
 import { HelpIcon } from "./help";
 import { useToast } from "./notify";
 import {
+  Alert,
   Badge,
   Button,
+  cx,
   Field,
+  FieldLabel,
   GithubIcon,
   humanize,
   IconButton,
+  inputClass,
   isoDateTime,
   localDateKey,
   localDateTimeInputValue,
   Progress,
   RangeCalendar,
   Segmented,
+  Select,
+  SettingRow,
+  Sheet,
+  Textarea,
   Tip,
   Z,
 } from "./ui";
@@ -78,13 +85,13 @@ function TreeView({
   depth?: number;
 }) {
   return (
-    <ul className={depth === 0 ? "space-y-0.5" : "ml-4 space-y-0.5 border-l border-zinc-200 pl-2 dark:border-zinc-800"}>
+    <ul className={depth === 0 ? "space-y-0.5" : "ml-4 space-y-0.5 border-l border-line pl-2"}>
       {nodes.map((n) =>
         n.type === "tree" ? (
           <li key={n.path}>
             <details open={depth < 1}>
-              <summary className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
-                <Folder className="size-3.5 text-zinc-400" />
+              <summary className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[13px] hover:bg-surface-2">
+                <Folder className="size-3.5 text-fg-faint" />
                 {n.name}
               </summary>
               <TreeView nodes={n.children} checked={checked} onToggle={onToggle} depth={depth + 1} />
@@ -92,17 +99,17 @@ function TreeView({
           </li>
         ) : (
           <li key={n.path}>
-            <label className="flex cursor-pointer items-center gap-1.5 rounded px-1 py-0.5 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-0.5 text-[13px] hover:bg-surface-2">
               <input
                 type="checkbox"
                 className="accent-accent"
                 checked={checked.has(n.path)}
                 onChange={(e) => onToggle(n.path, e.target.checked)}
               />
-              <FileText className="size-3.5 text-zinc-400" />
-              {n.name}
+              <FileText className="size-3.5 text-fg-faint" />
+              <span className={checked.has(n.path) ? "font-medium" : ""}>{n.name}</span>
               {checked.has(n.path) ? (
-                <span className="text-xs text-accent">protected</span>
+                <Lock className="size-3 text-accent" aria-label="protected" />
               ) : null}
             </label>
           </li>
@@ -112,7 +119,7 @@ function TreeView({
   );
 }
 
-// --- Create / edit form (shown in a modal) ---
+// --- Create / edit form (shown in a sheet) ---
 
 const toIso = (local: string) => new Date(local).toISOString();
 const toLocalInput = (iso: string) => localDateTimeInputValue(new Date(iso));
@@ -140,45 +147,14 @@ function CreatingOverlay() {
     return () => clearInterval(id);
   }, []);
   return (
-    // Above the modal (Z.modal): the whole dialog greys out, spinner on top.
+    // Above the sheet (Z.modal): the whole panel greys out, spinner on top.
     <div
-      className={`fixed inset-0 ${Z.overlay} flex flex-col items-center justify-center gap-3 bg-white/70 backdrop-blur-sm dark:bg-zinc-950/70`}
+      className={`fixed inset-0 ${Z.overlay} flex flex-col items-center justify-center gap-3 bg-canvas/70 backdrop-blur-sm`}
       role="status"
       aria-live="polite"
     >
       <Loader2 className="size-8 animate-spin text-accent" />
-      <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
-        {CREATE_STEPS[step]}
-      </p>
-    </div>
-  );
-}
-
-/**
- * Settings row: label + a description of the CURRENT choice on the left
- * (one dynamic line, not one per option), the control on the right.
- */
-function SettingRow({
-  title,
-  desc,
-  help,
-  children,
-}: {
-  title: string;
-  desc?: string;
-  help?: string;
-  children?: ReactNode;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0">
-        <span className="flex items-center gap-1 text-sm text-zinc-800 dark:text-zinc-200">
-          {title}
-          {help ? <HelpIcon topic={help} /> : null}
-        </span>
-        {desc ? <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{desc}</p> : null}
-      </div>
-      {children}
+      <p className="text-sm font-medium text-fg-muted">{CREATE_STEPS[step]}</p>
     </div>
   );
 }
@@ -190,8 +166,8 @@ function SettingRow({
  */
 const WORK_MODE_LABELS: Record<WorkMode, string> = {
   free: "Free",
-  online: "Online workspace",
-  online_seb: "Online workspace, SEB only",
+  online: "Online",
+  online_seb: "Exam (SEB)",
 };
 const WORK_MODE_DESC: Record<WorkMode, string> = {
   free: "Students clone and push with their own GitHub account",
@@ -221,6 +197,16 @@ export function compactDuration(ms: number): string {
   const d = Math.floor(h / 24);
   const hr = h % 24;
   return hr ? `${d} d ${hr} h` : `${d} d`;
+}
+
+/** Section label inside the sheet. */
+function Eyebrow({ children, trailing }: { children: React.ReactNode; trailing?: React.ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-fg-faint">{children}</p>
+      {trailing}
+    </div>
+  );
 }
 
 export function AssignmentForm({
@@ -443,25 +429,69 @@ export function AssignmentForm({
       ? apiErrorMessage(save.error, "Request failed")
       : null;
 
-  const select =
-    "rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900";
   // Recessed panel for conditional detail — one surface level below the sheet.
-  const panel = "rounded-lg bg-zinc-100/70 p-3 dark:bg-zinc-800/50";
-  const eyebrow = "text-xs font-medium text-zinc-400 dark:text-zinc-500";
+  const panel = "rounded-field bg-surface-2 p-3";
+  const section = "space-y-4 px-6 py-5";
   const fileCount = tree.data?.tree.filter((e) => e.type === "blob").length ?? 0;
+  const formId = "assignment-form";
+  const submitDisabled =
+    save.isPending ||
+    (!existing && !sourceRepo) ||
+    (durationOnly && durationMinutes < 15) ||
+    missingWhen ||
+    rangeInvalid ||
+    !milestonesValid ||
+    (workMode === "online_seb" && !keysValid);
 
   return (
-    <form
-      className="relative"
-      onSubmit={(e) => {
-        e.preventDefault();
-        save.mutate();
-      }}
+    <Sheet
+      title={existing ? `Edit “${existing.name}”` : "New assignment"}
+      subtitle={
+        !existing || existing.state === "draft"
+          ? "Draft — nothing is published yet"
+          : existing.state === "locked"
+            ? "Expired — move the deadline forward to reopen"
+            : "Live — changes apply when you save"
+      }
+      onClose={onDone}
+      flush
+      footer={
+        <>
+          {error ? (
+            <span className="min-w-0 flex-1 text-xs text-danger">{error}</span>
+          ) : (
+            <span className="min-w-0 flex-1 text-xs text-fg-faint">
+              {livePublished
+                ? "The assignment is live — changes apply when you save"
+                : "Saved as a draft until you publish"}
+            </span>
+          )}
+          <Button type="button" variant="ghost" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button type="submit" form={formId} disabled={submitDisabled} loading={save.isPending}>
+            {save.isPending
+              ? existing
+                ? "Saving…"
+                : "Creating…"
+              : existing
+                ? "Save changes"
+                : "Create assignment"}
+          </Button>
+        </>
+      }
     >
       {save.isPending && !existing ? <CreatingOverlay /> : null}
-      <div className="divide-y divide-zinc-200 dark:divide-zinc-800">
+      <form
+        id={formId}
+        className="divide-y divide-line"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+      >
         {/* --- Identity: name, source, protected files --- */}
-        <div className="space-y-3 px-5 py-4">
+        <div className={section}>
           <Field
             label="Name"
             placeholder="Lab 1 — Pointers"
@@ -469,26 +499,23 @@ export function AssignmentForm({
             onChange={(e) => setName(e.target.value)}
             fullWidth
             required
+            autoFocus={!existing}
           />
           <div className="flex items-end gap-2.5">
             {existing ? (
-              <div className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-                  Source repository <HelpIcon topic="assignment-source" />
-                </span>
-                <span className="inline-flex items-center gap-1.5 py-1.5 text-sm text-zinc-500 dark:text-zinc-400">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <FieldLabel help="assignment-source">Source repository</FieldLabel>
+                <span className="inline-flex h-[34px] items-center gap-1.5 text-sm text-fg-muted">
                   <GithubIcon className="size-4" /> {existing.sourceFullName.split("/")[1]}
                 </span>
               </div>
             ) : (
               // Picking the repository pre-fills a humanized name
               // ("labo-02-quadratic" → "Labo 02 Quadratic") that stays editable.
-              <label className="flex min-w-0 flex-1 flex-col gap-1 text-sm">
-                <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-                  Source repository <HelpIcon topic="assignment-source" />
-                </span>
-                <select
-                  className={`${select} w-full`}
+              <div className="min-w-0 flex-1">
+                <Select
+                  label="Source repository"
+                  help="assignment-source"
                   value={sourceRepo}
                   onChange={(e) => {
                     const next = e.target.value;
@@ -505,27 +532,27 @@ export function AssignmentForm({
                       {r.name}
                     </option>
                   ))}
-                </select>
-              </label>
+                </Select>
+              </div>
             )}
             <Button
               type="button"
-              variant="subtle"
+              variant="secondary"
               disabled={!tree.data}
               onClick={() => setShowFiles((v) => !v)}
               aria-expanded={showFiles}
             >
-              <Lock className="size-3.5" /> Protect files
+              <Lock /> Protect files
             </Button>
           </div>
           {sourceRepo === "" ? (
-            <p className="text-xs text-zinc-400">
+            <p className="text-xs text-fg-faint">
               Pick a source repository to browse its files and protect some of them.
             </p>
           ) : tree.isFetching ? (
             <Progress label={`Exploring ${sourceRepo}…`} />
           ) : tree.data ? (
-            <p className="flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">
+            <p className="flex items-center gap-1 text-xs text-fg-muted">
               {fileCount} file{fileCount === 1 ? "" : "s"} · {protectedFiles.size} protected —
               student changes to protected files are reverted
               <HelpIcon topic="protected-files" />
@@ -538,17 +565,15 @@ export function AssignmentForm({
                   {tree.data.defaultBranch}
                 </Badge>
                 {tree.data.branches.length > 1 ? (
-                  <span className="text-zinc-500 dark:text-zinc-400">
-                    {tree.data.branches.length} branches
-                  </span>
+                  <span className="text-xs text-fg-muted">{tree.data.branches.length} branches</span>
                 ) : null}
-                <span className="ml-auto inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-xs text-fg-faint">
                   <GitCommitHorizontal className="size-3.5" />
                   {tree.data.headSha.slice(0, 7)}
                   {tree.data.headDate ? ` · ${isoDateTime(tree.data.headDate)}` : ""}
                 </span>
               </div>
-              <div className="max-h-64 overflow-y-auto rounded-md bg-white p-2 dark:bg-zinc-900">
+              <div className="max-h-64 overflow-y-auto rounded-[10px] border border-line bg-surface p-2">
                 <TreeView
                   nodes={nodes}
                   checked={protectedFiles}
@@ -563,91 +588,93 @@ export function AssignmentForm({
                 />
               </div>
               {tree.data.truncated ? (
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Large repository — tree truncated.
-                </p>
+                <p className="text-xs text-fg-muted">Large repository — tree truncated.</p>
               ) : null}
             </div>
           ) : null}
         </div>
 
         {/* --- Timing: publication mode, deadline shape, dates --- */}
-        <div className="space-y-4 px-5 py-4">
-          {!livePublished ? (
-            <SettingRow
-              title="Goes live"
-              help="assignment-dates"
-              desc={
-                publishMode === "manual"
-                  ? "When you press Publish"
-                  : "At the start date, automatically"
-              }
-            >
-              <Segmented
-                name="publish-mode"
-                value={publishMode}
-                onChange={setPublishMode}
-                options={[
-                  { value: "manual", label: "Manually" },
-                  { value: "scheduled", label: "On a date" },
-                ]}
+        <div className={section}>
+          <Eyebrow>Schedule</Eyebrow>
+          <div className="divide-y divide-line">
+            {!livePublished ? (
+              <SettingRow
+                title="Goes live"
+                help="assignment-dates"
+                desc={
+                  publishMode === "manual"
+                    ? "When you press Publish"
+                    : "At the start date, automatically"
+                }
+                className="pt-0"
+              >
+                <Segmented
+                  name="publish-mode"
+                  value={publishMode}
+                  onChange={setPublishMode}
+                  options={[
+                    { value: "manual", label: "Manually" },
+                    { value: "scheduled", label: "On a date" },
+                  ]}
+                />
+              </SettingRow>
+            ) : (
+              <SettingRow
+                title="Start & deadline"
+                help="assignment-dates"
+                desc="The assignment is live — dates stay editable"
+                className="pt-0"
               />
-            </SettingRow>
-          ) : (
-            <SettingRow
-              title="Start & deadline"
-              help="assignment-dates"
-              desc="The assignment is live — dates stay editable"
-            />
-          )}
-          {!livePublished && publishMode === "manual" ? (
-            <SettingRow
-              title="Deadline"
-              desc={
-                deadlineKind === "date" ? "The same date for everyone" : "Counted from publication"
-              }
-            >
-              <Segmented
-                name="deadline-kind"
-                value={deadlineKind}
-                onChange={setDeadlineKind}
-                options={[
-                  { value: "date", label: "Fixed date" },
-                  { value: "duration", label: "Duration" },
-                ]}
-              />
-            </SettingRow>
-          ) : null}
+            )}
+            {!livePublished && publishMode === "manual" ? (
+              <SettingRow
+                title="Deadline"
+                desc={
+                  deadlineKind === "date" ? "The same date for everyone" : "Counted from publication"
+                }
+              >
+                <Segmented
+                  name="deadline-kind"
+                  value={deadlineKind}
+                  onChange={setDeadlineKind}
+                  options={[
+                    { value: "date", label: "Fixed date" },
+                    { value: "duration", label: "Duration" },
+                  ]}
+                />
+              </SettingRow>
+            ) : null}
+          </div>
           {durationOnly ? (
             <div className={`${panel} flex flex-wrap items-center gap-2.5`}>
               <input
                 type="number"
                 min={0}
                 max={400}
-                className={`${select} w-16 text-center font-mono`}
+                className={cx(inputClass, "w-16 text-center font-mono")}
                 aria-label="Days"
                 value={durationDays}
                 onChange={(e) => setDurationDays(e.target.value)}
                 required
               />
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">days</span>
+              <span className="text-sm text-fg-muted">days</span>
               <input
                 type="number"
                 min={0}
                 max={23}
-                className={`${select} w-16 text-center font-mono`}
+                className={cx(inputClass, "w-16 text-center font-mono")}
                 aria-label="Hours"
                 value={durationHours}
                 onChange={(e) => setDurationHours(e.target.value)}
                 required
               />
-              <span className="text-sm text-zinc-500 dark:text-zinc-400">hours</span>
+              <span className="text-sm text-fg-muted">hours</span>
               <span
-                className={`ml-auto text-sm ${
-                  durationMinutes < 15
-                    ? "text-amber-600 dark:text-amber-400"
-                    : "text-zinc-500 dark:text-zinc-400"
-                }`}
+                className={cx(
+                  "ml-auto text-sm",
+                  durationMinutes < 15 ? "text-warning" : "text-fg-muted",
+                )}
               >
                 {durationMinutes < 15
                   ? "At least 15 minutes"
@@ -687,13 +714,11 @@ export function AssignmentForm({
                   onChange={(e) => setDeadlineAt(`${deadlineAt.slice(0, 10)}T${e.target.value}`)}
                   required
                 />
-                <p className="min-w-0 flex-1 pb-1.5 text-right text-sm">
+                <p className="min-w-0 flex-1 pb-2 text-right text-[13px]">
                   {rangeInvalid ? (
-                    <span className="text-amber-600 dark:text-amber-400">
-                      The deadline must come after the start.
-                    </span>
+                    <span className="text-warning">The deadline must come after the start.</span>
                   ) : missingWhen ? (
-                    <span className="text-zinc-400">
+                    <span className="text-fg-faint">
                       {rangeMode
                         ? startAt === ""
                           ? "Pick the start day, then the deadline."
@@ -705,15 +730,13 @@ export function AssignmentForm({
                           : "Set the deadline time."}
                     </span>
                   ) : rangeMode ? (
-                    <span className="text-zinc-500 dark:text-zinc-400">
+                    <span className="text-fg-muted">
                       {isoDateTime(toIso(startAt))} → {isoDateTime(toIso(deadlineAt))}
                       {" · "}
                       {compactDuration(new Date(deadlineAt).getTime() - new Date(startAt).getTime())}
                     </span>
                   ) : (
-                    <span className="text-zinc-500 dark:text-zinc-400">
-                      Deadline {isoDateTime(toIso(deadlineAt))}
-                    </span>
+                    <span className="text-fg-muted">Deadline {isoDateTime(toIso(deadlineAt))}</span>
                   )}
                 </p>
               </div>
@@ -722,87 +745,88 @@ export function AssignmentForm({
         </div>
 
         {/* --- Repository setup --- */}
-        <div className="space-y-3.5 px-5 py-4">
-          <p className={eyebrow}>Repository setup</p>
-          {!existing ? (
+        <div className={section}>
+          <Eyebrow>Repository setup</Eyebrow>
+          <div className="divide-y divide-line">
+            {!existing ? (
+              <SettingRow
+                title="Students receive"
+                help="distributed-source"
+                desc={
+                  sourceStrategy === "squash"
+                    ? "Your commit history stays private"
+                    : "The full history is distributed as is"
+                }
+                className="pt-0"
+              >
+                <Segmented
+                  name="source-strategy"
+                  value={sourceStrategy}
+                  onChange={setSourceStrategy}
+                  options={[
+                    { value: "squash", label: "One commit" },
+                    { value: "whole", label: "Full history" },
+                  ]}
+                />
+              </SettingRow>
+            ) : null}
+            {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
+              <SettingRow title="Branch to squash" help="squash-branch">
+                <Select value={branch} onChange={(e) => setBranch(e.target.value)} className="w-44">
+                  {tree.data!.branches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </Select>
+              </SettingRow>
+            ) : null}
             <SettingRow
-              title="Students receive"
-              help="distributed-source"
-              desc={
-                sourceStrategy === "squash"
-                  ? "Your commit history stays private"
-                  : "The full history is distributed as is"
-              }
+              title="Grading"
+              desc={gradingMode === "auto" ? "Points and a final review" : "Students see no grades"}
+              className={existing ? "pt-0" : ""}
             >
               <Segmented
-                name="source-strategy"
-                value={sourceStrategy}
-                onChange={setSourceStrategy}
+                name="grading-mode"
+                value={gradingMode}
+                onChange={setGradingMode}
                 options={[
-                  { value: "squash", label: "One commit" },
-                  { value: "whole", label: "Full history" },
+                  { value: "auto", label: "Automatic" },
+                  { value: "none", label: "No grades" },
                 ]}
               />
             </SettingRow>
-          ) : null}
-          {!existing && sourceStrategy === "squash" && (tree.data?.branches.length ?? 0) > 1 ? (
-            <SettingRow title="Branch to squash" help="squash-branch">
-              <select
-                className={select}
-                value={branch}
-                onChange={(e) => setBranch(e.target.value)}
-              >
-                {tree.data!.branches.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
+            <SettingRow
+              title="At the deadline"
+              help="deadline-strategy"
+              desc={
+                deadlineStrategy === "lock"
+                  ? "Pushes blocked, repository read-only"
+                  : "A marker commit; late pushes stay visible"
+              }
+              className="pb-0"
+            >
+              <Tip label={livePublished ? "The deadline strategy is fixed at publication" : null}>
+                <Segmented
+                  name="deadline-strategy"
+                  value={deadlineStrategy}
+                  onChange={setDeadlineStrategy}
+                  disabled={livePublished}
+                  options={[
+                    { value: "lock", label: "Lock" },
+                    { value: "commit", label: "Mark and allow" },
+                  ]}
+                />
+              </Tip>
             </SettingRow>
-          ) : null}
-          <SettingRow
-            title="Grading"
-            desc={gradingMode === "auto" ? "Points and a final review" : "Students see no grades"}
-          >
-            <Segmented
-              name="grading-mode"
-              value={gradingMode}
-              onChange={setGradingMode}
-              options={[
-                { value: "auto", label: "Automatic" },
-                { value: "none", label: "No grades" },
-              ]}
-            />
-          </SettingRow>
-          <SettingRow
-            title="At the deadline"
-            help="deadline-strategy"
-            desc={
-              deadlineStrategy === "lock"
-                ? "Pushes blocked, repository read-only"
-                : "A marker commit; late pushes stay visible"
-            }
-          >
-            <Tip label={livePublished ? "The deadline strategy is fixed at publication" : null}>
-              <Segmented
-                name="deadline-strategy"
-                value={deadlineStrategy}
-                onChange={setDeadlineStrategy}
-                disabled={livePublished}
-                options={[
-                  { value: "lock", label: "Lock" },
-                  { value: "commit", label: "Mark and allow" },
-                ]}
-              />
-            </Tip>
-          </SettingRow>
+          </div>
         </div>
 
         {/* --- Online workspace (ADR-013), granted teachers only --- */}
         {canOnline ? (
-          <div className="space-y-3.5 px-5 py-4">
-            <p className={eyebrow}>Work mode</p>
-            <SettingRow title="Students work" desc={WORK_MODE_DESC[workMode]}>
+          <div className={section}>
+            <Eyebrow>Work mode</Eyebrow>
+            <SettingRow title="Students work" desc={WORK_MODE_DESC[workMode]} className="py-0">
               <Tip
                 label={
                   onlineLocked
@@ -822,40 +846,33 @@ export function AssignmentForm({
               <div className={`${panel} space-y-3`}>
                 <Field
                   label="Container image"
+                  hint="optional"
                   placeholder="default image"
                   value={codespaceImage}
                   onChange={(e) => setCodespaceImage(e.target.value)}
                   fullWidth
                 />
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                <p className="text-xs text-fg-muted">
                   Image name from the portal catalogue — leave empty for the portal's default
                   image.
                 </p>
                 {workMode === "online_seb" ? (
-                  <label className="flex flex-col gap-1 text-sm">
-                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                      Browser Exam Keys, one per line
-                    </span>
-                    <textarea
+                  <div className="space-y-1.5">
+                    <Textarea
+                      label="Browser Exam Keys, one per line"
                       rows={3}
                       spellCheck={false}
-                      className={`${select} w-full font-mono text-xs`}
+                      className="font-mono text-xs"
                       placeholder="64 hexadecimal characters per key"
                       value={examKeys}
                       onChange={(e) => setExamKeys(e.target.value)}
                     />
-                    <span
-                      className={
-                        keysValid
-                          ? "text-xs text-zinc-500 dark:text-zinc-400"
-                          : "text-xs text-amber-600 dark:text-amber-400"
-                      }
-                    >
+                    <p className={cx("text-xs", keysValid ? "text-fg-muted" : "text-warning")}>
                       {keysValid
                         ? `${keys.length} key${keys.length === 1 ? "" : "s"} — one per Safe Exam Browser platform/version`
                         : "Each key is exactly 64 hexadecimal characters"}
-                    </span>
-                  </label>
+                    </p>
+                  </div>
                 ) : null}
               </div>
             ) : null}
@@ -864,17 +881,18 @@ export function AssignmentForm({
 
         {/* --- Milestones (creation only, graded assignments) --- */}
         {!existing && gradingMode === "auto" ? (
-          <div className="space-y-2.5 px-5 py-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <span className={eyebrow}>Milestones — optional intermediate reviews</span>
-              <span className="font-mono text-xs text-zinc-400 dark:text-zinc-500">
-                criteria tagged milestone:
-              </span>
-            </div>
+          <div className={section}>
+            <Eyebrow
+              trailing={
+                <span className="font-mono text-[11px] text-fg-faint">criteria tagged milestone:</span>
+              }
+            >
+              Milestones — optional intermediate reviews
+            </Eyebrow>
             {milestones.map((m, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <input
-                  className={`${select} min-w-0 flex-1 font-mono`}
+                  className={cx(inputClass, "min-w-0 flex-1 font-mono")}
                   placeholder="review-1"
                   aria-label="Milestone name"
                   value={m.name}
@@ -889,7 +907,7 @@ export function AssignmentForm({
                   type="number"
                   min={1}
                   max={365}
-                  className={`${select} w-16 text-center font-mono`}
+                  className={cx(inputClass, "w-16 text-center font-mono")}
                   aria-label="Days before the deadline"
                   value={m.days}
                   onChange={(e) =>
@@ -899,7 +917,7 @@ export function AssignmentForm({
                   }
                   required
                 />
-                <span className="whitespace-nowrap text-sm text-zinc-500 dark:text-zinc-400">
+                <span className="whitespace-nowrap text-[13px] text-fg-muted">
                   days before
                   {milestoneDate(m.days) ? ` → ${milestoneDate(m.days)}` : ""}
                 </span>
@@ -908,75 +926,36 @@ export function AssignmentForm({
                   type="button"
                   onClick={() => setMilestones((rows) => rows.filter((_, j) => j !== i))}
                 >
-                  <Trash2 className="size-4" />
+                  <Trash2 />
                 </IconButton>
                 {m.name !== "" && !milestoneName.test(m.name) ? (
-                  <span className="w-full text-xs text-amber-600 dark:text-amber-400">
+                  <span className="w-full text-xs text-warning">
                     lowercase letters, digits, - and _
                   </span>
                 ) : null}
               </div>
             ))}
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={() => setMilestones((rows) => [...rows, { name: "", days: "7" }])}
-              className="inline-flex items-center gap-1 text-sm font-medium text-accent hover:text-accent-hover"
             >
-              <Plus className="size-4" /> Add milestone
-            </button>
+              <Plus /> Add milestone
+            </Button>
           </div>
         ) : null}
 
         {existing?.state === "locked" ? (
-          <div className="px-5 py-4">
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-              This assignment has expired. Saving a deadline in the future <b>reopens</b> it:
-              repositories are unlocked, students can push again, and the grade freezes anew at
-              the new deadline (the previous frozen grade and LLM review are discarded).
-            </p>
+          <div className="px-6 py-5">
+            <Alert tone="warning" title="This assignment has expired">
+              Saving a deadline in the future <b>reopens</b> it: repositories are unlocked,
+              students can push again, and the grade freezes anew at the new deadline (the
+              previous frozen grade and LLM review are discarded).
+            </Alert>
           </div>
         ) : null}
-
-        {/* --- Footer: state note (or error) + actions --- */}
-        <div className="flex items-center justify-between gap-3 bg-zinc-50 px-5 py-3 dark:bg-zinc-950/40">
-          {error ? (
-            <span className="min-w-0 text-xs text-red-600 dark:text-red-400">{error}</span>
-          ) : (
-            <span className="text-xs text-zinc-400 dark:text-zinc-500">
-              {livePublished
-                ? "The assignment is live — changes apply when you save"
-                : "Saved as a draft until you publish"}
-            </span>
-          )}
-          <div className="flex shrink-0 items-center gap-2">
-            <Button type="button" variant="ghost" onClick={onDone}>
-              Cancel
-            </Button>
-            <Button
-              disabled={
-                save.isPending ||
-                (!existing && !sourceRepo) ||
-                (durationOnly && durationMinutes < 15) ||
-                missingWhen ||
-                rangeInvalid ||
-                !milestonesValid ||
-                (workMode === "online_seb" && !keysValid)
-              }
-            >
-              {save.isPending ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  {existing ? "Saving…" : "Creating squashed repository…"}
-                </>
-              ) : existing ? (
-                "Save changes"
-              ) : (
-                "Create assignment"
-              )}
-            </Button>
-          </div>
-        </div>
-      </div>
-    </form>
+      </form>
+    </Sheet>
   );
 }

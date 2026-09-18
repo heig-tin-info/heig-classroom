@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ImageUp, Loader2, Trash2, ZoomIn } from "lucide-react";
+import { ImageUp, Trash2, ZoomIn } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "./api";
@@ -89,23 +89,43 @@ export function AvatarEditor({
   }
 
   return (
-    <Modal title="Profile picture" onClose={onClose}>
+    <Modal
+      title="Profile picture"
+      size="sm"
+      onClose={onClose}
+      footer={
+        <>
+          {hasAvatar ? (
+            <Button variant="ghost" onClick={() => remove.mutate()} loading={remove.isPending} className="mr-auto">
+              <Trash2 /> Remove picture
+            </Button>
+          ) : null}
+          {img ? (
+            <Button variant="ghost" onClick={() => fileRef.current?.click()}>
+              Choose another
+            </Button>
+          ) : null}
+          <Button onClick={() => save.mutate()} disabled={!img} loading={save.isPending}>
+            Save picture
+          </Button>
+        </>
+      }
+    >
       <div className="space-y-4">
         {!img ? (
           <button
+            type="button"
             onClick={() => fileRef.current?.click()}
-            className="flex w-full cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-4 py-10 text-center transition-colors hover:border-zinc-400 dark:border-zinc-700 dark:hover:border-zinc-500"
+            className="flex w-full cursor-pointer flex-col items-center gap-2 rounded-card border border-dashed border-line-strong px-4 py-10 text-center transition-colors hover:border-fg-faint hover:bg-surface-2/60"
           >
-            <ImageUp className="size-8 text-zinc-400" />
-            <span className="text-sm font-medium">Choose an image</span>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              JPEG, PNG or WebP — you will crop it next
-            </span>
+            <ImageUp className="size-7 text-fg-faint" />
+            <span className="text-sm font-semibold">Choose an image</span>
+            <span className="text-xs text-fg-muted">JPEG, PNG or WebP — you will crop it next</span>
           </button>
         ) : (
           <div className="flex flex-col items-center gap-3">
             <div
-              className="relative touch-none overflow-hidden rounded-xl"
+              className="relative touch-none overflow-hidden rounded-card"
               style={{ width: VIEW, height: VIEW }}
             >
               <canvas
@@ -146,11 +166,9 @@ export function AvatarEditor({
                 }}
               />
             </div>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400">
-              Drag to reposition, scroll or use the slider to zoom.
-            </p>
+            <p className="text-xs text-fg-muted">Drag to reposition, scroll or use the slider to zoom.</p>
             <div className="flex w-full max-w-xs items-center gap-2">
-              <ZoomIn className="size-4 text-zinc-400" />
+              <ZoomIn className="size-4 text-fg-faint" />
               <input
                 type="range"
                 min={1}
@@ -179,31 +197,7 @@ export function AvatarEditor({
             e.target.value = "";
           }}
         />
-
-        <div className="flex items-center gap-3">
-          <Button onClick={() => save.mutate()} disabled={!img || save.isPending}>
-            {save.isPending ? <Loader2 className="size-4 animate-spin" /> : null}
-            Save picture
-          </Button>
-          {img ? (
-            <Button variant="ghost" onClick={() => fileRef.current?.click()}>
-              Choose another image
-            </Button>
-          ) : null}
-          <span className="flex-1" />
-          {hasAvatar ? (
-            <Button
-              variant="subtle"
-              onClick={() => remove.mutate()}
-              disabled={remove.isPending}
-            >
-              <Trash2 className="size-4" /> Remove picture
-            </Button>
-          ) : null}
-        </div>
-        {save.isError ? (
-          <p className="text-sm text-red-600 dark:text-red-400">Upload failed — try again.</p>
-        ) : null}
+        {save.isError ? <p className="text-sm text-danger">Upload failed — try again.</p> : null}
       </div>
     </Modal>
   );

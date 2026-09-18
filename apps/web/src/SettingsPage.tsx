@@ -1,31 +1,40 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { ArrowLeft, BellRing, CalendarClock, GraduationCap, Languages, Mail, Palette, School, ShieldCheck, Unlink } from "lucide-react";
+import { BellRing, GraduationCap, Mail, School, ShieldCheck, SlidersHorizontal, Unlink } from "lucide-react";
 
-import { AdminPanel } from "./AdminPanel";
-import { HelpIcon } from "./help";
+import { AvatarEditor } from "./AvatarEditor";
+import { api } from "./api";
+import { useConfirm } from "./confirm";
 import { useI18n, LOCALES } from "./i18n";
 import { DATE_FORMATS, EMAIL_KINDS, type DateFormat, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
 
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
-import { AvatarEditor } from "./AvatarEditor";
-import { api } from "./api";
-import { applyUiTheme, initialUiTheme, type UiTheme } from "./theme";
-import { Avatar, Badge, Button, Card, formatDateTimeAs, GithubIcon, isoDateTime, setDateFormat, Tip } from "./ui";
+import { applyTheme, initialTheme, type ThemeChoice } from "./theme";
+import {
+  Avatar,
+  Badge,
+  Button,
+  Card,
+  formatDateTimeAs,
+  GithubIcon,
+  isoDateTime,
+  LinkButton,
+  PageHeader,
+  SectionHeading,
+  Segmented,
+  Select,
+  setDateFormat,
+  SettingRow,
+  Switch,
+  Tip,
+} from "./ui";
 
-/** Shared look of the small pick-one buttons (language, date format, theme). */
-const pickBtn = (active: boolean) =>
-  `rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors ${
-    active
-      ? "border-accent bg-accent/10 text-accent"
-      : "border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-  }`;
-
-/** Date-time display format, persisted on the account (server-side). */
-function DateFormatSettings({ me }: { me: Me }) {
-  const { t } = useI18n();
+/** Language, appearance and date format: three rows, one card. */
+function PreferencesCard({ me }: { me: Me }) {
+  const { t, locale, setLocale } = useI18n();
   const qc = useQueryClient();
-  const save = useMutation({
+  const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
+  const saveDate = useMutation({
     mutationFn: (dateFormat: DateFormat) =>
       api("/app/api/me", { method: "PATCH", body: JSON.stringify({ dateFormat }) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["me"] }),
@@ -33,96 +42,89 @@ function DateFormatSettings({ me }: { me: Me }) {
   const current = me.dateFormat ?? "iso";
   const sample = new Date().toISOString();
   return (
-    <Card className="p-5">
-      <h2 className="mb-1 flex items-center gap-2 font-medium">
-        <CalendarClock className="size-4 text-zinc-400" /> {t("settings.dateFormat")}
-      </h2>
-      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-        {t("settings.dateFormatHint")}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {DATE_FORMATS.map((f) => (
-          <button
-            key={f}
-            onClick={() => {
-              setDateFormat(f);
-              save.mutate(f);
+    <section className="space-y-3">
+      <SectionHeading icon={SlidersHorizontal} title={t("settings.preferences")} />
+      <Card className="divide-y divide-line px-5">
+        <SettingRow title={t("settings.language")} desc={t("settings.languageHint")}>
+          <Segmented
+            name="locale"
+            value={locale}
+            onChange={setLocale}
+            options={LOCALES.map((l) => ({ value: l.code, label: l.label }))}
+          />
+        </SettingRow>
+        <SettingRow title={t("settings.appearance")} desc={t("settings.appearanceHint")}>
+          <Segmented
+            name="theme"
+            value={theme}
+            onChange={(v) => {
+              setTheme(v);
+              applyTheme(v);
             }}
-            disabled={save.isPending}
-            className={`tabular-nums ${pickBtn(current === f)}`}
+            options={[
+              { value: "light", label: t("settings.theme.light") },
+              { value: "dark", label: t("settings.theme.dark") },
+              { value: "system", label: t("settings.theme.system") },
+            ]}
+          />
+        </SettingRow>
+        <SettingRow title={t("settings.dateFormat")} desc={t("settings.dateFormatHint")}>
+          <Select
+            value={current}
+            disabled={saveDate.isPending}
+            onChange={(e) => {
+              const f = e.target.value as DateFormat;
+              setDateFormat(f);
+              saveDate.mutate(f);
+            }}
+            className="w-52 tabular-nums"
+            aria-label={t("settings.dateFormat")}
           >
-            {formatDateTimeAs(sample, f)}
-          </button>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-/** UI style (classic / revamped), stored in this browser like light/dark. */
-function AppearanceSettings() {
-  const { t } = useI18n();
-  const [ui, setUi] = useState<UiTheme>(initialUiTheme);
-  const pick = (v: UiTheme) => {
-    setUi(v);
-    applyUiTheme(v);
-  };
-  return (
-    <Card className="p-5">
-      <h2 className="mb-1 flex items-center gap-2 font-medium">
-        <Palette className="size-4 text-zinc-400" /> {t("settings.appearance")}
-      </h2>
-      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-        {t("settings.appearanceHint")}
-      </p>
-      <div className="flex gap-2">
-        <button onClick={() => pick("classic")} className={pickBtn(ui === "classic")}>
-          {t("settings.theme.classic")}
-        </button>
-        <button onClick={() => pick("v2")} className={pickBtn(ui === "v2")}>
-          {t("settings.theme.v2")}
-        </button>
-      </div>
-    </Card>
+            {DATE_FORMATS.map((f) => (
+              <option key={f} value={f}>
+                {formatDateTimeAs(sample, f)}
+              </option>
+            ))}
+          </Select>
+        </SettingRow>
+      </Card>
+    </section>
   );
 }
 
 /** Per-kind toggles for the real-time toasts; stored in this browser. */
-function NotificationSettings() {
+function NotificationsCard() {
   const { t } = useI18n();
   const [prefs, setPrefs] = useState(notifyPrefs);
-  const toggle = (kind: NoticeKind) => {
-    const next = !prefs[kind];
+  const toggle = (kind: NoticeKind, next: boolean) => {
     setNotifyPref(kind, next);
     setPrefs({ ...prefs, [kind]: next });
   };
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <BellRing className="size-4 text-zinc-400" />
-        <h2 className="font-medium">{t("settings.notifications")}</h2>
-        <HelpIcon topic="notifications" />
-        <span className="text-xs text-zinc-400">{t("settings.notificationsHint")}</span>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+    <section className="space-y-3">
+      <SectionHeading
+        icon={BellRing}
+        title={t("settings.notifications")}
+        help="notifications"
+        description={t("settings.notificationsBrowser")}
+      />
+      <Card className="divide-y divide-line px-5">
         {NOTICE_KINDS.map(({ kind }) => (
-          <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <SettingRow key={kind} title={t(`notify.${kind}` as Parameters<typeof t>[0])} className="py-2.5">
+            <Switch
               checked={prefs[kind]}
-              onChange={() => toggle(kind)}
-              className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
+              onChange={(v) => toggle(kind, v)}
+              label={t(`notify.${kind}` as Parameters<typeof t>[0])}
             />
-            {t(`notify.${kind}` as Parameters<typeof t>[0])}
-          </label>
+          </SettingRow>
         ))}
-      </div>
-    </Card>
+      </Card>
+    </section>
   );
 }
 
 /** Per-kind email opt-outs, persisted on the account (server-side). */
-function EmailSettings({ me }: { me: Me }) {
+function EmailCard({ me }: { me: Me }) {
   const { t } = useI18n();
   const qc = useQueryClient();
   const save = useMutation({
@@ -137,33 +139,28 @@ function EmailSettings({ me }: { me: Me }) {
     (kind) => teacher || EMAIL_KINDS[kind].audience === "student",
   );
   return (
-    <Card className="p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <Mail className="size-4 text-zinc-400" />
-        <h2 className="font-medium">{t("settings.emails")}</h2>
-        <span className="text-xs text-zinc-400">{t("settings.emailsHint")}</span>
-      </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+    <section className="space-y-3">
+      <SectionHeading icon={Mail} title={t("settings.emails")} description={t("settings.emailsHint")} />
+      <Card className="divide-y divide-line px-5">
         {kinds.map((kind) => (
-          <label key={kind} className="flex cursor-pointer items-center gap-2 text-sm">
-            <input
-              type="checkbox"
+          <SettingRow key={kind} title={t(`email.${kind}` as Parameters<typeof t>[0])} className="py-2.5">
+            <Switch
               checked={me.emailPrefs?.[kind] ?? true}
-              onChange={(e) => save.mutate({ [kind]: e.target.checked })}
+              onChange={(v) => save.mutate({ [kind]: v })}
               disabled={save.isPending}
-              className="size-4 rounded border-zinc-300 accent-[var(--color-accent)]"
+              label={t(`email.${kind}` as Parameters<typeof t>[0])}
             />
-            {t(`email.${kind}` as Parameters<typeof t>[0])}
-          </label>
+          </SettingRow>
         ))}
-      </div>
-    </Card>
+      </Card>
+    </section>
   );
 }
 
-export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
+export function SettingsPage({ me }: { me: Me }) {
   const qc = useQueryClient();
-  const { t, locale, setLocale } = useI18n();
+  const confirm = useConfirm();
+  const { t } = useI18n();
   const [editingAvatar, setEditingAvatar] = useState(false);
   const unlink = useMutation({
     mutationFn: () => api("/app/auth/github/unlink", { method: "POST" }),
@@ -174,120 +171,89 @@ export function SettingsPage({ me, onBack }: { me: Me; onBack: () => void }) {
     me.role === "admin" ? ShieldCheck : me.role === "teacher" ? School : GraduationCap;
 
   return (
-    <div className="space-y-6">
-      <button
-        onClick={onBack}
-        className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100"
-      >
-        <ArrowLeft className="size-4" /> {t("common.back")}
-      </button>
+    <div className="max-w-3xl space-y-8">
+      <PageHeader title={t("settings.title")} />
 
-      <h1 className="text-2xl font-semibold tracking-tight">{t("settings.title")}</h1>
-
-      <Card className="p-5">
-        <h2 className="mb-1 flex items-center gap-2 font-medium">
-          <Languages className="size-4 text-zinc-400" /> {t("settings.language")}
-        </h2>
-        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-          {t("settings.languageHint")}
-        </p>
-        <div className="flex gap-2">
-          {LOCALES.map((l) => (
-            <button key={l.code} onClick={() => setLocale(l.code)} className={pickBtn(locale === l.code)}>
-              {l.label}
-            </button>
-          ))}
-        </div>
-      </Card>
-
-      <AppearanceSettings />
-
-      <DateFormatSettings me={me} />
-
-      <Card className="flex flex-wrap items-center gap-4 p-5">
-        <Tip label="Change profile picture">
-        <button
-          onClick={() => setEditingAvatar(true)}
-          aria-label="Change profile picture"
-          className="group relative rounded-full focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-        >
-          <Avatar me={me} />
-          <span className="absolute inset-0 flex items-center justify-center rounded-full bg-black/45 text-xs font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
-            Edit
-          </span>
-        </button>
-        </Tip>
-        <div className="min-w-0">
-          <p className="text-lg font-medium">
-            {me.givenName} {me.familyName}
-          </p>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">{me.email}</p>
-          <p className="mt-1 flex items-center gap-2 text-sm">
-            <Badge tone="zinc" icon={roleIcon}>
-              {me.role}
-            </Badge>
-            {me.lastLoginAt ? (
-              <span className="text-zinc-400">
-                last sign-in {isoDateTime(me.lastLoginAt)}
-              </span>
-            ) : null}
-          </p>
-        </div>
-      </Card>
-
-      <Card className="p-5">
-        <h2 className="mb-1 flex items-center gap-2 font-medium">
-          <GithubIcon className="size-4" /> {t("settings.github")}
-        </h2>
-        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-          {t("settings.githubHint")}
-        </p>
-        {me.githubLogin ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <Badge tone="green" icon={GithubIcon}>
-              {me.githubLogin}
-            </Badge>
-            <Button
-              variant="subtle"
-              onClick={() => {
-                if (
-                  window.confirm(
-                    "Unlink your GitHub account? You will not be able to accept assignments until you link one again.",
-                  )
-                ) {
-                  unlink.mutate();
-                }
-              }}
-              disabled={unlink.isPending}
-            >
-              <Unlink className="size-4" /> {t("settings.unlink")}
-            </Button>
+      <section className="space-y-3">
+        <SectionHeading title={t("settings.profile")} />
+        <Card className="divide-y divide-line">
+          <div className="flex flex-wrap items-center gap-5 p-5">
+            <Tip label={t("settings.changePicture")}>
+              <button
+                type="button"
+                onClick={() => setEditingAvatar(true)}
+                aria-label={t("settings.changePicture")}
+                className="group relative rounded-full"
+              >
+                <Avatar me={me} className="size-16 text-xl" />
+                <span className="absolute inset-0 flex items-center justify-center rounded-full bg-fg/50 text-xs font-medium text-canvas opacity-0 transition-opacity group-hover:opacity-100">
+                  {t("settings.changePicture")}
+                </span>
+              </button>
+            </Tip>
+            <div className="min-w-0 flex-1">
+              <p className="text-[17px] font-bold tracking-tight">
+                {me.givenName} {me.familyName}
+              </p>
+              <p className="text-sm text-fg-muted">{me.email}</p>
+              <p className="mt-2 flex flex-wrap items-center gap-2 text-[13px] text-fg-faint">
+                <Badge tone="zinc" icon={roleIcon}>
+                  {t(`settings.role.${me.role}` as Parameters<typeof t>[0])}
+                </Badge>
+                {me.lastLoginAt ? <span>{t("settings.lastSignIn", { date: isoDateTime(me.lastLoginAt) })}</span> : null}
+              </p>
+            </div>
           </div>
-        ) : (
-          <a
-            href="/app/auth/github/link"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
-          >
-            <GithubIcon className="size-4" /> {t("settings.link")}
-          </a>
-        )}
-      </Card>
+          <div className="flex flex-wrap items-center gap-4 p-5">
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-2 font-semibold">
+                <GithubIcon className="size-4 text-fg-faint" /> {t("settings.github")}
+              </p>
+              <p className="mt-0.5 text-[13px] text-fg-muted">{t("settings.githubHint")}</p>
+            </div>
+            {me.githubLogin ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge tone="green" icon={GithubIcon}>
+                  {me.githubLogin}
+                </Badge>
+                <Button
+                  variant="secondary"
+                  loading={unlink.isPending}
+                  onClick={async () => {
+                    if (
+                      await confirm({
+                        title: t("settings.unlink"),
+                        message: t("settings.unlinkConfirm"),
+                        confirmLabel: t("settings.unlink"),
+                        cancelLabel: t("common.cancel"),
+                        danger: true,
+                      })
+                    ) {
+                      unlink.mutate();
+                    }
+                  }}
+                >
+                  <Unlink /> {t("settings.unlink")}
+                </Button>
+              </div>
+            ) : (
+              <LinkButton href="/app/auth/github/link" variant="primary">
+                <GithubIcon /> {t("settings.link")}
+              </LinkButton>
+            )}
+          </div>
+        </Card>
+      </section>
+
+      <PreferencesCard me={me} />
+      <NotificationsCard />
+      <EmailCard me={me} />
 
       {editingAvatar ? (
         <AvatarEditor
           hasAvatar={me.hasUploadedAvatar}
           onClose={() => setEditingAvatar(false)}
         />
-      ) : null}
-
-      <NotificationSettings />
-
-      <EmailSettings me={me} />
-
-      {me.role === "admin" ? (
-        <div className="border-t border-zinc-200/60 pt-6 dark:border-zinc-800/60">
-          <AdminPanel />
-        </div>
       ) : null}
     </div>
   );

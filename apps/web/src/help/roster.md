@@ -10,8 +10,8 @@ Students claim their seat automatically at their first sign-in — no invitation
 
 ## How to manage rows
 
-The icons on the right edit a row, revoke a claim, or remove the student. The envelope icon opens your mail client. Changing an e-mail revokes the claim of that row.
+The menu at the end of a row edits it, revokes a claim, or removes the student. Click an e-mail to write to the student. Changing an e-mail revokes the claim of that row. **Add students** opens the import panel (file, one student, or pasted CSV).
 
 ## How to join your own classroom
 
-**Join as student** gives you a *staff* seat, excluded from the class headcount: combined with the graduation-cap button in the header, you can walk the whole student flow (accept, push, grades) without a second account.
+**Join as student** gives you a *staff* seat, excluded from the class headcount: combined with **Switch to student view** in the account menu, you can walk the whole student flow (accept, push, grades) without a second account.

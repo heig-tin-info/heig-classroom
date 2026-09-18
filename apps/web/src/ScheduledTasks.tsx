@@ -3,8 +3,7 @@ import { Loader2, Pause, Play, TimerReset, Zap } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "./api";
-import { HelpIcon } from "./help";
-import { Badge, Card, IconButton, isoDateTime, Tip } from "./ui";
+import { Badge, Button, Card, cx, IconButton, inputClass, isoDateTime, SectionHeading, T, Tip } from "./ui";
 
 interface TaskRow {
   key: string;
@@ -18,8 +17,6 @@ interface TaskRow {
   lastError: string | null;
   lastDurationMs: number | null;
 }
-
-const cell = "px-3 py-2";
 
 function formatInterval(minutes: number): string {
   if (minutes % (24 * 60) === 0) return `${minutes / (24 * 60)} d`;
@@ -48,7 +45,7 @@ function IntervalEditor({
   const valid = Number.isInteger(parsed) && parsed >= 5 && parsed <= 7 * 24 * 60;
   const dirty = valid && parsed !== task.intervalMinutes;
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-2">
       <input
         type="number"
         min={5}
@@ -58,21 +55,17 @@ function IntervalEditor({
         onKeyDown={(e) => {
           if (e.key === "Enter" && dirty) onSave(parsed);
         }}
-        className="w-20 rounded-md border border-zinc-200 bg-white px-2 py-1 text-sm tabular-nums focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+        className={cx(inputClass, "h-8 w-20 tabular-nums")}
         aria-label="Interval in minutes"
         disabled={saving}
       />
-      <span className="text-xs text-zinc-400">min</span>
+      <span className="text-xs text-fg-faint">min</span>
       {dirty ? (
-        <button
-          onClick={() => onSave(parsed)}
-          disabled={saving}
-          className="rounded-md px-1.5 py-0.5 text-xs font-medium text-accent hover:bg-accent/10"
-        >
-          {saving ? <Loader2 className="size-3 animate-spin" /> : "Save"}
-        </button>
+        <Button size="sm" variant="secondary" onClick={() => onSave(parsed)} loading={saving}>
+          Save
+        </Button>
       ) : (
-        <span className="text-xs text-zinc-400">({formatInterval(task.intervalMinutes)})</span>
+        <span className="text-xs text-fg-faint">({formatInterval(task.intervalMinutes)})</span>
       )}
     </span>
   );
@@ -98,107 +91,99 @@ export function ScheduledTasksCard() {
   });
 
   return (
-    <Card>
-      <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
-        <TimerReset className="size-4 text-zinc-400" />
-        <h2 className="font-medium">Scheduled tasks</h2>
-        <HelpIcon topic="scheduled-tasks" />
-        <span className="text-xs text-zinc-400">
-          Safety-net reconciliation. Webhook events are processed immediately, without waiting
-          for these schedules.
-        </span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
-              <th className={`${cell} font-medium`}>Task</th>
-              <th className={`${cell} font-medium`}>Every</th>
-              <th className={`${cell} font-medium`}>Last run</th>
-              <th className={`${cell} font-medium`}>Status</th>
-              <th className={cell} aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {(tasks.data ?? []).map((t) => (
-              <tr
-                key={t.key}
-                className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${t.enabled ? "" : "opacity-50"}`}
-              >
-                <td className={`${cell} max-w-md`}>
-                  <div className="flex items-center gap-2 font-mono text-xs font-medium">
-                    {t.key}
-                    {t.webhookWoken ? (
-                      <Tip label="Webhooks also trigger this work immediately; the schedule is only the fallback.">
-                        <span className="inline-flex items-center gap-0.5 text-[10px] font-sans text-zinc-400">
-                          <Zap className="size-3" /> webhook-woken
-                        </span>
+    <section className="space-y-3">
+      <SectionHeading
+        icon={TimerReset}
+        title="Scheduled tasks"
+        help="scheduled-tasks"
+        description="Safety-net reconciliation. Webhook events are processed immediately, without waiting for these schedules."
+      />
+      <Card className="overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className={T.table}>
+            <thead>
+              <tr className={T.head}>
+                <th className={T.th}>Task</th>
+                <th className={T.th}>Every</th>
+                <th className={T.th}>Last run</th>
+                <th className={T.th}>Status</th>
+                <th className={T.th} aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {(tasks.data ?? []).map((t) => (
+                <tr key={t.key} className={cx(T.row, T.rowHover, !t.enabled && "opacity-50")}>
+                  <td className={`${T.td} max-w-md`}>
+                    <div className="flex items-center gap-2 font-mono text-xs font-medium">
+                      {t.key}
+                      {t.webhookWoken ? (
+                        <Tip label="Webhooks also trigger this work immediately; the schedule is only the fallback.">
+                          <span className="inline-flex items-center gap-0.5 font-sans text-[10px] text-fg-faint">
+                            <Zap className="size-3" /> webhook-woken
+                          </span>
+                        </Tip>
+                      ) : null}
+                    </div>
+                    <p className="mt-0.5 text-xs text-fg-muted">{t.description}</p>
+                  </td>
+                  <td className={T.td}>
+                    <IntervalEditor
+                      task={t}
+                      saving={patch.isPending}
+                      onSave={(minutes) =>
+                        patch.mutate({ key: t.key, body: { intervalMinutes: minutes } })
+                      }
+                    />
+                  </td>
+                  <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
+                    {t.lastRunAt ? isoDateTime(t.lastRunAt) : "—"}
+                    {t.lastDurationMs !== null && t.lastStatus !== "running" ? (
+                      <span className="ml-1 text-xs text-fg-faint">
+                        ({(t.lastDurationMs / 1000).toFixed(1)} s)
+                      </span>
+                    ) : null}
+                  </td>
+                  <td className={T.td}>
+                    <StatusBadge t={t} />
+                    {t.lastError ? (
+                      <Tip label={t.lastError} className="block">
+                        <p
+                          className={cx(
+                            "mt-0.5 max-w-xs truncate text-xs",
+                            t.lastStatus === "error" ? "text-danger" : "text-fg-faint",
+                          )}
+                        >
+                          {t.lastError}
+                        </p>
                       </Tip>
                     ) : null}
-                  </div>
-                  <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">{t.description}</p>
-                </td>
-                <td className={cell}>
-                  <IntervalEditor
-                    task={t}
-                    saving={patch.isPending}
-                    onSave={(minutes) =>
-                      patch.mutate({ key: t.key, body: { intervalMinutes: minutes } })
-                    }
-                  />
-                </td>
-                <td className={`${cell} whitespace-nowrap text-zinc-500 dark:text-zinc-400`}>
-                  {t.lastRunAt ? isoDateTime(t.lastRunAt) : "—"}
-                  {t.lastDurationMs !== null && t.lastStatus !== "running" ? (
-                    <span className="ml-1 text-xs text-zinc-400">
-                      ({(t.lastDurationMs / 1000).toFixed(1)} s)
-                    </span>
-                  ) : null}
-                </td>
-                <td className={cell}>
-                  <StatusBadge t={t} />
-                  {t.lastError ? (
-                    <Tip label={t.lastError} className="block">
-                      <p
-                        className={`mt-0.5 max-w-xs truncate text-xs ${
-                          t.lastStatus === "error"
-                            ? "text-red-600 dark:text-red-400"
-                            : "text-zinc-400"
-                        }`}
-                      >
-                        {t.lastError}
-                      </p>
-                    </Tip>
-                  ) : null}
-                </td>
-                <td className={`${cell} whitespace-nowrap text-right`}>
-                  <IconButton
-                    label={t.enabled ? "Disable task" : "Enable task"}
-                    onClick={() => patch.mutate({ key: t.key, body: { enabled: !t.enabled } })}
-                    disabled={patch.isPending}
-                  >
-                    {t.enabled ? <Pause className="size-4" /> : <Play className="size-4" />}
-                  </IconButton>
-                  <Tip label="Run now">
-                    <button
-                      aria-label="Run now"
+                  </td>
+                  <td className={`${T.td} whitespace-nowrap text-right`}>
+                    <IconButton
+                      label={t.enabled ? "Disable task" : "Enable task"}
+                      onClick={() => patch.mutate({ key: t.key, body: { enabled: !t.enabled } })}
+                      disabled={patch.isPending}
+                    >
+                      {t.enabled ? <Pause /> : <Play />}
+                    </IconButton>
+                    <IconButton
+                      label="Run now"
                       onClick={() => runNow.mutate(t.key)}
                       disabled={runNow.isPending || t.lastStatus === "running"}
-                      className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-accent/10 hover:text-accent disabled:pointer-events-none disabled:opacity-40"
                     >
                       {runNow.isPending && runNow.variables === t.key ? (
-                        <Loader2 className="size-4 animate-spin" />
+                        <Loader2 className="animate-spin" />
                       ) : (
-                        <Zap className="size-4" />
+                        <Zap />
                       )}
-                    </button>
-                  </Tip>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
+                    </IconButton>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </section>
   );
 }

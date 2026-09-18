@@ -56,15 +56,15 @@ function ActivityChart({ commits }: { commits: Commit[] }) {
               width={STEP - 2}
               height={h}
               rx={1.5}
-              fill="var(--color-accent)"
+              fill="var(--accent)"
             >
               <title>{`${label(i)} — ${n} commit${n > 1 ? "s" : ""}`}</title>
             </rect>
           );
         })}
-        <line x1={0} y1={H + 0.5} x2={width} y2={H + 0.5} className="stroke-zinc-200 dark:stroke-zinc-700" strokeWidth={1} />
+        <line x1={0} y1={H + 0.5} x2={width} y2={H + 0.5} className="stroke-line-strong" strokeWidth={1} />
       </svg>
-      <figcaption className="mt-1 flex justify-between text-[10px] text-zinc-400">
+      <figcaption className="mt-1 flex justify-between text-[10px] text-fg-faint">
         <span>{label(0)}</span>
         <span>
           max {max} · {weekly ? t("assignment.activity.perWeek") : t("assignment.activity.perDay")}
@@ -99,7 +99,7 @@ function CommitList({
   const headsOf = (sha: string) => branches.filter((b) => b.headSha === sha);
 
   return (
-    <div className="flex max-h-72 overflow-y-auto text-sm">
+    <div className="flex max-h-72 overflow-y-auto text-[13px]">
       {showGraph ? (
         <svg
           width={width}
@@ -123,7 +123,7 @@ function CommitList({
               cy={y(r)}
               r={3.5}
               fill={laneColor(laneOf.get(c.sha)!)}
-              className="stroke-white dark:stroke-zinc-900"
+              className="stroke-surface"
               strokeWidth={2}
             />
           ))}
@@ -137,17 +137,17 @@ function CommitList({
                 href={`https://github.com/${fullName}/commit/${c.sha}`}
                 target="_blank"
                 rel="noreferrer"
-                className="shrink-0 font-mono text-xs text-zinc-400 hover:text-accent hover:underline"
+                className="shrink-0 font-mono text-xs text-fg-faint hover:text-accent hover:underline"
               >
                 {c.sha.slice(0, 7)}
               </a>
             ) : (
-              <span className="shrink-0 font-mono text-xs text-zinc-400">{c.sha.slice(0, 7)}</span>
+              <span className="shrink-0 font-mono text-xs text-fg-faint">{c.sha.slice(0, 7)}</span>
             )}
             {headsOf(c.sha).map((b) => (
               <span
                 key={b.name}
-                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium text-fg-muted"
               >
                 <span
                   className="inline-block size-1.5 rounded-full"
@@ -159,7 +159,7 @@ function CommitList({
             <span className="min-w-0 flex-1 truncate" title={c.message}>
               {c.message}
             </span>
-            <span className="shrink-0 text-xs text-zinc-400">
+            <span className="shrink-0 text-xs text-fg-faint">
               {c.date ? isoDateTime(c.date) : ""}
             </span>
           </li>
@@ -180,7 +180,7 @@ function TestsChart({ tests }: { tests: ActivityData["tests"] }) {
     .filter((r) => r.total !== null)
     .map((r) => ({ ts: new Date(r.date).getTime(), passed: r.passed ?? 0, total: r.total! }));
   if (pts.length === 0) {
-    return <p className="text-xs text-zinc-400">{t("assignment.activity.noTests")}</p>;
+    return <p className="text-xs text-fg-faint">{t("assignment.activity.noTests")}</p>;
   }
   const W = 320;
   const H = 78;
@@ -202,21 +202,21 @@ function TestsChart({ tests }: { tests: ActivityData["tests"] }) {
     <figure className="min-w-0">
       <svg viewBox={`0 0 ${W} ${H + 14}`} className="h-24 w-full" role="img"
         aria-label={t("assignment.activity.testsOverTime")}>
-        <line x1={0} y1={H + 0.5} x2={W} y2={H + 0.5} className="stroke-zinc-200 dark:stroke-zinc-700" strokeWidth={1} />
+        <line x1={0} y1={H + 0.5} x2={W} y2={H + 0.5} className="stroke-line-strong" strokeWidth={1} />
         <path d={step((p) => p.total)} fill="none" strokeWidth={2} strokeDasharray="4 3"
-          className="stroke-zinc-300 dark:stroke-zinc-600" />
-        <path d={step((p) => p.passed)} fill="none" stroke="var(--color-accent)" strokeWidth={2} />
+          className="stroke-line-strong" />
+        <path d={step((p) => p.passed)} fill="none" stroke="var(--accent)" strokeWidth={2} />
         {pts.map((p, i) => (
-          <circle key={i} cx={px(p.ts)} cy={py(p.passed)} r={3.5} fill="var(--color-accent)"
-            className="stroke-white dark:stroke-zinc-900" strokeWidth={1.5}>
+          <circle key={i} cx={px(p.ts)} cy={py(p.passed)} r={3.5} fill="var(--accent)"
+            className="stroke-surface" strokeWidth={1.5}>
             <title>{`${new Date(p.ts).toISOString().slice(0, 16).replace("T", " ")} — ${p.passed}/${p.total}`}</title>
           </circle>
         ))}
       </svg>
-      <figcaption className="mt-1 flex items-center justify-between text-[10px] text-zinc-400">
+      <figcaption className="mt-1 flex items-center justify-between text-[10px] text-fg-faint">
         <span className="inline-flex items-center gap-1">
           <span className="inline-block h-0.5 w-3 rounded bg-accent" /> {t("assignment.activity.passed")}
-          <span className="ml-2 inline-block h-0.5 w-3 rounded border-t border-dashed border-zinc-400" />{" "}
+          <span className="ml-2 inline-block h-0.5 w-3 rounded border-t border-dashed border-fg-faint" />{" "}
           {t("assignment.activity.total")}
         </span>
         <span>max {maxY}</span>
@@ -247,7 +247,7 @@ export function ActivityPanel({
   });
   if (activity.isLoading) {
     return (
-      <p className="flex items-center gap-2 px-4 py-4 text-sm text-zinc-500 dark:text-zinc-400">
+      <p className="flex items-center gap-2 px-5 py-4 text-sm text-fg-muted">
         <Loader2 className="size-4 animate-spin" /> Loading activity…
       </p>
     );
@@ -256,14 +256,13 @@ export function ActivityPanel({
   const tests = activity.data?.tests ?? [];
   if (commits.length === 0 && tests.length === 0) {
     return (
-      <p className="px-4 py-4 text-sm text-zinc-500 dark:text-zinc-400">
-        {t("assignment.activity.empty")}
-      </p>
+      <p className="px-5 py-4 text-sm text-fg-muted">{t("assignment.activity.empty")}</p>
     );
   }
-  const sub = "rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/40";
+  const sub = "rounded-field border border-line bg-surface p-3";
+  const heading = "mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg-faint";
   return (
-    <div className="space-y-3 px-4 py-3">
+    <div className="space-y-3 px-5 py-4">
       {commits.length ? (
         <div className={sub}>
           <CommitList commits={commits} branches={activity.data?.branches ?? []} fullName={fullName} />
@@ -271,17 +270,13 @@ export function ActivityPanel({
       ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className={sub}>
-          <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            {t("assignment.activity.commitsOverTime")}
-          </h4>
+          <h4 className={heading}>{t("assignment.activity.commitsOverTime")}</h4>
           {commits.length ? <ActivityChart commits={commits} /> : (
-            <p className="text-xs text-zinc-400">{t("assignment.activity.empty")}</p>
+            <p className="text-xs text-fg-faint">{t("assignment.activity.empty")}</p>
           )}
         </div>
         <div className={sub}>
-          <h4 className="mb-2 text-xs font-medium uppercase tracking-wide text-zinc-400">
-            {t("assignment.activity.testsOverTime")}
-          </h4>
+          <h4 className={heading}>{t("assignment.activity.testsOverTime")}</h4>
           <TestsChart tests={tests} />
         </div>
       </div>

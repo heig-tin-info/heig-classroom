@@ -1,5 +1,17 @@
-import { ArrowDown, ArrowUp, Building2, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Building2,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Ellipsis,
+  Loader2,
+  Search,
+  X,
+} from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { ComponentType, ReactNode } from "react";
 
@@ -7,8 +19,20 @@ import type { DateFormat, Me } from "@hgc/contracts";
 
 import { HelpIcon } from "./help";
 
+/*
+ * Shared primitives. Every visual value here comes from DESIGN.md (tokens in
+ * style.css): semantic colors (`surface`, `fg-muted`, `line`…) swap in dark
+ * mode by themselves, so components carry no `dark:` variants.
+ */
+
+/** Joins class names, skipping falsy entries. */
+export const cx = (...parts: (string | false | null | undefined)[]) =>
+  parts.filter(Boolean).join(" ");
+
+export type IconType = ComponentType<{ className?: string }>;
+
 /**
- * Stacking scale (SSOT): popovers < modal = toasts < modal overlay <
+ * Stacking scale (SSOT): popovers < sheet = dialog = toasts < busy overlay <
  * help drawer < tooltips. Literal Tailwind tokens live here so the JIT
  * scanner picks them up; compose with template strings.
  */
@@ -16,9 +40,9 @@ export const Z = {
   popover: "z-30",
   modal: "z-50",
   toast: "z-50",
-  /** Above the modal: CreatingOverlay greys the whole dialog out. */
+  /** Above the dialog: CreatingOverlay greys the whole dialog out. */
   overlay: "z-[60]",
-  /** Help must be able to slide over a modal that summoned it. */
+  /** Help must be able to slide over a dialog that summoned it. */
   helpBackdrop: "z-[75]",
   help: "z-[80]",
   tooltip: "z-[90]",
@@ -32,6 +56,29 @@ export function useNow(intervalMs = 30_000): number {
     return () => clearInterval(timer);
   }, [intervalMs]);
   return now;
+}
+
+/** Calls `onEscape` on the Escape key while mounted (dialogs, sheets, menus). */
+export function useEscape(onEscape: () => void, enabled = true) {
+  useEffect(() => {
+    if (!enabled) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onEscape();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onEscape, enabled]);
+}
+
+/** Locks the page scroll while a floating layer is open. */
+function useScrollLock() {
+  useLayoutEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
 }
 
 // --- Sortable tables (one motif for every hand-rolled table) ---
@@ -65,6 +112,16 @@ export function useSortableTable<T, K extends string>(
   return { sorted, sort, toggle };
 }
 
+/** Table styles (DESIGN.md › Components): dense 13 px rows, hairline dividers. */
+export const T = {
+  table: "w-full text-[13px]",
+  head: "text-left text-xs text-fg-muted",
+  th: "px-3 py-2 font-medium",
+  td: "px-3 py-2.5 align-middle",
+  row: "border-t border-line transition-colors",
+  rowHover: "hover:bg-surface-2/70",
+} as const;
+
 /** Clickable column header bound to useSortableTable. */
 export function SortHeader<K extends string>({
   k,
@@ -72,20 +129,24 @@ export function SortHeader<K extends string>({
   onToggle,
   children,
   className = "",
-  buttonClassName = "hover:text-zinc-900 dark:hover:text-zinc-100",
+  right,
 }: {
   k: K;
   sort: SortState<K>;
   onToggle: (k: K) => void;
   children: ReactNode;
   className?: string;
-  buttonClassName?: string;
+  right?: boolean;
 }) {
   const active = sort.key === k;
   return (
-    <th className={className}>
+    <th className={cx(T.th, right && "text-right", className)}>
       <button
-        className={`inline-flex items-center gap-1 uppercase tracking-wide ${buttonClassName}`}
+        type="button"
+        className={cx(
+          "inline-flex items-center gap-1 rounded-sm transition-colors hover:text-fg",
+          active && "text-fg",
+        )}
         onClick={() => onToggle(k)}
       >
         {children}
@@ -98,12 +159,11 @@ export function SortHeader<K extends string>({
 }
 
 /**
- * Instant tooltip (replaces the laggy native `title`): dark bubble with an
- * arrow, rendered in a portal on hover/focus after 120 ms, tippy-like pop
- * animation (`tip-in` in style.css), flipped below the anchor near the top
- * edge and clamped to the viewport. Wraps any element; keep the accessible
- * name (`aria-label`) on the control itself — the bubble is aria-hidden.
- * A nullish label renders the child untouched (conditional tooltips).
+ * Instant tooltip (replaces the laggy native `title`): inverted bubble with an
+ * arrow, rendered in a portal on hover/focus after 120 ms, flipped below the
+ * anchor near the top edge and clamped to the viewport. Wraps any element;
+ * keep the accessible name (`aria-label`) on the control itself — the bubble
+ * is aria-hidden. A nullish label renders the child untouched.
  */
 export function Tip({
   label,
@@ -156,15 +216,18 @@ export function Tip({
               }}
             >
               <span
-                className={`tip-bubble relative block rounded-md bg-zinc-800 px-2 py-1 text-xs font-medium text-white shadow-lg dark:bg-zinc-600 ${
-                  tip.below ? "origin-top" : "origin-bottom"
-                } ${label.length > 60 ? "max-w-xs whitespace-normal" : "whitespace-nowrap"}`}
+                className={cx(
+                  "tip-bubble relative block rounded-lg bg-fg px-2.5 py-1.5 text-xs font-medium leading-snug text-canvas",
+                  tip.below ? "origin-top" : "origin-bottom",
+                  label.length > 60 ? "max-w-xs whitespace-normal" : "whitespace-nowrap",
+                )}
               >
                 {label}
                 <span
-                  className={`absolute left-1/2 size-2 -translate-x-1/2 rotate-45 bg-zinc-800 dark:bg-zinc-600 ${
-                    tip.below ? "-top-1" : "-bottom-1"
-                  }`}
+                  className={cx(
+                    "absolute left-1/2 size-2 -translate-x-1/2 rotate-45 bg-fg",
+                    tip.below ? "-top-1" : "-bottom-1",
+                  )}
                 />
               </span>
             </span>,
@@ -175,26 +238,118 @@ export function Tip({
   );
 }
 
-/** Icon-only button on the shared Tip tooltip (label = accessible name too). */
+// --- Buttons ---
+
+export type ButtonVariant = "primary" | "secondary" | "subtle" | "ghost" | "danger";
+export type ButtonSize = "sm" | "md" | "lg";
+
+const BUTTON_VARIANTS: Record<ButtonVariant, string> = {
+  primary: "bg-accent text-white hover:bg-accent-hover",
+  secondary: "border border-line-strong bg-surface text-fg hover:bg-surface-2",
+  subtle: "bg-surface-3 text-fg hover:bg-line-strong/70",
+  ghost: "text-fg-muted hover:bg-surface-2 hover:text-fg",
+  danger: "bg-danger text-white hover:opacity-90",
+};
+const BUTTON_SIZES: Record<ButtonSize, string> = {
+  sm: "h-7 px-3 text-[13px] [&_svg]:size-3.5",
+  md: "h-[34px] px-4 text-sm [&_svg]:size-4",
+  lg: "h-10 px-5 text-sm [&_svg]:size-4",
+};
+
+/** Class list of a button; shared by <Button>, <LinkButton> and raw anchors. */
+export function buttonClass(variant: ButtonVariant = "primary", size: ButtonSize = "md", extra = "") {
+  return cx(
+    // disabled:pointer-events-none: hovering a disabled button must hit the
+    // wrapping Tip span (disabled controls swallow mouse events).
+    "inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-[background-color,color,border-color,opacity,transform] duration-150 ease-out-emphasized active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50",
+    BUTTON_VARIANTS[variant],
+    BUTTON_SIZES[size],
+    extra,
+  );
+}
+
+export function Button({
+  children,
+  variant = "primary",
+  size = "md",
+  loading,
+  className = "",
+  ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  /** Shows a spinner in place of the leading icon and disables the button. */
+  loading?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      {...props}
+      disabled={props.disabled || loading}
+      className={buttonClass(variant, size, className)}
+    >
+      {loading ? <Loader2 className="animate-spin" /> : null}
+      {children}
+    </button>
+  );
+}
+
+/** Anchor styled as a button (external links, downloads, plain navigations). */
+export function LinkButton({
+  children,
+  variant = "secondary",
+  size = "md",
+  className = "",
+  ...props
+}: React.AnchorHTMLAttributes<HTMLAnchorElement> & {
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+}) {
+  return (
+    <a {...props} className={buttonClass(variant, size, className)}>
+      {children}
+    </a>
+  );
+}
+
+/** Icon-only round button on the shared Tip tooltip (label = accessible name too). */
 export function IconButton({
   label,
   danger,
+  active,
+  size = "md",
+  className = "",
   ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string; danger?: boolean }) {
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
+  label: string;
+  danger?: boolean;
+  /** Pressed state (view toggles, filters): accent-soft chip. */
+  active?: boolean;
+  size?: "sm" | "md";
+}) {
   return (
     <Tip label={label}>
       <button
+        type="button"
         {...props}
         aria-label={label}
-        className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-40 ${
-          danger
-            ? "text-zinc-400 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
-            : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-        }`}
+        aria-pressed={active}
+        className={cx(
+          "inline-flex shrink-0 items-center justify-center rounded-full transition-colors duration-150 disabled:pointer-events-none disabled:opacity-40",
+          size === "sm" ? "size-7 [&_svg]:size-3.5" : "size-8 [&_svg]:size-4",
+          active
+            ? "bg-accent-soft text-accent"
+            : danger
+              ? "text-fg-faint hover:bg-danger-soft hover:text-danger"
+              : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+          className,
+        )}
       />
     </Tip>
   );
 }
+
+// --- Identity ---
 
 /** User avatar: uploaded/IdP picture, or initials on the accent color. */
 export function Avatar({ me, className = "size-16 text-xl" }: { me: Me; className?: string }) {
@@ -212,7 +367,25 @@ export function Avatar({ me, className = "size-16 text-xl" }: { me: Me; classNam
     `${me.givenName.charAt(0)}${me.familyName.charAt(0)}`.toUpperCase() || "?";
   return (
     <span
-      className={`inline-flex items-center justify-center rounded-full bg-accent font-semibold text-white ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-accent font-semibold text-white ${className}`}
+    >
+      {initials}
+    </span>
+  );
+}
+
+/** Initials disc for a roster entry (no account picture, or one that failed). */
+export function Initials({
+  name,
+  className = "size-7 text-xs",
+}: {
+  name: [string, string];
+  className?: string;
+}) {
+  const initials = `${name[0].charAt(0)}${name[1].charAt(0)}`.toUpperCase() || "?";
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center justify-center rounded-full bg-surface-3 font-semibold text-fg-muted ${className}`}
     >
       {initials}
     </span>
@@ -222,17 +395,19 @@ export function Avatar({ me, className = "size-16 text-xl" }: { me: Me; classNam
 /** Public GitHub avatar of an organization, with an icon fallback. */
 export function OrgAvatar({ login, className = "size-5" }: { login: string; className?: string }) {
   const [failed, setFailed] = useState(false);
-  if (failed) return <Building2 className={`${className} text-zinc-400`} />;
+  if (failed) return <Building2 className={`${className} text-fg-faint`} />;
   return (
     <img
       src={`https://github.com/${login}.png?size=64`}
       alt=""
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
-      className={`rounded ${className}`}
+      className={`shrink-0 rounded-md ${className}`}
     />
   );
 }
+
+// --- Dates ---
 
 /** Account preference adopted in App.tsx; module-level on purpose — date
     formatting is plain string work, every view re-renders through the `me`
@@ -281,64 +456,285 @@ export function localDateTimeInputValue(date = new Date()): string {
   return d.toISOString().slice(0, 16);
 }
 
+// --- Floating layers: dialog, sheet, menu ---
+
+function LayerClose({ onClose }: { onClose: () => void }) {
+  return (
+    <IconButton label="Close" onClick={onClose} className="-mr-1.5">
+      <X />
+    </IconButton>
+  );
+}
+
+/**
+ * Centered dialog for confirmations and one-field forms (≤ 480 px by
+ * default). Long forms belong in a <Sheet>. Deliberately no close on
+ * backdrop click: a stray click must not discard what the user typed.
+ */
 export function Modal({
   title,
   subtitle,
-  narrow,
-  flush,
+  size = "md",
   onClose,
   children,
+  footer,
 }: {
   title: string;
-  /** Muted state line under the title ("Draft — nothing is published yet"). */
+  /** Muted state line under the title. */
   subtitle?: ReactNode;
-  /** 600px settings-sheet width instead of the default 768px. */
-  narrow?: boolean;
-  /** Children own the padding: full-bleed sections separated by hairlines. */
-  flush?: boolean;
+  size?: "sm" | "md" | "lg";
   onClose: () => void;
   children: ReactNode;
+  /** Actions row, right-aligned, on its own hairline. */
+  footer?: ReactNode;
 }) {
-  // Deliberately no close-on-backdrop-click: modals hold forms, and a stray
-  // click outside must not discard them. Closing is the X or an explicit button.
-  return (
+  useEscape(onClose);
+  useScrollLock();
+  const width = { sm: "max-w-[420px]", md: "max-w-[520px]", lg: "max-w-[760px]" }[size];
+  return createPortal(
     <div
-      className={`modal-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-black/40 p-4 backdrop-blur-sm`}
+      className={`layer-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-fg/30 p-4 backdrop-blur-[2px] sm:items-center`}
       role="dialog"
       aria-modal="true"
       aria-label={title}
     >
       <div
-        className={`modal-panel mt-10 w-full rounded-xl bg-white shadow-2xl dark:bg-zinc-900 ${
-          narrow ? "max-w-[600px]" : "max-w-3xl"
-        } ${flush ? "overflow-hidden" : "p-5"}`}
+        className={cx(
+          "dialog-panel mt-8 w-full rounded-sheet border border-line bg-surface shadow-overlay sm:mt-0",
+          width,
+        )}
       >
-        <div
-          className={
-            flush
-              ? "flex items-start gap-2 border-b border-zinc-200 px-5 pb-3.5 pt-4 dark:border-zinc-800"
-              : "mb-4 flex items-start gap-2"
-          }
-        >
+        <div className="flex items-start gap-3 px-5 pt-5">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold tracking-tight">{title}</h2>
-            {subtitle ? (
-              <p className="mt-0.5 text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</p>
-            ) : null}
+            <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-sm text-fg-muted">{subtitle}</p> : null}
           </div>
-          <button
-            aria-label="Close"
-            onClick={onClose}
-            className="rounded-md p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-          >
-            <X className="size-4" />
-          </button>
+          <LayerClose onClose={onClose} />
         </div>
-        {children}
+        <div className="px-5 py-4">{children}</div>
+        {footer ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line px-5 py-3">
+            {footer}
+          </div>
+        ) : null}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
+
+/**
+ * Right-hand drawer for anything longer than three fields (assignment form,
+ * imports, histories). Header and footer stay put, the body scrolls.
+ * Same closing rule as the dialog: Escape or the X, never the backdrop.
+ */
+export function Sheet({
+  title,
+  subtitle,
+  onClose,
+  children,
+  footer,
+  width = "md",
+  flush,
+}: {
+  title: string;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  width?: "md" | "lg";
+  /** Children own the padding (full-bleed sections separated by hairlines). */
+  flush?: boolean;
+}) {
+  useEscape(onClose);
+  useScrollLock();
+  return createPortal(
+    <div
+      className={`layer-backdrop fixed inset-0 ${Z.modal} flex justify-end bg-fg/30 backdrop-blur-[2px]`}
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
+      <div
+        className={cx(
+          "sheet-panel flex h-full w-full flex-col border-l border-line bg-surface shadow-sheet",
+          width === "lg" ? "sm:max-w-[760px]" : "sm:max-w-[600px]",
+        )}
+      >
+        <div className="flex items-start gap-3 border-b border-line px-6 pb-4 pt-5">
+          <div className="min-w-0 flex-1">
+            <h2 className="text-lg font-bold tracking-tight">{title}</h2>
+            {subtitle ? <p className="mt-0.5 text-sm text-fg-muted">{subtitle}</p> : null}
+          </div>
+          <LayerClose onClose={onClose} />
+        </div>
+        <div className={cx("min-h-0 flex-1 overflow-y-auto", !flush && "px-6 py-5")}>
+          {children}
+        </div>
+        {footer ? (
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-line bg-surface px-6 py-3">
+            {footer}
+          </div>
+        ) : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export interface MenuItem {
+  label: string;
+  icon?: IconType;
+  onSelect?: () => void;
+  /** Plain link item (external URLs, downloads). */
+  href?: string;
+  danger?: boolean;
+  disabled?: boolean;
+  /** Draws a hairline above this item. */
+  separator?: boolean;
+}
+
+/**
+ * Overflow menu for tertiary actions. Positioned in a portal from the
+ * trigger's rectangle (so it escapes overflow-hidden cards and tables) and
+ * closes on outside click, Escape, scroll or selection.
+ */
+export function Menu({
+  items,
+  label = "More actions",
+  trigger,
+  align = "end",
+}: {
+  items: MenuItem[];
+  label?: string;
+  /** Custom trigger; the default is a round ellipsis button. */
+  trigger?: ReactNode;
+  align?: "start" | "end";
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; up: boolean } | null>(null);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useEscape(() => setOpen(false), open);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchor.current?.contains(t) || panel.current?.contains(t)) return;
+      setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+  const toggle = () => {
+    if (!open && anchor.current) {
+      const r = anchor.current.getBoundingClientRect();
+      // Open upward when the trigger sits near the bottom edge (sidebar account row).
+      const up = r.bottom + 280 > window.innerHeight && r.top > window.innerHeight / 2;
+      setPos({
+        ...(up ? { bottom: window.innerHeight - r.top + 6 } : { top: r.bottom + 6 }),
+        left: align === "end" ? r.right : r.left,
+        up,
+      });
+    }
+    setOpen((v) => !v);
+  };
+  return (
+    <>
+      <span
+        ref={anchor}
+        className="inline-flex"
+        onClick={(e) => {
+          e.stopPropagation();
+          toggle();
+        }}
+      >
+        {trigger ?? (
+          <IconButton label={label} aria-haspopup="menu" aria-expanded={open}>
+            <Ellipsis />
+          </IconButton>
+        )}
+      </span>
+      {open && pos
+        ? createPortal(
+            <div
+              ref={panel}
+              role="menu"
+              className={`menu-panel fixed ${Z.popover} min-w-44 rounded-menu border border-line bg-surface p-1 shadow-popover`}
+              style={{
+                top: pos.top,
+                bottom: pos.bottom,
+                left: pos.left,
+                transform: align === "end" ? "translateX(-100%)" : undefined,
+                transformOrigin: `${pos.up ? "bottom" : "top"} ${align === "end" ? "right" : "left"}`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {items.map((it, i) => {
+                const Icon = it.icon;
+                const cls = cx(
+                  "flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-1.5 text-left text-sm transition-colors",
+                  it.disabled
+                    ? "pointer-events-none opacity-40"
+                    : it.danger
+                      ? "text-danger hover:bg-danger-soft"
+                      : "text-fg hover:bg-surface-2",
+                );
+                const body = (
+                  <>
+                    {Icon ? (
+                      <Icon className={cx("size-4", it.danger ? "" : "text-fg-faint")} />
+                    ) : null}
+                    {it.label}
+                  </>
+                );
+                return (
+                  <div key={i}>
+                    {it.separator ? <div className="my-1 border-t border-line" /> : null}
+                    {it.href ? (
+                      <a
+                        role="menuitem"
+                        href={it.href}
+                        target={it.href.startsWith("http") ? "_blank" : undefined}
+                        rel="noreferrer"
+                        className={cls}
+                        onClick={() => setOpen(false)}
+                      >
+                        {body}
+                      </a>
+                    ) : (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={cls}
+                        disabled={it.disabled}
+                        onClick={() => {
+                          setOpen(false);
+                          it.onSelect?.();
+                        }}
+                      >
+                        {body}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
+  );
+}
+
+// --- Feedback ---
 
 /** Centered spinner for a panel whose data is still loading. */
 export function Spinner({ label, className = "py-12" }: { label?: string; className?: string }) {
@@ -349,21 +745,25 @@ export function Spinner({ label, className = "py-12" }: { label?: string; classN
       aria-label={label ?? "Loading"}
       className={`flex flex-col items-center justify-center gap-2 ${className}`}
     >
-      <Loader2 className="size-6 animate-spin text-accent" />
-      {label ? <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p> : null}
+      <Loader2 className="size-5 animate-spin text-fg-faint" />
+      {label ? <p className="text-sm text-fg-muted">{label}</p> : null}
     </div>
   );
+}
+
+/** Placeholder block for content still loading (lists, cards). */
+export function Skeleton({ className = "h-4 w-full" }: { className?: string }) {
+  return <div aria-hidden className={`animate-pulse rounded-md bg-surface-3 ${className}`} />;
 }
 
 /** Indeterminate progress bar (unknown duration work). */
 export function Progress({ label }: { label: string }) {
   return (
     <div className="space-y-1.5" role="status" aria-label={label}>
-      <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
-      <div className="h-1.5 overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
-        <div className="h-full w-1/3 animate-[progress_1.2s_ease-in-out_infinite] rounded-full bg-accent" />
+      <p className="text-sm text-fg-muted">{label}</p>
+      <div className="h-1 overflow-hidden rounded-full bg-surface-3">
+        <div className="progress-bar h-full w-1/3 rounded-full bg-accent" />
       </div>
-      <style>{`@keyframes progress { 0% { margin-left: -33%; } 100% { margin-left: 100%; } }`}</style>
     </div>
   );
 }
@@ -377,63 +777,35 @@ export function GithubIcon({ className = "size-4" }: { className?: string }) {
   );
 }
 
-export function Button({
-  children,
-  variant = "primary",
-  ...props
-}: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "ghost" | "subtle";
-}) {
-  const styles = {
-    primary:
-      "bg-accent text-white hover:bg-accent-hover shadow-sm disabled:opacity-50",
-    ghost:
-      "text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800",
-    subtle:
-      "bg-zinc-100 text-zinc-800 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700",
-  }[variant];
-  return (
-    <button
-      {...props}
-      // disabled:pointer-events-none: hovering a disabled button must hit the
-      // wrapping Tip span (disabled controls swallow mouse events).
-      className={`hgc-btn inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-150 hover:-translate-y-px active:translate-y-0 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:pointer-events-none ${styles} ${props.className ?? ""}`}
-    >
-      {children}
-    </button>
-  );
-}
+export type Tone = "green" | "amber" | "red" | "zinc" | "accent";
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return (
-    <div
-      className={`hgc-card rounded-xl bg-white shadow-[0_1px_2px_rgb(0_0_0/0.05),0_4px_16px_rgb(0_0_0/0.04)] transition-all duration-200 dark:bg-zinc-900 dark:shadow-[0_1px_2px_rgb(0_0_0/0.3)] ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
+const TONES: Record<Tone, string> = {
+  green: "bg-success-soft text-success",
+  amber: "bg-warning-soft text-warning",
+  red: "bg-danger-soft text-danger",
+  zinc: "bg-surface-3 text-fg-muted",
+  accent: "bg-accent-soft text-accent",
+};
 
+/** Status pill. A status is a badge; a plain count is text. */
 export function Badge({
   tone,
   icon: Icon,
   children,
+  className = "",
 }: {
-  tone: "green" | "amber" | "red" | "zinc";
-  icon?: ComponentType<{ className?: string }>;
+  tone: Tone;
+  icon?: IconType;
   children: ReactNode;
+  className?: string;
 }) {
-  const tones = {
-    green:
-      "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-400",
-    amber:
-      "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-400",
-    red: "bg-red-50 text-red-700 ring-red-600/20 dark:bg-red-500/10 dark:text-red-400",
-    zinc: "bg-zinc-100 text-zinc-600 ring-zinc-500/20 dark:bg-zinc-800 dark:text-zinc-300",
-  }[tone];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones}`}
+      className={cx(
+        "inline-flex h-[22px] shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-2 text-xs font-medium",
+        TONES[tone],
+        className,
+      )}
     >
       {Icon ? <Icon className="size-3" /> : null}
       {children}
@@ -441,32 +813,393 @@ export function Badge({
   );
 }
 
+/** Inline notice: neutral information, a warning, a failure or a success. */
+export function Alert({
+  tone = "neutral",
+  icon: Icon,
+  title,
+  children,
+  action,
+}: {
+  tone?: "neutral" | "warning" | "danger" | "success";
+  icon?: IconType;
+  title?: string;
+  children?: ReactNode;
+  /** Right-aligned action (a button or a link). */
+  action?: ReactNode;
+}) {
+  const styles = {
+    neutral: "border-line bg-surface-2 text-fg",
+    warning: "border-warning/30 bg-warning-soft text-fg",
+    danger: "border-danger/30 bg-danger-soft text-fg",
+    success: "border-success/30 bg-success-soft text-fg",
+  }[tone];
+  const iconColor = {
+    neutral: "text-fg-muted",
+    warning: "text-warning",
+    danger: "text-danger",
+    success: "text-success",
+  }[tone];
+  return (
+    <div role="status" className={cx("flex flex-wrap items-start gap-3 rounded-card border px-4 py-3 text-sm", styles)}>
+      {Icon ? <Icon className={cx("mt-0.5 size-4 shrink-0", iconColor)} /> : null}
+      <div className="min-w-0 flex-1 space-y-0.5">
+        {title ? <p className="font-semibold">{title}</p> : null}
+        {children ? <div className="text-fg-muted">{children}</div> : null}
+      </div>
+      {action ? <div className="flex shrink-0 items-center self-center">{action}</div> : null}
+    </div>
+  );
+}
+
 export function EmptyState({
   icon: Icon,
   title,
   children,
+  action,
+  className = "py-14",
 }: {
-  icon: ComponentType<{ className?: string }>;
+  icon: IconType;
   title: string;
   children?: ReactNode;
+  /** The one thing to do from here. */
+  action?: ReactNode;
+  className?: string;
 }) {
   return (
-    <div className="flex flex-col items-center gap-2 py-12 text-center">
-      <div className="rounded-full bg-zinc-100 p-3 dark:bg-zinc-800">
-        <Icon className="size-6 text-zinc-500 dark:text-zinc-400" />
+    <div className={cx("flex flex-col items-center gap-2 px-4 text-center", className)}>
+      <div className="mb-1 rounded-full bg-surface-2 p-3">
+        <Icon className="size-6 text-fg-muted" />
       </div>
-      <p className="font-medium">{title}</p>
-      {children ? (
-        <p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">{children}</p>
-      ) : null}
+      <p className="font-semibold">{title}</p>
+      {children ? <p className="max-w-sm text-sm text-fg-muted">{children}</p> : null}
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
+  );
+}
+
+// --- Surfaces and page structure ---
+
+export function Card({
+  children,
+  className = "",
+  interactive,
+  onClick,
+}: {
+  children: ReactNode;
+  className?: string;
+  /** Clickable surface: hairline darkens on hover, no movement. */
+  interactive?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={cx(
+        "rounded-card border border-line bg-surface",
+        interactive && "cursor-pointer transition-colors duration-150 hover:border-line-strong hover:bg-surface-2/40",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Title row of a page: one h1, an optional line under it, the actions right. */
+export function PageHeader({
+  eyebrow,
+  title,
+  description,
+  actions,
+  className = "",
+}: {
+  eyebrow?: ReactNode;
+  title: ReactNode;
+  description?: ReactNode;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <header className={cx("flex flex-wrap items-end justify-between gap-x-6 gap-y-3", className)}>
+      <div className="min-w-0">
+        {eyebrow ? <div className="mb-1.5 text-[13px] text-fg-muted">{eyebrow}</div> : null}
+        <h1 className="text-[28px] font-bold leading-tight tracking-[-0.02em]">{title}</h1>
+        {description ? <div className="mt-1.5 text-sm text-fg-muted">{description}</div> : null}
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </header>
+  );
+}
+
+/** Heading of a section inside a page or a card (h2 at 16 px). */
+export function SectionHeading({
+  icon: Icon,
+  title,
+  count,
+  description,
+  help,
+  actions,
+  className = "",
+}: {
+  icon?: IconType;
+  title: ReactNode;
+  count?: number;
+  description?: ReactNode;
+  help?: string;
+  actions?: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={cx("flex flex-wrap items-center gap-x-3 gap-y-2", className)}>
+      <div className="flex min-w-0 items-center gap-2">
+        {Icon ? <Icon className="size-4 text-fg-faint" /> : null}
+        <h2 className="text-[16px] font-bold tracking-tight">{title}</h2>
+        {count != null ? <span className="text-sm tabular-nums text-fg-faint">{count}</span> : null}
+        {help ? <HelpIcon topic={help} /> : null}
+      </div>
+      {description ? <p className="basis-full text-sm text-fg-muted sm:basis-auto">{description}</p> : null}
+      {actions ? <div className="ml-auto flex items-center gap-2">{actions}</div> : null}
+    </div>
+  );
+}
+
+/** Key figure: a small label over a large tabular number. */
+export function Stat({
+  label,
+  value,
+  hint,
+  icon: Icon,
+}: {
+  label: ReactNode;
+  value: ReactNode;
+  hint?: ReactNode;
+  icon?: IconType;
+}) {
+  return (
+    <div className="rounded-card border border-line bg-surface px-4 py-3">
+      <p className="flex items-center gap-1.5 text-xs font-medium text-fg-muted">
+        {Icon ? <Icon className="size-3.5 text-fg-faint" /> : null}
+        {label}
+      </p>
+      <p className="mt-1 text-[22px] font-bold leading-none tabular-nums tracking-tight">{value}</p>
+      {hint ? <p className="mt-1.5 text-xs text-fg-faint">{hint}</p> : null}
+    </div>
+  );
+}
+
+/** Text tabs with an ink underline; counts sit in `fg-faint`. */
+export function Tabs<V extends string>({
+  value,
+  onChange,
+  items,
+  className = "",
+}: {
+  value: V;
+  onChange: (v: V) => void;
+  items: { value: V; label: string; count?: number; icon?: IconType }[];
+  className?: string;
+}) {
+  return (
+    <div role="tablist" className={cx("flex gap-1 overflow-x-auto border-b border-line", className)}>
+      {items.map((it) => {
+        const Icon = it.icon;
+        const active = it.value === value;
+        return (
+          <button
+            key={it.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(it.value)}
+            className={cx(
+              "relative -mb-px inline-flex h-10 shrink-0 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
+              active ? "text-fg" : "text-fg-muted hover:text-fg",
+              active && "after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full after:bg-fg",
+            )}
+          >
+            {Icon ? <Icon className="size-4" /> : null}
+            {it.label}
+            {it.count != null ? (
+              <span className={cx("text-xs tabular-nums", active ? "text-fg-muted" : "text-fg-faint")}>
+                {it.count}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// --- Form controls ---
+
+export const inputClass =
+  "h-[34px] w-full rounded-field border border-line-strong bg-surface px-3 text-sm text-fg transition-colors placeholder:text-fg-faint hover:border-fg-faint focus:border-accent focus:outline-none focus:ring-[3px] focus:ring-accent/20 disabled:opacity-50 disabled:hover:border-line-strong";
+
+/** Label above a control; used by Field, Select and Textarea. */
+export function FieldLabel({
+  children,
+  help,
+  hint,
+}: {
+  children: ReactNode;
+  help?: string;
+  hint?: ReactNode;
+}) {
+  return (
+    <span className="flex items-center gap-1 text-[13px] font-medium text-fg">
+      {children}
+      {help ? <HelpIcon topic={help} /> : null}
+      {hint ? <span className="ml-auto font-normal text-fg-faint">{hint}</span> : null}
+    </span>
+  );
+}
+
+export function Field({
+  label,
+  help,
+  hint,
+  fullWidth,
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & {
+  label: string;
+  help?: string;
+  /** Right-aligned note on the label line. */
+  hint?: ReactNode;
+  /** Stretch label and input to the parent width (grid cells). */
+  fullWidth?: boolean;
+}) {
+  return (
+    <label className={cx("flex flex-col gap-1.5", fullWidth ? "w-full" : "w-fit")}>
+      <FieldLabel help={help} hint={hint}>
+        {label}
+      </FieldLabel>
+      <input {...props} className={cx(inputClass, !fullWidth && "w-52", className)} />
+    </label>
+  );
+}
+
+/** Native select with the field chrome and a chevron. */
+export function Select({
+  label,
+  help,
+  className = "",
+  children,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { label?: string; help?: string }) {
+  const control = (
+    <span className="relative block">
+      <select {...props} className={cx(inputClass, "appearance-none pr-8", className)}>
+        {children}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 size-4 -translate-y-1/2 text-fg-faint" />
+    </span>
+  );
+  if (!label) return control;
+  return (
+    <label className="flex flex-col gap-1.5">
+      <FieldLabel help={help}>{label}</FieldLabel>
+      {control}
+    </label>
+  );
+}
+
+export function Textarea({
+  label,
+  help,
+  className = "",
+  ...props
+}: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; help?: string }) {
+  const control = (
+    <textarea
+      {...props}
+      className={cx(inputClass, "h-auto min-h-24 py-2 leading-relaxed", className)}
+    />
+  );
+  if (!label) return control;
+  return (
+    <label className="flex flex-col gap-1.5">
+      <FieldLabel help={help}>{label}</FieldLabel>
+      {control}
+    </label>
+  );
+}
+
+/** Pill search box; keeps its own width so toolbars stay aligned. */
+export function SearchInput({
+  className = "w-56",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <label className={cx("relative block", className)}>
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-faint" />
+      <input
+        type="search"
+        {...props}
+        className={cx(inputClass, "rounded-full pl-9 pr-3")}
+      />
+    </label>
+  );
+}
+
+/** Checkbox with the accent tick, label on the right. */
+export function Checkbox({
+  label,
+  className = "",
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { label: ReactNode }) {
+  return (
+    <label className={cx("inline-flex cursor-pointer items-center gap-2.5 text-sm", props.disabled && "opacity-50", className)}>
+      <span className="relative inline-flex size-4 shrink-0">
+        <input type="checkbox" {...props} className="peer size-4 appearance-none rounded-[5px] border border-line-strong bg-surface transition-colors checked:border-accent checked:bg-accent" />
+        <Check className="pointer-events-none absolute inset-0 m-auto size-3 text-white opacity-0 peer-checked:opacity-100" strokeWidth={3} />
+      </span>
+      {label}
+    </label>
+  );
+}
+
+/** On/off switch (settings rows). Accent when on: it is a state, not an action. */
+export function Switch({
+  checked,
+  onChange,
+  disabled,
+  label,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "relative inline-flex h-6 w-10 shrink-0 items-center rounded-full transition-colors duration-150 disabled:opacity-50",
+        checked ? "bg-success" : "bg-line-strong",
+      )}
+    >
+      <span
+        className={cx(
+          "absolute left-0.5 size-5 rounded-full bg-white shadow-[0_1px_2px_rgb(0_0_0/0.2)] transition-transform duration-150 ease-out-emphasized",
+          checked ? "translate-x-4" : "translate-x-0",
+        )}
+      />
+    </button>
   );
 }
 
 /**
  * Segmented control for 2–3 mutually exclusive choices: the selected chip is
- * raised (surface + hairline border) — selection is structure, never color,
- * the accent stays reserved for primary actions. Native radios underneath
+ * raised (surface + hairline) — selection is structure, never color, the
+ * accent stays reserved for primary actions. Native radios underneath
  * (sr-only) keep it a keyboard-accessible radiogroup.
  */
 export function Segmented<T extends string>({
@@ -475,31 +1208,34 @@ export function Segmented<T extends string>({
   options,
   onChange,
   disabled,
+  size = "md",
 }: {
   /** Groups the native radios (one form can hold several groups). */
   name: string;
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: ReactNode }[];
   onChange: (value: T) => void;
   disabled?: boolean;
+  size?: "sm" | "md";
 }) {
   return (
     <div
       role="radiogroup"
-      className={`inline-flex shrink-0 gap-[3px] rounded-lg bg-zinc-100 p-[3px] dark:bg-zinc-800 ${
-        disabled ? "opacity-60" : ""
-      }`}
+      className={cx(
+        "inline-flex shrink-0 gap-0.5 rounded-full bg-surface-3 p-[3px]",
+        disabled && "opacity-60",
+      )}
     >
       {options.map((o) => (
         <label
           key={o.value}
-          className={`rounded-md border px-3 py-1 text-[13px] leading-5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/50 ${
+          className={cx(
+            "inline-flex items-center justify-center rounded-full px-3 font-medium transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent/50",
+            size === "sm" ? "h-6 text-xs" : "h-7 text-[13px]",
             value === o.value
-              ? "border-zinc-300 bg-white text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-              : `border-transparent text-zinc-500 dark:text-zinc-400 ${
-                  disabled ? "" : "cursor-pointer hover:text-zinc-800 dark:hover:text-zinc-200"
-                }`
-          }`}
+              ? "bg-surface text-fg ring-1 ring-line-strong/70"
+              : cx("text-fg-muted", !disabled && "cursor-pointer hover:text-fg"),
+          )}
         >
           <input
             type="radio"
@@ -512,6 +1248,38 @@ export function Segmented<T extends string>({
           {o.label}
         </label>
       ))}
+    </div>
+  );
+}
+
+/**
+ * Settings row: label + a description of the CURRENT choice on the left
+ * (one dynamic line, not one per option), the control on the right.
+ */
+export function SettingRow({
+  title,
+  desc,
+  help,
+  children,
+  className = "",
+}: {
+  title: ReactNode;
+  desc?: ReactNode;
+  help?: string;
+  children?: ReactNode;
+  className?: string;
+}) {
+  const id = useId();
+  return (
+    <div className={cx("flex items-center justify-between gap-6 py-3", className)}>
+      <div className="min-w-0">
+        <span id={id} className="flex items-center gap-1 text-sm font-medium text-fg">
+          {title}
+          {help ? <HelpIcon topic={help} /> : null}
+        </span>
+        {desc ? <p className="mt-0.5 text-[13px] text-fg-muted">{desc}</p> : null}
+      </div>
+      {children ? <div className="flex shrink-0 items-center gap-2">{children}</div> : null}
     </div>
   );
 }
@@ -585,14 +1353,9 @@ export function RangeCalendar({
     });
 
   const nav = (delta: number, label: string, className = "") => (
-    <button
-      type="button"
-      aria-label={label}
-      onClick={() => shift(delta)}
-      className={`rounded-md p-1 text-zinc-400 hover:bg-zinc-200/70 hover:text-zinc-700 dark:hover:bg-zinc-700/60 dark:hover:text-zinc-200 ${className}`}
-    >
-      {delta < 0 ? <ChevronLeft className="size-4" /> : <ChevronRight className="size-4" />}
-    </button>
+    <IconButton size="sm" label={label} onClick={() => shift(delta)} className={className}>
+      {delta < 0 ? <ChevronLeft /> : <ChevronRight />}
+    </IconButton>
   );
 
   return (
@@ -603,8 +1366,8 @@ export function RangeCalendar({
         return (
           <div key={k} className={k === 1 ? "hidden sm:block" : ""}>
             <div className="mb-1 flex items-center justify-between">
-              {k === 0 ? nav(-1, "Previous month") : <span className="size-6" />}
-              <span className="text-sm font-medium">
+              {k === 0 ? nav(-1, "Previous month") : <span className="size-7" />}
+              <span className="text-sm font-semibold">
                 {MONTH_NAMES[m]} {y}
               </span>
               {/* Right arrow lives on the last visible month (first on mobile). */}
@@ -612,7 +1375,7 @@ export function RangeCalendar({
             </div>
             <div className="grid grid-cols-7 text-center">
               {WEEKDAYS.map((d) => (
-                <span key={d} className="pb-1 text-xs font-medium text-zinc-400">
+                <span key={d} className="pb-1 text-xs font-medium text-fg-faint">
                   {d}
                 </span>
               ))}
@@ -626,23 +1389,26 @@ export function RangeCalendar({
                     onClick={() => pick(day)}
                     onMouseEnter={() => setHover(day)}
                     aria-pressed={day === start || day === end}
-                    className={`h-8 w-8 text-sm tabular-nums transition-colors ${
+                    className={cx(
+                      "h-8 w-8 text-[13px] tabular-nums transition-colors",
                       (mode === "range" && day === start) || day === end
-                        ? `bg-accent font-medium text-white ${
+                        ? cx(
+                            "bg-accent font-semibold text-white",
                             mode === "single" || !bandEnd || start === bandEnd
-                              ? "rounded-md"
+                              ? "rounded-full"
                               : day === start
-                                ? "rounded-l-md"
-                                : "rounded-r-md"
-                          }`
+                                ? "rounded-l-full"
+                                : "rounded-r-full",
+                          )
                         : bandEnd !== "" && day > start && day < bandEnd && mode === "range"
-                          ? "bg-accent/10 text-zinc-800 dark:text-zinc-200"
+                          ? "bg-accent-soft text-fg"
                           : day === bandEnd && picking
-                            ? "rounded-r-md bg-accent/70 text-white"
-                            : `rounded-md hover:bg-zinc-200/70 dark:hover:bg-zinc-700/60 ${
-                                day === today ? "font-semibold text-accent" : ""
-                              }`
-                    }`}
+                            ? "rounded-r-full bg-accent/70 text-white"
+                            : cx(
+                                "rounded-full hover:bg-surface-3",
+                                day === today && "font-bold text-accent",
+                              ),
+                    )}
                   >
                     {Number(day.slice(8, 10))}
                   </button>
@@ -653,31 +1419,5 @@ export function RangeCalendar({
         );
       })}
     </div>
-  );
-}
-
-export function Field({
-  label,
-  help,
-  fullWidth,
-  className = "",
-  ...props
-}: React.InputHTMLAttributes<HTMLInputElement> & {
-  label: string;
-  help?: string;
-  /** Stretch label and input to the parent width (grid cells). */
-  fullWidth?: boolean;
-}) {
-  return (
-    <label className={`flex flex-col gap-1 text-sm ${fullWidth ? "w-full" : ""}`}>
-      <span className="flex items-center gap-1 font-medium text-zinc-700 dark:text-zinc-300">
-        {label}
-        {help ? <HelpIcon topic={help} /> : null}
-      </span>
-      <input
-        {...props}
-        className={`rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm placeholder:text-zinc-400 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/20 dark:border-zinc-700 dark:bg-zinc-900 ${fullWidth ? "w-full" : ""} ${className}`}
-      />
-    </label>
   );
 }

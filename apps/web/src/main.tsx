@@ -3,27 +3,37 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
+import { ConfirmProvider } from "./confirm";
 import { HelpProvider } from "./help";
 import { I18nProvider } from "./i18n";
 import { ToastProvider } from "./notify";
-import { applyTheme, applyUiTheme, initialTheme, initialUiTheme } from "./theme";
+import { applyTheme, initialTheme } from "./theme";
 import "./style.css";
 
-applyTheme(initialTheme());
-applyUiTheme(initialUiTheme());
+async function boot() {
+  // Design work without a backend: `pnpm dev:mock` serves fake data from the
+  // browser. The flag is static, so production builds drop this branch.
+  if (import.meta.env.VITE_MOCK === "1") await import("./mock");
 
-const queryClient = new QueryClient();
+  applyTheme(initialTheme());
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider>
-        <ToastProvider>
-          <HelpProvider>
-            <App />
-          </HelpProvider>
-        </ToastProvider>
-      </I18nProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-);
+  const queryClient = new QueryClient();
+
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider>
+          <ToastProvider>
+            <ConfirmProvider>
+              <HelpProvider>
+                <App />
+              </HelpProvider>
+            </ConfirmProvider>
+          </ToastProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+void boot();

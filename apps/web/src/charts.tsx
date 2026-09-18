@@ -22,10 +22,10 @@ export interface GradeBand {
  */
 export function gradeBand(points: number, max: number): GradeBand {
   const n = gradeToSix(points, max);
-  if (n < 3.5) return { color: "#dc2626", label: "insufficient" };
-  if (n < 4) return { color: "#f59e0b", label: "borderline" };
-  if (n < 5) return { color: "#16a34a", label: "sufficient" };
-  return { color: "#15803d", label: "strong" };
+  if (n < 3.5) return { color: "var(--danger)", label: "insufficient" };
+  if (n < 4) return { color: "var(--warning)", label: "borderline" };
+  if (n < 5) return { color: "var(--success)", label: "sufficient" };
+  return { color: "var(--success)", label: "strong" };
 }
 
 /** Pass/fail donut for CI checks. */
@@ -41,23 +41,23 @@ export function TestDonut({
   const r = size / 2 - 4;
   const c = 2 * Math.PI * r;
   const frac = total > 0 ? passed / total : 0;
-  const failColor = "#e5e7eb";
+  const failColor = "var(--surface-3)";
   return (
     <span className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={failColor} strokeWidth="4" className="dark:opacity-30" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={failColor} strokeWidth="4" />
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
-          stroke={frac === 1 ? "#16a34a" : frac === 0 ? "#dc2626" : "#f59e0b"}
+          stroke={frac === 1 ? "var(--success)" : frac === 0 ? "var(--danger)" : "var(--warning)"}
           strokeWidth="4"
           strokeLinecap="round"
           strokeDasharray={`${c * frac} ${c}`}
         />
       </svg>
-      <span className="absolute text-[0.7rem] font-semibold tabular-nums">
+      <span className="absolute text-[10px] font-bold tabular-nums">
         {passed}/{total}
       </span>
     </span>
@@ -71,12 +71,12 @@ export function GradeScale({ points, max }: { points: number; max: number }) {
   return (
     <span className="inline-flex items-center gap-2">
       <span
-        className="rounded-full px-2 py-0.5 text-xs font-semibold text-white"
+        className="inline-flex h-[22px] items-center rounded-full px-2 text-xs font-bold tabular-nums text-white"
         style={{ backgroundColor: band.color }}
       >
         {points}/{max}
       </span>
-      <span className="text-xs text-zinc-400">≈ {six.toFixed(1)}/6</span>
+      <span className="text-xs tabular-nums text-fg-faint">≈ {six.toFixed(1)}/6</span>
     </span>
   );
 }

@@ -6,7 +6,7 @@ Un devoir distribue un **dépôt source** à chaque étudiant sous forme de **d�
 
 ## Cycle de vie
 
-**draft** → **published** → **locked**. Publiez (icône avion en papier) pour ouvrir l'acceptation. À l'échéance, les dépôts sont verrouillés ou reçoivent un commit-marqueur — automatiquement, avec une période de grâce pour les runs CI en cours.
+**draft** → **published** → **locked**. **Publish** (le bouton d'une ligne en brouillon) ouvre l'acceptation. À l'échéance, les dépôts sont verrouillés ou reçoivent un commit-marqueur — automatiquement, avec une période de grâce pour les runs CI en cours.
 
 ## Réouvrir ou replanifier
 
@@ -14,4 +14,4 @@ Un devoir distribue un **dépôt source** à chaque étudiant sous forme de **d�
 
 ## Voir les devoirs archivés
 
-Cliquez le bouton **boîte d'archive** dans l'en-tête de cette carte. Les devoirs archivés portent un badge *archived* ; l'icône de restauration en ramène un. Archiver cache le devoir aux étudiants mais conserve dépôts et notes.
+Cliquez le bouton **archives** à côté de **New assignment**. Les devoirs archivés portent un badge *archived* ; le bouton de restauration en ramène un. Archiver cache le devoir aux étudiants mais conserve dépôts et notes.

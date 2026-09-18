@@ -2,7 +2,7 @@
 
 ## What this table shows
 
-One row per enrolled student: acceptance, last commit, live CI checks and the grade. The table is sortable and the search field filters students.
+The figures at the top sum up acceptance, CI, the average grade and the deadline. Below, one row per enrolled student: acceptance, last commit, live CI checks and the grade. The table is sortable, the search field filters students, and clicking a row unfolds its commit activity.
 
 ## How grades work (two tiers)
 

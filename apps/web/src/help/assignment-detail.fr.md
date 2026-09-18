@@ -2,7 +2,7 @@
 
 ## Ce que montre cette table
 
-Une ligne par étudiant inscrit : acceptation, dernier commit, checks CI en direct et note. La table est triable et la recherche filtre les étudiants.
+Les chiffres en haut résument acceptation, CI, note moyenne et échéance. En dessous, une ligne par étudiant inscrit : acceptation, dernier commit, checks CI en direct et note. La table est triable, la recherche filtre les étudiants, et cliquer une ligne déplie son activité de commits.
 
 ## Comment fonctionnent les notes (deux temps)
 

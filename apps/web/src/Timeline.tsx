@@ -9,8 +9,7 @@ import {
 } from "lucide-react";
 
 import type { ClassroomSummary } from "@hgc/contracts";
-import { HelpIcon } from "./help";
-import { Card, EmptyState, IconButton, OrgAvatar } from "./ui";
+import { Card, EmptyState, IconButton, OrgAvatar, SectionHeading } from "./ui";
 
 /**
  * Assignment occupancy timeline: one row per classroom, and — when expanded —
@@ -233,12 +232,9 @@ export function TimelineView({
     });
 
   return (
-    <Card className="p-4">
-      <div className="mb-2 flex items-center justify-end gap-1 text-zinc-500">
-        <span className="mr-auto inline-flex items-center gap-1 text-xs text-zinc-400">
-          Wheel / drag to pan · ⌘/Ctrl + wheel to zoom
-          <HelpIcon topic="timeline" />
-        </span>
+    <Card className="p-5">
+      <div className="mb-3 flex items-center gap-1">
+        <SectionHeading title="Timeline" help="timeline" description="Wheel or drag to pan · ⌘/Ctrl + wheel to zoom" className="mr-auto" />
         <IconButton label="Zoom out" onClick={() => zoomBy(1.6)}><ZoomOut className="size-4" /></IconButton>
         <IconButton label="Zoom in" onClick={() => zoomBy(1 / 1.6)}><ZoomIn className="size-4" /></IconButton>
         <IconButton label="Focus on what's in progress" onClick={() => setView(computeDefault(rooms))}>
@@ -256,18 +252,18 @@ export function TimelineView({
               <div key={room.id}>
                 <button
                   onClick={() => toggleRoom(room.id)}
-                  className={`flex ${ROOM_H} w-full items-center gap-1 truncate pr-1 text-left text-sm font-medium hover:text-accent`}
+                  className={`flex ${ROOM_H} w-full items-center gap-1 truncate rounded-md pr-1 text-left text-sm font-semibold hover:text-accent`}
                 >
                   {isCollapsed ? (
-                    <ChevronRight className="size-3.5 shrink-0 text-zinc-400" />
+                    <ChevronRight className="size-3.5 shrink-0 text-fg-faint" />
                   ) : (
-                    <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
+                    <ChevronDown className="size-3.5 shrink-0 text-fg-faint" />
                   )}
                   <OrgAvatar login={room.orgLogin} className="size-4 shrink-0" />
                   <span className="truncate" title={room.name}>
                     {room.name}
                   </span>
-                  <span className="ml-auto shrink-0 text-xs font-normal text-zinc-400">
+                  <span className="ml-auto shrink-0 text-xs font-normal text-fg-faint">
                     {room.assignments.length}
                   </span>
                 </button>
@@ -275,7 +271,7 @@ export function TimelineView({
                   room.assignments.map((a) => (
                     <div
                       key={a.id}
-                      className={`flex ${LANE_H} items-center gap-1.5 truncate pl-5 pr-1 text-xs text-zinc-500 dark:text-zinc-400`}
+                      className={`flex ${LANE_H} items-center gap-1.5 truncate pl-5 pr-1 text-xs text-fg-muted`}
                       title={a.name}
                     >
                       <StateDot state={a.state} deadlineAt={a.deadlineAt} now={now} />
@@ -296,13 +292,13 @@ export function TimelineView({
           }`}
         >
           {/* Axis */}
-          <div className={`relative ${AXIS_H} text-[10px] uppercase tracking-wide text-zinc-400`}>
+          <div className={`relative ${AXIS_H} text-[10px] font-medium uppercase tracking-wider text-fg-faint`}>
             {ticks.map((tick) =>
               tick.label ? (
                 <span
                   key={tick.t}
                   className={`absolute top-1 -translate-x-1/2 whitespace-nowrap ${
-                    tick.major ? "font-semibold text-zinc-500 dark:text-zinc-300" : ""
+                    tick.major ? "font-bold text-fg-muted" : ""
                   }`}
                   style={{ left: `${pct(tick.t)}%` }}
                 >
@@ -318,15 +314,13 @@ export function TimelineView({
               <span
                 key={tick.t}
                 className={`absolute inset-y-0 w-px ${
-                  tick.major
-                    ? "bg-zinc-300/70 dark:bg-zinc-600/50"
-                    : "bg-zinc-200/60 dark:bg-zinc-700/40"
+                  tick.major ? "bg-line-strong" : "bg-line"
                 }`}
                 style={{ left: `${pct(tick.t)}%` }}
               />
             ))}
             {nowVisible ? (
-              <div className="absolute inset-y-0 w-px bg-red-500/70" style={{ left: `${pct(now)}%` }} />
+              <div className="absolute inset-y-0 w-px bg-accent" style={{ left: `${pct(now)}%` }} />
             ) : null}
           </div>
 
@@ -372,24 +366,24 @@ export function TimelineView({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-zinc-400">
+      <div className="mt-4 flex flex-wrap items-center gap-4 text-xs text-fg-faint">
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm bg-accent ring-2 ring-accent/30" /> in
+          <span className="inline-block h-2.5 w-4 rounded-full bg-accent ring-2 ring-accent/30" /> in
           progress
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm bg-accent" /> published
+          <span className="inline-block h-2.5 w-4 rounded-full bg-accent" /> published
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-zinc-400" />{" "}
+          <span className="inline-block h-2.5 w-4 rounded-full border border-dashed border-fg-faint" />{" "}
           draft
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-2.5 w-4 rounded-sm bg-zinc-300 dark:bg-zinc-700" /> past or
+          <span className="inline-block h-2.5 w-4 rounded-full bg-surface-3" /> past or
           locked
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-px bg-red-500/70" /> now
+          <span className="inline-block h-3 w-px bg-accent" /> now
         </span>
       </div>
     </Card>
@@ -416,9 +410,9 @@ function StateDot({
   const past = new Date(deadlineAt).getTime() < now;
   const cls =
     state === "draft"
-      ? "border border-dashed border-zinc-400"
+      ? "border border-dashed border-fg-faint"
       : state === "locked" || past
-        ? "bg-zinc-300 dark:bg-zinc-600"
+        ? "bg-line-strong"
         : "bg-accent";
   return <span className={`inline-block size-2 shrink-0 rounded-full ${cls}`} />;
 }
@@ -455,11 +449,11 @@ function AssignmentBar({
     <button
       onClick={onClick}
       title={`${a.name} — ${a.startAt.slice(0, 10)} → ${a.deadlineAt.slice(0, 10)} (${a.state})`}
-      className={`absolute ${compact ? "top-1 h-6 leading-6" : "top-1.5 h-6 leading-6"} truncate rounded-md px-2 text-left text-xs font-medium ${dragging ? "" : "transition-all hover:-translate-y-px hover:shadow-md"} ${
+      className={`absolute ${compact ? "top-1 h-6 leading-6" : "top-1.5 h-6 leading-6"} truncate rounded-full px-2.5 text-left text-xs font-medium ${dragging ? "" : "transition-[filter] hover:brightness-95"} ${
         a.state === "draft"
-          ? "border border-dashed border-zinc-400 bg-white/60 text-zinc-500 dark:border-zinc-500 dark:bg-zinc-900/40 dark:text-zinc-400"
+          ? "border border-dashed border-fg-faint bg-surface text-fg-muted"
           : a.state === "locked" || past
-            ? "bg-zinc-300 text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300"
+            ? "bg-surface-3 text-fg-muted"
             : ongoing
               ? "bg-accent text-white ring-2 ring-accent/30"
               : "bg-accent text-white"

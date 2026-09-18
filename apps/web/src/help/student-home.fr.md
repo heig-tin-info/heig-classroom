@@ -2,7 +2,7 @@
 
 ## Ce que montre cette page
 
-Une carte par classe à laquelle vous appartenez, avec ses devoirs en table triable : échéance et compte à rebours, statut, tests et note. La recherche filtre tout ; les boutons basculent entre cartes et liste à plat.
+**À venir** montre l'échéance la plus proche. En dessous, une section par classe à laquelle vous appartenez, avec ses devoirs : échéance et compte à rebours, statut, tests et note. La recherche filtre tout ; le sélecteur bascule entre sections et liste à plat triable.
 
 ## Accepter un devoir
 
@@ -14,4 +14,4 @@ Tant que le devoir est ouvert, chaque push lance les tests et affiche une note *
 
 ## Enseignants
 
-Le bouton chapeau de diplômé dans l'en-tête ramène à la vue enseignant.
+**Revenir à la vue enseignant** dans le bandeau en haut (ou dans le menu du compte) quitte la vue étudiant.
