@@ -68,6 +68,19 @@ describe("ClassroomView tabs", () => {
     expect(stub.calls.some((c) => c.url === `${DETAIL}/assignments`)).toBe(false);
   });
 
+  it("ignores a ?tab= value that names no tab", async () => {
+    mockFetch(baseRoutes());
+    renderWithProviders(<ClassroomView id="c1" navigate={vi.fn()} />, {
+      route: "/classrooms/c1?tab=../../etc/passwd",
+    });
+    // An unknown value used to select nothing at all and leave an empty panel
+    // under a strip with no tab in the Tab order.
+    const assignments = await screen.findByRole("tab", { name: /Assignments/ });
+    expect(assignments).toHaveAttribute("aria-selected", "true");
+    expect(assignments).toHaveAttribute("tabindex", "0");
+    expect(document.getElementById("classroom-panel-assignments")).not.toBeNull();
+  });
+
   it("drops the parameter again on the way back to the default tab", async () => {
     renderClassroom();
     await screen.findByRole("tab", { name: /Students/ });
@@ -126,6 +139,34 @@ describe("ClassroomView settings tab", () => {
     expect(screen.getByRole("button", { name: "Rename" })).toBeDisabled();
     await userEvent.type(field, " bis");
     expect(screen.getByRole("button", { name: "Rename" })).toBeEnabled();
+  });
+
+  it("says the name was saved only right after a save, and forgets it on the next keystroke", async () => {
+    let name = "PRG1 2026";
+    mockFetch({
+      ...baseRoutes(),
+      [`GET ${DETAIL}`]: () => ok(makeClassroomDetail({ name })),
+      [`PATCH ${DETAIL}`]: (call) => {
+        name = (call.body as { name: string }).name;
+        return noContent();
+      },
+    });
+    renderWithProviders(<ClassroomView id="c1" navigate={vi.fn()} />, {
+      route: "/classrooms/c1?tab=settings",
+    });
+    const field = await screen.findByLabelText("Classroom name");
+    // Arriving on the tab is not "just saved".
+    expect(screen.queryByText("Name saved.")).toBeNull();
+
+    await userEvent.type(field, " bis");
+    await userEvent.click(screen.getByRole("button", { name: "Rename" }));
+    expect(await screen.findByText("Name saved.")).toBeVisible();
+    // The refetch brings the new name back; the field follows it instead of
+    // holding a value nobody can see any more.
+    await waitFor(() => expect(field).toHaveValue("PRG1 2026 bis"));
+
+    await userEvent.type(field, "!");
+    expect(screen.queryByText("Name saved.")).toBeNull();
   });
 });
 
@@ -203,6 +244,50 @@ describe("ClassroomView states", () => {
     expect(
       await screen.findByText("heig-prg1-2026 is on the GitHub Free plan"),
     ).toBeVisible();
+  });
+
+  it("reports the grade sheet through toasts, since the menu is gone by then", async () => {
+    mockFetch({ ...baseRoutes(), [`GET ${DETAIL}/grades`]: fail(500, { message: "grades are down" }) });
+    renderWithProviders(<ClassroomView id="c1" navigate={vi.fn()} />, {
+      route: "/classrooms/c1",
+    });
+    await screen.findByRole("heading", { name: "PRG1 2026", level: 1 });
+    await userEvent.click(screen.getByRole("button", { name: "Classroom actions" }));
+    const item = within(screen.getByRole("menu")).getByRole("menuitem", { name: /Grade sheet/ });
+    // A2/A6: the item carries what it produces, which the label alone lost.
+    expect(
+      within(item).getByText(/Download the grades of the whole classroom/),
+    ).toBeVisible();
+    await userEvent.click(item);
+    // The menu closed on the click, so `disabled` could never have shown this.
+    expect(await screen.findByText("Preparing the grade sheet…")).toBeVisible();
+    expect(await screen.findByText("grades are down")).toBeVisible();
+  });
+
+  it("keeps the recovery sentence on the organization-not-found alert", async () => {
+    mockFetch({
+      ...baseRoutes(),
+      [`GET ${DETAIL}`]: ok(
+        makeClassroomDetail({
+          org: {
+            login: "heig-prg1-2026",
+            installationId: null,
+            githubOrgId: 99,
+            plan: null,
+            status: "active",
+            exists: false,
+            llmSecret: null,
+          },
+        }),
+      ),
+    });
+    renderWithProviders(<ClassroomView id="c1" navigate={vi.fn()} />, {
+      route: "/classrooms/c1",
+    });
+    expect(await screen.findByText("Organization not found")).toBeVisible();
+    // A rename with the App uninstalled is the common case, and the only way
+    // out of it was the sentence the redesign dropped.
+    expect(screen.getByText(/only renamed while the App was uninstalled/)).toBeVisible();
   });
 
   it("removes a staff member only after the question, through the right endpoint", async () => {

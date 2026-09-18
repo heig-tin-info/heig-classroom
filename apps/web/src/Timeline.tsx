@@ -98,7 +98,11 @@ function buildTicks(from: number, to: number): Tick[] {
       const t = d.getTime();
       if (t >= from) {
         const firstOfMonth = d.getDate() === 1;
-        const label = dense || d.getDay() === 1 || firstOfMonth;
+        // A Monday label right next to a "1 Sep" label overlaps it: the
+        // month boundary wins over the week boundary on the days around it.
+        const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+        const mondayClear = d.getDay() === 1 && d.getDate() >= 3 && d.getDate() <= lastDay - 1;
+        const label = dense || mondayClear || firstOfMonth;
         const text = dense && !firstOfMonth ? String(d.getDate()) : `${d.getDate()} ${shortMon(d)}`;
         ticks.push({ t, label, text, major: firstOfMonth });
       }
@@ -330,8 +334,10 @@ export function TimelineView({
                 style={{ left: `${pct(tick.t)}%` }}
               />
             ))}
+            {/* Ink, not red: the bars are already accent, and a red hairline
+                among red bars reads as one more bar, not as "you are here". */}
             {nowVisible ? (
-              <div className="absolute inset-y-0 w-px bg-accent" style={{ left: `${pct(now)}%` }} />
+              <div className="absolute inset-y-0 w-px bg-fg" style={{ left: `${pct(now)}%` }} />
             ) : null}
           </div>
 
@@ -400,7 +406,7 @@ export function TimelineView({
           locked
         </span>
         <span className="inline-flex items-center gap-1.5">
-          <span className="inline-block h-3 w-px bg-accent" /> now
+          <span className="inline-block h-3 w-px bg-fg" /> now
         </span>
       </div>
     </Card>

@@ -6,6 +6,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   GraduationCap,
+  Loader2,
   Lock,
   ShieldAlert,
   UserPlus,
@@ -75,18 +76,25 @@ const ICONS: Record<NoticeKind, typeof UserPlus> = {
   sync: GitPullRequest,
 };
 
-export type ToastTone = "success" | "error" | "warning";
+/**
+ * `progress` is the "this has started" tone: an action taken from an overflow
+ * menu has nowhere else to say so, because the menu closes as it is picked.
+ * It is neutral on purpose — nothing has gone right or wrong yet.
+ */
+export type ToastTone = "success" | "error" | "warning" | "progress";
 
 const TONE_ICONS: Record<ToastTone, typeof CheckCircle2> = {
   success: CheckCircle2,
   error: AlertTriangle,
   warning: AlertTriangle,
+  progress: Loader2,
 };
 
 const TONE_COLORS: Record<ToastTone, string> = {
   success: "text-success",
   error: "text-danger",
   warning: "text-warning",
+  progress: "animate-spin text-fg-faint",
 };
 
 interface Toast {

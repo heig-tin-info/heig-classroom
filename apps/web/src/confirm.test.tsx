@@ -118,4 +118,23 @@ describe("useConfirm", () => {
     expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(screen.getByRole("dialog")).toHaveAccessibleName("Second question?");
   });
+
+  it("answers the question it replaces with false instead of dropping it", async () => {
+    renderWithProviders(
+      <>
+        <ConfirmHarness options={archive} label="First" />
+        <ConfirmHarness options={{ title: "Second question?" }} label="Second" />
+      </>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "First" }));
+    await userEvent.click(screen.getByRole("button", { name: "Second" }));
+    // The first dialog left the screen, so its caller has its answer: no.
+    // Leaving that promise pending forever stalls whatever awaited it.
+    await waitFor(() => expect(screen.getByTestId("answer-First").textContent).toBe("false"));
+    expect(screen.getByTestId("answer-Second").textContent).toBe("pending");
+
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(screen.getByTestId("answer-Second").textContent).toBe("true"));
+  });
 });

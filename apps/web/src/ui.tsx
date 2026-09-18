@@ -46,12 +46,17 @@ export const cx = (...parts: (string | false | null | undefined)[]) =>
 export type IconType = ComponentType<{ className?: string }>;
 
 /**
- * Stacking scale (SSOT): popovers < sheet = dialog = toasts < busy overlay <
+ * Stacking scale (SSOT): sheet = dialog = toasts < popovers < busy overlay <
  * help drawer < tooltips. Literal Tailwind tokens live here so the JIT
  * scanner picks them up; compose with template strings.
+ *
+ * A popover sits ABOVE the dialog layer, not below it: menus are opened from
+ * inside sheets, dialogs and the mobile drawer (the account menu), and a
+ * panel portalled to <body> under those layers is simply invisible. It stays
+ * below `overlay`, which greys out everything on purpose.
  */
 export const Z = {
-  popover: "z-30",
+  popover: "z-55",
   modal: "z-50",
   toast: "z-50",
   /** Above the dialog: CreatingOverlay greys the whole dialog out. */
@@ -61,6 +66,31 @@ export const Z = {
   help: "z-80",
   tooltip: "z-90",
 } as const;
+
+/**
+ * Keyboard contract for an element made clickable without being a <button>
+ * (a card, a table row): Enter and Space activate it, and Space does not
+ * scroll the page underneath. Spread it next to the element's own `onClick`.
+ *
+ * `role` is a parameter because a clickable <tr> must stay a row: announcing
+ * it as a button would cost the reader the table structure around it. Cards
+ * take the default.
+ *
+ * A key press that started on a nested control (a link, a menu trigger) is
+ * that control's business, so only the element itself answers.
+ */
+export function pressable(onActivate: () => void, role: string = "button") {
+  return {
+    role,
+    tabIndex: 0,
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      if (e.target !== e.currentTarget) return;
+      e.preventDefault();
+      onActivate();
+    },
+  };
+}
 
 /** Ticking clock for countdowns; re-renders every `intervalMs`. */
 export function useNow(intervalMs = 30_000): number {
@@ -623,6 +653,10 @@ export function Modal({
   const width = { sm: "max-w-105", md: "max-w-130", lg: "max-w-190" }[size];
   return createPortal(
     <div
+      // The portal escapes the DOM but not the React tree: without this, a
+      // click inside the dialog bubbles up to the <tr onClick> that rendered
+      // it and toggles the row behind the user's back.
+      onClick={(e) => e.stopPropagation()}
       className={`layer-backdrop fixed inset-0 ${Z.modal} flex items-start justify-center overflow-y-auto bg-fg/30 p-4 backdrop-blur-[2px] sm:items-center`}
     >
       <div
@@ -685,7 +719,12 @@ export function Sheet({
   const titleId = useId();
   useLayer(panel, onClose);
   return createPortal(
-    <div className={`layer-backdrop fixed inset-0 ${Z.modal} flex justify-end bg-fg/30 backdrop-blur-[2px]`}>
+    <div
+      // Same as Modal: a click in the panel must not reach the row, card or
+      // cell whose onClick opened the sheet.
+      onClick={(e) => e.stopPropagation()}
+      className={`layer-backdrop fixed inset-0 ${Z.modal} flex justify-end bg-fg/30 backdrop-blur-[2px]`}
+    >
       <div
         ref={panel}
         role="dialog"
@@ -722,11 +761,19 @@ export function Sheet({
 
 export interface MenuItem {
   label: string;
+  /** Second, muted line under the label: what the item produces, in one go. */
+  description?: string;
   icon?: IconType;
   onSelect?: () => void;
   /** Plain link item (external URLs, downloads). */
   href?: string;
   danger?: boolean;
+  /**
+   * Greys the item out and takes it out of the arrow order. It reflects the
+   * state WHEN THE MENU WAS OPENED, not a busy state: selecting an item
+   * closes the menu, so a `disabled` bound to a mutation's `isPending` can
+   * never be seen. Report progress with a toast instead.
+   */
   disabled?: boolean;
   /** Draws a hairline above this item. */
   separator?: boolean;
@@ -850,6 +897,44 @@ export function Menu({
     if (open && active >= 0) itemRefs.current[active]?.focus();
   }, [open, active]);
 
+  /*
+   * `menuPosition` anchors the panel on the trigger and knows nothing of the
+   * panel's own width, so a right-aligned trigger near the left edge (the
+   * overflow button of a page header on a phone) put half the panel off
+   * screen. Measure once it is laid out and nudge it back inside. A layout
+   * effect: doing it after paint would show the panel in the wrong place for
+   * one frame.
+   */
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !el) return;
+    const margin = 8;
+    const clamp = () => {
+      if (!pos) return;
+      el.style.marginLeft = "";
+      // Computed from `pos` and the panel's width, never from its rectangle:
+      // the opening animation owns `transform` for 160 ms and drops the
+      // `translateX(-100%)` of a right-aligned panel while it plays, so a
+      // measured rectangle is wrong exactly when this effect runs.
+      const width = el.offsetWidth;
+      const left = align === "end" ? pos.left - width : pos.left;
+      const shift =
+        left < margin
+          ? margin - left
+          : left + width > window.innerWidth - margin
+            ? window.innerWidth - margin - (left + width)
+            : 0;
+      if (shift) el.style.marginLeft = `${shift}px`;
+    };
+    clamp();
+    // The panel's width can land after the first measurement (a font, an icon
+    // or, in dev, a class the stylesheet has not generated yet), and a stale
+    // measurement is worse than none: re-clamp whenever it changes.
+    const observer = new ResizeObserver(clamp);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [open, pos, align]);
+
   const openAt = (index: number) => {
     if (!anchor.current) return;
     const r = anchor.current.getBoundingClientRect();
@@ -931,14 +1016,28 @@ export function Menu({
               aria-label={label}
               tabIndex={-1}
               onKeyDown={onPanelKeyDown}
-              className={`menu-panel fixed ${Z.popover} min-w-44 rounded-menu border border-line bg-surface p-1 shadow-popover focus:outline-none`}
-              style={{
-                top: pos.top,
-                bottom: pos.bottom,
-                left: pos.left,
-                transform: align === "end" ? "translateX(-100%)" : undefined,
-                transformOrigin: `${pos.up ? "bottom" : "top"} ${align === "end" ? "right" : "left"}`,
-              }}
+              className={cx(
+                "menu-panel fixed min-w-44 rounded-menu border border-line bg-surface p-1 shadow-popover focus:outline-none",
+                Z.popover,
+                // A fixed width, not a max: the panel is `position: fixed` with
+                // only `left` set, so shrink-to-fit gives it whatever is left
+                // of the viewport — about nothing for a trigger on the right
+                // edge, which squeezed a description into one word per line.
+                items.some((it) => it.description) && "w-80 max-w-[calc(100vw-2rem)]",
+              )}
+              style={
+                {
+                  top: pos.top,
+                  bottom: pos.bottom,
+                  left: pos.left,
+                  // Not `transform`: `.menu-panel` animates that property on
+                  // open, and an animation owns it entirely while it plays.
+                  // The alignment offset travels as a custom property the
+                  // keyframes compose in (style.css).
+                  "--menu-x": align === "end" ? "-100%" : "0",
+                  transformOrigin: `${pos.up ? "bottom" : "top"} ${align === "end" ? "right" : "left"}`,
+                } as React.CSSProperties
+              }
               onClick={(e) => e.stopPropagation()}
             >
               {items.map((it, i) => {
@@ -954,9 +1053,24 @@ export function Menu({
                 const body = (
                   <>
                     {Icon ? (
-                      <Icon className={cx("size-4", it.danger ? "" : "text-fg-faint")} />
+                      <Icon
+                        className={cx(
+                          "size-4 shrink-0",
+                          it.danger ? "" : "text-fg-faint",
+                          // Two-line item: the icon aligns with the label, not
+                          // with the middle of the block.
+                          it.description && "mt-0.5 self-start",
+                        )}
+                      />
                     ) : null}
-                    {it.label}
+                    <span className="min-w-0">
+                      {it.label}
+                      {it.description ? (
+                        <span className="mt-0.5 block text-xs font-normal text-fg-muted">
+                          {it.description}
+                        </span>
+                      ) : null}
+                    </span>
                   </>
                 );
                 return (
@@ -1361,6 +1475,16 @@ export function Tabs<V extends string>({
   const refs = useRef<Partial<Record<V, HTMLButtonElement | null>>>({});
   const strip = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: false });
+  const selected = items.findIndex((it) => it.value === value);
+  /**
+   * Which tab holds the roving tabindex. A `value` matching no item (a hand
+   * edited `?tab=` in the URL) used to leave every tab at `tabIndex={-1}`,
+   * which took the whole strip out of the Tab order; the first tab stands in.
+   */
+  const roving = selected >= 0 ? selected : 0;
+  // The fade is measured from the rendered strip, so it has to be recomputed
+  // whenever the labels or the counts change, not only their number.
+  const shape = items.map((it) => `${it.value}\u0000${it.label}\u0000${it.count ?? ""}`).join("|");
   // Layout effect: measuring after paint would show one unfaded frame.
   useLayoutEffect(() => {
     const el = strip.current;
@@ -1379,7 +1503,7 @@ export function Tabs<V extends string>({
       el.removeEventListener("scroll", update);
       observer.disconnect();
     };
-  }, [items.length]);
+  }, [shape]);
   // A mask, not an overlay: it fades whatever the strip holds without laying a
   // canvas-coloured rectangle over it, which would be wrong in dark mode.
   const mask =
@@ -1390,7 +1514,7 @@ export function Tabs<V extends string>({
     const keys = ["ArrowRight", "ArrowLeft", "Home", "End"];
     if (!keys.includes(e.key) || items.length === 0) return;
     e.preventDefault();
-    const i = items.findIndex((it) => it.value === value);
+    const i = roving;
     const next =
       e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : items.length - 1;
     const target = items[(next + items.length) % items.length];
@@ -1410,7 +1534,7 @@ export function Tabs<V extends string>({
         className="flex snap-x snap-proximity gap-1 overflow-x-auto"
         style={mask ? { maskImage: mask, WebkitMaskImage: mask } : undefined}
       >
-        {items.map((it) => {
+        {items.map((it, i) => {
           const Icon = it.icon;
           const active = it.value === value;
           return (
@@ -1424,7 +1548,7 @@ export function Tabs<V extends string>({
               id={idPrefix ? `${idPrefix}-tab-${it.value}` : undefined}
               aria-controls={idPrefix ? `${idPrefix}-panel-${it.value}` : undefined}
               aria-selected={active}
-              tabIndex={active ? 0 : -1}
+              tabIndex={i === roving ? 0 : -1}
               onClick={() => onChange(it.value)}
               className={cx(
                 "relative -mb-px inline-flex h-10 shrink-0 snap-start items-center gap-1.5 px-3 text-sm font-medium transition-colors",
@@ -1466,22 +1590,32 @@ export const inputSize: Record<InputSize, string> = {
   md: "h-8.5",
 };
 
-/** Label above a control; used by Field, Select and Textarea. */
+/**
+ * Label above a control; used by Field, Select and Textarea.
+ *
+ * The <label> covers the text only. A <label> wrapping the help "?" button
+ * makes that BUTTON its labelled control, which leaves the real input with no
+ * accessible name and turns a click on the label into a click on help; so the
+ * row is a div and the label points at the control through `htmlFor`.
+ */
 export function FieldLabel({
   children,
+  htmlFor,
   help,
   hint,
 }: {
   children: ReactNode;
+  /** Id of the control this labels; omit for a label with no control. */
+  htmlFor?: string;
   help?: string;
   hint?: ReactNode;
 }) {
   return (
-    <span className="flex items-center gap-1 text-[13px] font-medium text-fg">
-      {children}
+    <div className="flex items-center gap-1 text-[13px] font-medium text-fg">
+      <label htmlFor={htmlFor}>{children}</label>
       {help ? <HelpIcon topic={help} /> : null}
       {hint ? <span className="ml-auto font-normal text-fg-faint">{hint}</span> : null}
-    </span>
+    </div>
   );
 }
 
@@ -1510,13 +1644,15 @@ export function Field({
    */
   width?: string;
 }) {
+  const auto = useId();
+  const id = props.id ?? auto;
   return (
-    <label className={cx("flex flex-col gap-1.5", fullWidth ? "w-full" : width)}>
-      <FieldLabel help={help} hint={hint}>
+    <div className={cx("flex flex-col gap-1.5", fullWidth ? "w-full" : width)}>
+      <FieldLabel htmlFor={id} help={help} hint={hint}>
         {label}
       </FieldLabel>
-      <input {...props} className={cx(inputClass, inputSize[size], "w-full", className)} />
-    </label>
+      <input {...props} id={id} className={cx(inputClass, inputSize[size], "w-full", className)} />
+    </div>
   );
 }
 
@@ -1537,10 +1673,13 @@ export function Select({
   /** Width utility on the wrapper; without it the select sizes to its parent. */
   width?: string;
 }) {
+  const auto = useId();
+  const id = props.id ?? auto;
   const control = (
     <span className={cx("relative block", width)}>
       <select
         {...props}
+        id={id}
         className={cx(inputClass, inputSize[size], "w-full appearance-none pr-8", className)}
       >
         {children}
@@ -1551,10 +1690,12 @@ export function Select({
   if (!label) return control;
   // The width sits on the control; the label column takes it from there.
   return (
-    <label className="flex flex-col gap-1.5">
-      <FieldLabel help={help}>{label}</FieldLabel>
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel htmlFor={id} help={help}>
+        {label}
+      </FieldLabel>
       {control}
-    </label>
+    </div>
   );
 }
 
@@ -1566,18 +1707,23 @@ export function Textarea({
 }: React.TextareaHTMLAttributes<HTMLTextAreaElement> & { label?: string; help?: string }) {
   // No `size` prop here on purpose: a textarea's height is its content, not
   // one of the two control heights.
+  const auto = useId();
+  const id = props.id ?? auto;
   const control = (
     <textarea
       {...props}
+      id={id}
       className={cx(inputClass, "min-h-24 w-full py-2 leading-relaxed", className)}
     />
   );
   if (!label) return control;
   return (
-    <label className="flex flex-col gap-1.5">
-      <FieldLabel help={help}>{label}</FieldLabel>
+    <div className="flex flex-col gap-1.5">
+      <FieldLabel htmlFor={id} help={help}>
+        {label}
+      </FieldLabel>
       {control}
-    </label>
+    </div>
   );
 }
 

@@ -217,14 +217,21 @@ html.dark {
     opacity: 1;
   }
 }
+/*
+ * `--menu-x` carries the alignment offset the Menu sets inline (0 for a
+ * left-aligned panel, -100% for a right-aligned one). It has to be composed
+ * into the keyframes: an animation on `transform` owns the whole property
+ * while it plays, so a keyframe that forgot the offset moved every
+ * right-aligned menu one panel-width sideways for the length of the opening.
+ */
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: translateY(-4px) scale(0.98);
+    transform: translateX(var(--menu-x, 0)) translateY(-4px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateX(var(--menu-x, 0)) translateY(0) scale(1);
   }
 }
 .layer-backdrop {
@@ -239,6 +246,7 @@ html.dark {
 }
 .menu-panel {
   transform-origin: top right;
+  transform: translateX(var(--menu-x, 0));
   animation: menu-in 0.16s var(--ease-out-emphasized);
 }
 

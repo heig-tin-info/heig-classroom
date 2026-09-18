@@ -9,14 +9,14 @@ import {
   Settings as SettingsIcon,
   Sun,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 import type { Me } from "@hgc/contracts";
 
 import { api } from "./api";
 import { useT } from "./i18n";
 import { useToast } from "./notify";
-import { applyTheme, initialTheme, resolveTheme } from "./theme";
+import { setThemeChoice, useResolvedTheme } from "./theme";
 import { Avatar, cx, GithubIcon, Menu, type MenuItem } from "./ui";
 
 export function Logo({ className = "size-5" }: { className?: string }) {
@@ -65,7 +65,9 @@ export function UserMenu({
 }) {
   const t = useT();
   const qc = useQueryClient();
-  const [theme, setTheme] = useState(() => resolveTheme(initialTheme()));
+  // Shared store, so the Settings segmented control and this toggle can
+  // never disagree about what is on screen.
+  const theme = useResolvedTheme();
   const logout = useMutation({
     mutationFn: () => api("/app/auth/logout", { method: "POST" }),
     onSuccess: () => qc.setQueryData(["me"], null),
@@ -84,11 +86,9 @@ export function UserMenu({
     {
       label: theme === "dark" ? t("menu.lightTheme") : t("menu.darkTheme"),
       icon: theme === "dark" ? Sun : Moon,
-      onSelect: () => {
-        const next = theme === "dark" ? "light" : "dark";
-        applyTheme(next);
-        setTheme(next);
-      },
+      // Flips what is on screen and stores that as an explicit choice: a
+      // toggle with two labels cannot express "system".
+      onSelect: () => setThemeChoice(theme === "dark" ? "light" : "dark"),
     },
     { label: t("header.docs"), icon: BookOpen, href: "https://heig-tin-info.github.io/heig-classroom/", separator: true },
     { label: t("header.sources"), icon: GithubIcon, href: "https://github.com/heig-tin-info/heig-classroom" },

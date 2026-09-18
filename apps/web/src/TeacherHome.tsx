@@ -36,6 +36,7 @@ import {
   Modal,
   OrgAvatar,
   PageHeader,
+  pressable,
   QueryError,
   SearchInput,
   Segmented,
@@ -99,15 +100,7 @@ function ClassroomCard({ room, onOpen }: { room: ClassroomSummary; onOpen: () =>
   const next = nextDeadline(room, now);
   const ratio = room.students ? room.claimed / room.students : 0;
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") onOpen();
-      }}
-      className="group/card text-left"
-    >
+    <div {...pressable(onOpen)} onClick={onOpen} className="group/card text-left">
       <Card interactive className="flex h-full flex-col p-5">
         <div className="flex items-start gap-3">
           <OrgAvatar login={room.orgLogin} className="size-9 rounded-[10px]" />
@@ -215,6 +208,7 @@ function ClassroomsList({
               <tr
                 key={r.id}
                 onClick={() => onOpen(r.id)}
+                {...pressable(() => onOpen(r.id), "row")}
                 className={cx(T.row, T.rowHover, "cursor-pointer")}
               >
                 <td className={`${T.td} font-semibold`}>

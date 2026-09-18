@@ -60,11 +60,22 @@ export function useRoute(): [Route, (r: Route) => void] {
 /**
  * One query-string parameter as state (tabs inside a page). Reading survives
  * a reload; writing replaces the entry so Back still leaves the page.
+ *
+ * It still listens to `popstate`: Back and Forward move between pages that
+ * carry a `?tab=` of their own, and without this the value stayed on whatever
+ * the previous page had selected.
  */
 export function useSearchParam(name: string, fallback: string): [string, (v: string) => void] {
-  const [value, setValue] = useState(
+  const read = useCallback(
     () => new URLSearchParams(window.location.search).get(name) ?? fallback,
+    [name, fallback],
   );
+  const [value, setValue] = useState(read);
+  useEffect(() => {
+    const onPop = () => setValue(read());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [read]);
   const set = useCallback(
     (v: string) => {
       const params = new URLSearchParams(window.location.search);

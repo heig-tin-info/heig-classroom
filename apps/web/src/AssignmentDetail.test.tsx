@@ -1,10 +1,11 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { AssignmentDetail } from "./AssignmentDetail";
 import {
   at,
+  DAY,
   makeAssignmentDetail,
   makeClassroomDetail,
   makeDetailRepo,
@@ -12,6 +13,7 @@ import {
   makeGrade,
 } from "./test/fixtures";
 import { fail, mockFetch, noContent, ok, renderWithProviders } from "./test/render";
+import { isoDateTime } from "./ui";
 
 /*
  * The assignment page: the figures at the top must be the payload's own, the
@@ -95,6 +97,35 @@ describe("AssignmentDetail stats", () => {
     expect(screen.getByText("4.0")).toBeVisible();
     expect(screen.getByText("2 claimed their seat")).toBeVisible();
     expect(screen.getByText(/2 graded/)).toBeVisible();
+  });
+
+  it("carries the LLM review as a toned chip that explains the grace period", async () => {
+    renderDetail({
+      [`GET ${ASSIGNMENT}/detail`]: ok(makeAssignmentDetail({ graceMinutes: 30 }, students)),
+    });
+    await screen.findByText("Accepted");
+    // A badge, not a bare sentence: the chip carries the tone the redesign
+    // dropped (neutral here, because the deadline is not enforced yet).
+    const chip = document.querySelector(".rounded-full.bg-surface-3");
+    expect(chip).not.toBeNull();
+    expect(chip).toHaveTextContent("LLM review at the deadline");
+    await userEvent.hover(chip as HTMLElement);
+    // And the hint says what happens at the deadline, which the Stat lost.
+    expect(await screen.findByText("30 min grace, then the full review")).toBeInTheDocument();
+  });
+
+  it("answers \"when?\" under the deadline countdown instead of repeating it", async () => {
+    const deadlineAt = at(-2 * DAY);
+    renderDetail({
+      [`GET ${ASSIGNMENT}/detail`]: ok(
+        makeAssignmentDetail({ state: "locked", deadlineAt }, students),
+      ),
+    });
+    expect(await screen.findByText("Deadline passed")).toBeVisible();
+    // The value is the elapsed duration; the hint has to be the date, not the
+    // very same duration a second time.
+    expect(screen.getByText(isoDateTime(deadlineAt))).toBeVisible();
+    expect(screen.queryAllByText(/ ago$/)).toHaveLength(0);
   });
 
   it("hides every grade figure when the assignment is not graded", async () => {
@@ -201,6 +232,40 @@ describe("AssignmentDetail row actions", () => {
     const row = await rowOf("Noah Bovet");
     expect(row.queryByRole("button", { name: /Lock repository/ })).toBeNull();
     expect(row.queryByRole("button", { name: /Grade now/ })).toBeNull();
+  });
+
+  it("reports a failed lock through a toast and leaves the padlock on its state", async () => {
+    renderDetail({
+      [`POST ${ASSIGNMENT}/repos/r-1/lock`]: fail(500, { message: "GitHub said no" }),
+    });
+    const row = await rowOf("Lucas Rochat");
+    await userEvent.click(row.getByRole("button", { name: "Lock repository (block pushes)" }));
+    expect(await screen.findByText("GitHub said no")).toBeVisible();
+    // The request failed, so the repository is still unlocked: the padlock
+    // must keep saying so instead of turning into a permanent warning sign.
+    expect(row.getByRole("button", { name: "Lock repository (block pushes)" })).toBeEnabled();
+  });
+
+  it("shows an em dash for a student with neither a repository nor a GitHub account", async () => {
+    renderDetail();
+    await screen.findByRole("table");
+    const row = screen.getAllByRole("row").find((r) => (r.textContent ?? "").includes("Noah Bovet"))!;
+    // First cell: the identity. Nothing to link to, so the cell says so.
+    expect(within(row.querySelector("td")!).getByText("—")).toBeVisible();
+  });
+
+  it("expands a row from the keyboard, with Space and without scrolling the page", async () => {
+    renderDetail();
+    await screen.findByRole("table");
+    const row = screen.getAllByRole("row").find((r) => (r.textContent ?? "").includes("Lucas Rochat"))!;
+    expect(row).toHaveAttribute("tabindex", "0");
+    // A clickable row stays a row: announcing it as a button would cost the
+    // reader the table around it.
+    expect(row).toHaveAttribute("role", "row");
+    const before = bodyRows().length;
+    row.focus();
+    expect(fireEvent.keyDown(row, { key: " " })).toBe(false);
+    await waitFor(() => expect(bodyRows().length).toBeGreaterThan(before));
   });
 
   it("links the repository of an accepted student to GitHub", async () => {

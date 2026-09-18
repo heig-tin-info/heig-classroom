@@ -25,10 +25,10 @@ raw values live in `src/style.css` and swap in dark mode without any
 | `surface-3` | `#eae7e1` | `#2c2a27` | segmented tracks, skeletons |
 | `line` | `#e7e4de` | `#2a2825` | hairlines (the separation language) |
 | `line-strong` | `#d3cfc7` | `#3a3733` | input borders, focused hairlines |
-| `fg` | `#1a1917` | `#ecebe7` | text |
+| `fg` | `#1a1917` | `#ecebe7` | text, and the timeline "now" marker (red there would read as one more bar) |
 | `fg-muted` | `#67635b` | `#a39e94` | secondary text, ≥ 4.5:1 on surface and surface-2 |
 | `fg-faint` | `#8f8a80` | `#6e6961` | captions, disabled, icons at rest; ≥ 3:1 on canvas |
-| `accent` | `#b41f24` | `#e85f64` | HEIG red (brand constraint): primary action, "now" marker, focus ring |
+| `accent` | `#b41f24` | `#e85f64` | HEIG red (brand constraint): primary action, focus ring |
 | `accent-hover` | `#9a1b1f` | `#f0787c` | |
 | `accent-soft` | `#fbebeb` | `rgb(232 95 100 / 0.10)` | selected nav item, accent chips |
 | `on-fill` | `#ffffff` | `#131211` | ink laid on a saturated fill (accent, danger, success) |
@@ -129,8 +129,15 @@ drawer and the help drawer:
 - close: focus goes back to the element that opened the layer;
 - naming: `role="dialog"`, `aria-modal="true"` and `aria-labelledby` pointing
   at the panel's own title.
-- the backdrop never closes a layer: a stray click must not discard what the
-  user typed. Escape and the X do.
+- closing on the backdrop depends on what the layer holds. A **form layer**
+  (`Modal`, `Sheet`, the confirm dialog) never closes on a backdrop click: a
+  stray click must not discard what the user typed, so Escape and the X are
+  the two ways out. A **navigation layer** (the mobile drawer, the help
+  drawer) holds nothing the user wrote, and closes on the backdrop as well:
+  there, insisting on the X is friction for nothing.
+- a form layer is portalled but still inside the React tree that rendered it,
+  so its root stops click propagation: a click in a dialog opened from a
+  table row must not reach that row's `onClick`.
 
 `Menu` follows the WAI-ARIA menu button pattern: `aria-haspopup="menu"` and
 `aria-expanded` on the trigger (cloned onto a custom one), Enter / Space /
@@ -139,7 +146,14 @@ Home/End jump, Escape and Tab close and hand the focus back to the trigger.
 Items are `role="menuitem"` with `tabIndex={-1}`.
 
 `Tabs` uses a roving tabindex: one tab in the Tab order, ArrowLeft/ArrowRight
-move and select with wrap, Home/End jump.
+move and select with wrap, Home/End jump. A `value` matching no item still
+leaves the first tab reachable, so a hand-edited URL cannot take the whole
+strip out of the Tab order.
+
+An element made clickable without being a button (a card, a table row) takes
+`pressable()` from `ui.tsx`: `tabIndex={0}` plus Enter and Space, with Space
+prevented from scrolling the page. A row keeps `role="row"`; announcing it as
+a button would cost the reader the table around it.
 
 `Tip` never takes the focus (portal, `pointer-events-none`, `aria-hidden`)
 and Escape dismisses it.
@@ -172,7 +186,9 @@ with a keyboard-reachable dismiss button.
   Queries retry once and never on a 4xx (`main.tsx`), so the error state
   arrives in about a second: three retries read as a hang, not as a failure.
 - Field: label 13 px 500 above, 12 px radius, `line-strong` border, accent
-  ring on focus. Two heights, from the button scale: `sm` 28 px for a control
+  ring on focus. The `<label>` covers the text only and points at the control
+  through `htmlFor`; the help "?" is its sibling, never inside it, or that
+  button becomes the labelled control and the input loses its name. Two heights, from the button scale: `sm` 28 px for a control
   inside a table row, `md` 34 px everywhere else (`inputSize` in ui.tsx).
   Width is a prop, never a class beside `inputClass`: Tailwind settles two
   width or height utilities on one element by their order in the generated
@@ -193,8 +209,17 @@ with a keyboard-reachable dismiss button.
   A sheet never opens another sheet; a dialog may open over a sheet.
 - Menu: overflow for tertiary actions; destructive items last, separated. It
   closes on a page scroll, but not on the scroll its own opening click causes
-  (200 ms of grace) nor on one inside the panel.
-- Toast: bottom-right, `surface` + hairline + overlay shadow.
+  (200 ms of grace) nor on one inside the panel. Its panel stacks ABOVE the
+  dialog layer (`Z.popover` > `Z.modal`), because menus open from inside
+  sheets, dialogs and the mobile drawer. An item may carry a `description`,
+  a second 12 px muted line, when the label alone loses what the action does.
+  An item's `disabled` describes the state when the menu was opened, never a
+  busy state: picking an item closes the menu, so a pending flag there is
+  invisible. A toast reports the progress instead.
+- Toast: bottom-right, `surface` + hairline + overlay shadow. Tones
+  `success` / `error` / `warning`, plus `progress` (a neutral spinner) for
+  "this has started", which is the only report an action taken from a menu
+  can get.
 - Empty state: icon in a `surface-2` circle, title, one line, one action.
 
 ## Voice

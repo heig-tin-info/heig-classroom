@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   Clock,
   GraduationCap,
+  Loader2,
   Pencil,
   Trash2,
   UserRoundX,
@@ -131,6 +132,8 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
     );
   }
 
+  const busy = unclaim.isPending || remove.isPending;
+
   // A failed action from the row menu: one line under the row it came from.
   const failure = unclaim.isError
     ? apiErrorMessage(unclaim.error, "Could not revoke this claim.")
@@ -188,6 +191,11 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
           {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
         </td>
         <td className={`${T.td} whitespace-nowrap text-right`}>
+          {/* The menu is gone by the time the request answers, so the row
+              itself carries the fact that something is running. */}
+          {busy ? (
+            <Loader2 className="mr-1 inline size-4 animate-spin text-fg-faint" aria-label="Working…" />
+          ) : null}
           <Menu
             label={`Actions for ${entry.prenom} ${entry.nom}`}
             items={[
@@ -197,6 +205,7 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
                     {
                       label: "Revoke claim",
                       icon: UserRoundX,
+                      disabled: unclaim.isPending,
                       onSelect: async () => {
                         if (
                           await confirm({
@@ -216,6 +225,7 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
                 icon: Trash2,
                 danger: true,
                 separator: true,
+                disabled: remove.isPending,
                 onSelect: async () => {
                   if (
                     await confirm({

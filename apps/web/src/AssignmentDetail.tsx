@@ -48,6 +48,7 @@ import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
+import { useToast } from "./notify";
 import type { Route } from "./router";
 import {
   Alert,
@@ -63,6 +64,7 @@ import {
   Menu,
   Modal,
   PageHeader,
+  pressable,
   QueryError,
   SearchInput,
   SectionHeading,
@@ -245,6 +247,7 @@ function StudentRow({
   s: AssignmentDetailStudent;
 }) {
   const t = useT();
+  const toast = useToast();
   const [showHistory, setShowHistory] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -258,6 +261,10 @@ function StudentRow({
         { method: "POST" },
       ),
     onSuccess: invalidate,
+    // The padlock is the repository's STATE; a failed request has not changed
+    // it, so it must keep showing it. The failure goes to a toast instead.
+    onError: (err) =>
+      toast(apiErrorMessage(err, "Could not change the lock on this repository."), "error"),
   });
   const gradeNow = useMutation({
     mutationFn: () =>
@@ -271,10 +278,6 @@ function StudentRow({
   const gradeNowUnsupported =
     gradeNow.isError && gradeNow.error instanceof ApiError && gradeNow.error.status === 409;
   const gradeNowError = gradeNow.isError && !gradeNowUnsupported;
-  const lockError = toggleLock.isError
-    ? apiErrorMessage(toggleLock.error, "Could not change the lock on this repository.")
-    : null;
-
   const r = s.repo;
   const locked = r?.lockedAt != null;
   const canExpand = r?.provisionStatus === "ok";
@@ -283,6 +286,7 @@ function StudentRow({
     <>
       <tr
         onClick={() => canExpand && setExpanded((e) => !e)}
+        {...(canExpand ? pressable(() => setExpanded((e) => !e), "row") : {})}
         className={cx(T.row, T.rowHover, canExpand && "cursor-pointer", locked && "opacity-60")}
       >
         <td className={`${T.td} whitespace-nowrap font-semibold`}>
@@ -298,7 +302,8 @@ function StudentRow({
             )}
             {name}
             {r?.provisionStatus === "ok" && r.fullName ? (
-              <Tip label={`${s.githubLogin ?? ""} · ${r.fullName}`}>
+              // No login: the separator would open the label with a stray " · ".
+              <Tip label={s.githubLogin ? `${s.githubLogin} · ${r.fullName}` : r.fullName}>
                 <a
                   href={`https://github.com/${r.fullName}`}
                   target="_blank"
@@ -314,7 +319,11 @@ function StudentRow({
               <span className="ml-1 inline-flex items-center gap-1 text-xs font-normal text-fg-faint">
                 <GithubIcon className="size-3" /> {s.githubLogin}
               </span>
-            ) : null}
+            ) : (
+              // Neither a repository nor a GitHub account: an empty cell reads
+              // as a layout bug, the em dash reads as "nothing here yet".
+              <span className="ml-1 text-xs font-normal text-fg-faint">—</span>
+            )}
           </span>
         </td>
         <td className={T.td}>
@@ -509,28 +518,27 @@ function StudentRow({
                   </button>
                 </Tip>
               ) : null}
-              {/* Padlock shows the STATE: closed red when locked, open otherwise.
-                  A failed lock/unlock turns it into a warning carrying the
-                  server's message — there is no room for a line in this cell. */}
-              <Tip label={lockError ?? (locked ? t("assignment.unlockRepo") : t("assignment.lockRepo"))}>
+              {/* Padlock shows the STATE: closed red when locked, open
+                  otherwise. It never becomes an error icon — a failed request
+                  left the repository exactly as it was. */}
+              <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
                 <button
                   type="button"
                   aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
-                  onClick={() => toggleLock.mutate(locked ? "unlock" : "lock")}
+                  onClick={() => {
+                    toggleLock.reset();
+                    toggleLock.mutate(locked ? "unlock" : "lock");
+                  }}
                   disabled={toggleLock.isPending}
                   className={cx(
                     "inline-flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none",
-                    lockError
-                      ? "text-danger"
-                      : locked
-                        ? "text-danger hover:bg-danger-soft"
-                        : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+                    locked
+                      ? "text-danger hover:bg-danger-soft"
+                      : "text-fg-faint hover:bg-surface-2 hover:text-fg",
                   )}
                 >
                   {toggleLock.isPending ? (
                     <Loader2 className="size-4 animate-spin" />
-                  ) : lockError ? (
-                    <AlertTriangle className="size-4" />
                   ) : locked ? (
                     <Lock className="size-4" />
                   ) : (
@@ -893,12 +901,77 @@ function reviewStatus(
   }
   const reviewAt = new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000;
   if (repos.every((s) => s.repo!.llmGrade)) {
-    return { label: "reviewed", hint: "every repository carries its LLM grade", tone: "green" };
+    return { label: "done", hint: "every repository carries its LLM grade", tone: "green" };
   }
   if (now < reviewAt) {
     return { label: `in ${formatDuration(reviewAt - now, t)}`, hint: "fires once the grace period ends", tone: "amber" };
   }
   return { label: "running…", hint: "grades land as the runs complete", tone: "amber" };
+}
+
+/*
+ * The three surfaces that tick. Each holds its own `useNow` instead of the
+ * page holding one: a clock at the root re-rendered the whole student table
+ * every 15 s, rows, badges, expanded panels and all, to move one countdown.
+ */
+
+/** Header chip: the tone and the grace-period explanation of the LLM review. */
+function ReviewChip({
+  a,
+  students,
+}: {
+  a: AssignmentDetailPayload["assignment"];
+  students: AssignmentDetailStudent[];
+}) {
+  const t = useT();
+  const now = useNow(15_000);
+  const review = reviewStatus(a, students, now, t);
+  return (
+    <Tip label={review.hint}>
+      <Badge tone={review.tone} icon={Bot}>
+        LLM review {review.label}
+      </Badge>
+    </Tip>
+  );
+}
+
+function AverageGradeStat({
+  a,
+  students,
+  graded,
+  average,
+}: {
+  a: AssignmentDetailPayload["assignment"];
+  students: AssignmentDetailStudent[];
+  graded: number[];
+  average: number | null;
+}) {
+  const t = useT();
+  const now = useNow(15_000);
+  const review = reviewStatus(a, students, now, t);
+  return (
+    <Stat
+      icon={Bot}
+      label="Average grade"
+      value={average != null ? average.toFixed(1) : "—"}
+      hint={`${graded.length} graded · LLM review ${review.label}`}
+    />
+  );
+}
+
+function DeadlineStat({ a }: { a: AssignmentDetailPayload["assignment"] }) {
+  const now = useNow(15_000);
+  const left = new Date(a.deadlineAt).getTime() - now;
+  return (
+    <Stat
+      icon={a.state === "locked" ? Lock : CalendarClock}
+      label={left > 0 ? "Deadline in" : "Deadline passed"}
+      value={compactDuration(Math.abs(left))}
+      // The hint answers "when?", which the value never does: repeating the
+      // same duration under itself said nothing twice.
+      hint={isoDateTime(a.deadlineAt)}
+    />
+  );
 }
 
 type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
@@ -915,7 +988,6 @@ export function AssignmentDetail({
   const t = useT();
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const now = useNow(15_000);
   const [query, setQuery] = useState("");
   const room = useQuery<ClassroomDetail>({
     queryKey: ["classroom", classroomId],
@@ -1020,8 +1092,6 @@ export function AssignmentDetail({
   const showGrades = a.gradingMode !== "none";
   // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
   const canAdjust = showGrades && a.frozenAt != null;
-  const review = reviewStatus(a, students, now, t);
-  const deadlineMs = new Date(a.deadlineAt).getTime() - now;
 
   // Grades sheet (last name, first name, email, grade) -- final grade rule: @hgc/domain.
   const exportGrades = async () => {
@@ -1084,6 +1154,7 @@ export function AssignmentDetail({
             <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "zinc" : "amber"} icon={a.state === "locked" ? Lock : undefined}>
               {t(`state.${a.state}` as Parameters<typeof t>[0])}
             </Badge>
+            {showGrades ? <ReviewChip a={a} students={students} /> : null}
             {a.gradesValidatedAt ? (
               <Tip label={`Validated ${isoDateTime(a.gradesValidatedAt)}`}>
                 <Badge tone="green" icon={ClipboardCheck}>
@@ -1105,9 +1176,21 @@ export function AssignmentDetail({
             <Menu
               label="Assignment actions"
               items={[
-                { label: t("assignment.cloneScript"), icon: FileCode, onSelect: downloadCloneScript },
+                {
+                  label: t("assignment.cloneScript"),
+                  description: t("assignment.cloneScriptTip"),
+                  icon: FileCode,
+                  onSelect: downloadCloneScript,
+                },
                 ...(showGrades
-                  ? [{ label: t("assignment.export"), icon: Download, onSelect: () => void exportGrades() }]
+                  ? [
+                      {
+                        label: t("assignment.export"),
+                        description: t("assignment.exportTip"),
+                        icon: Download,
+                        onSelect: () => void exportGrades(),
+                      },
+                    ]
                   : []),
               ]}
             />
@@ -1155,19 +1238,9 @@ export function AssignmentDetail({
           hint="on the last commit"
         />
         {showGrades ? (
-          <Stat
-            icon={Bot}
-            label="Average grade"
-            value={average != null ? average.toFixed(1) : "—"}
-            hint={`${graded.length} graded · LLM review ${review.label}`}
-          />
+          <AverageGradeStat a={a} students={students} graded={graded} average={average} />
         ) : null}
-        <Stat
-          icon={a.state === "locked" ? Lock : CalendarClock}
-          label={deadlineMs > 0 ? "Deadline in" : "Deadline passed"}
-          value={compactDuration(Math.abs(deadlineMs))}
-          hint={deadlineMs > 0 ? isoDateTime(a.deadlineAt) : `${compactDuration(Math.abs(deadlineMs))} ago`}
-        />
+        <DeadlineStat a={a} />
       </div>
 
       <SyncBanner classroomId={classroomId} a={a} />

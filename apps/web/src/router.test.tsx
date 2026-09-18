@@ -48,6 +48,24 @@ describe("useSearchParam", () => {
     expect(window.location.pathname).toBe("/classrooms/c1");
   });
 
+  it("follows Back and Forward", () => {
+    goTo("/classrooms/c1?tab=students");
+    const { result } = renderHook(() => useSearchParam("tab", "assignments"));
+    expect(result.current[0]).toBe("students");
+    // The browser has already changed the URL by the time popstate fires; the
+    // hook used to ignore it and keep showing the previous tab.
+    act(() => {
+      window.history.replaceState(null, "", "/classrooms/c1?tab=staff");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current[0]).toBe("staff");
+    act(() => {
+      window.history.replaceState(null, "", "/classrooms/c1");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current[0]).toBe("assignments");
+  });
+
   it("leaves the other parameters of the URL alone", () => {
     goTo("/classrooms/c1?tab=staff&q=rochat");
     const { result } = renderHook(() => useSearchParam("tab", "assignments"));

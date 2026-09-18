@@ -86,7 +86,15 @@ export function RosterImport({ classroomId, onClose }: { classroomId: string; on
               <span className="inline-flex items-center gap-1.5 text-sm text-success">
                 <CheckCircle2 className="size-4" /> Import done
               </span>
-            ) : importRoster.isError && importErrors.length === 0 ? (
+            ) : importErrors.length > 0 ? (
+              // The lines themselves are under the drop zone; the footer says
+              // how many there are, so the sheet never fails in silence.
+              <span className="text-sm text-danger">
+                {importErrors.length === 1
+                  ? "1 line rejected — see above."
+                  : `${importErrors.length} lines rejected — see above.`}
+              </span>
+            ) : importRoster.isError ? (
               <span className="text-sm text-danger">Import failed.</span>
             ) : null}
           </span>
@@ -140,6 +148,17 @@ export function RosterImport({ classroomId, onClose }: { classroomId: string; on
               }}
             />
           </div>
+          {/* Under the drop zone, where the file was let go: a list of rejected
+              lines at the far end of the sheet is out of sight on a phone. */}
+          {importErrors.length > 0 ? (
+            <ul className="space-y-1 text-sm text-danger">
+              {importErrors.map((e, i) => (
+                <li key={i} className="flex items-start gap-1.5">
+                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> line {e.line}: {e.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </section>
 
         <section className="space-y-3">
@@ -207,15 +226,6 @@ export function RosterImport({ classroomId, onClose }: { classroomId: string; on
           </Button>
         </section>
 
-        {importErrors.length > 0 ? (
-          <ul className="space-y-1 text-sm text-danger">
-            {importErrors.map((e, i) => (
-              <li key={i} className="flex items-center gap-1.5">
-                <AlertTriangle className="size-3.5" /> line {e.line}: {e.message}
-              </li>
-            ))}
-          </ul>
-        ) : null}
       </div>
     </Sheet>
   );

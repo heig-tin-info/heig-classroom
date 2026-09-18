@@ -8,7 +8,7 @@ import { ConfirmProvider } from "./confirm";
 import { HelpProvider } from "./help";
 import { I18nProvider } from "./i18n";
 import { ToastProvider } from "./notify";
-import { applyTheme, initialTheme } from "./theme";
+import { applyTheme, getThemeChoice } from "./theme";
 import "./style.css";
 
 async function boot() {
@@ -16,7 +16,7 @@ async function boot() {
   // browser. The flag is static, so production builds drop this branch.
   if (import.meta.env.VITE_MOCK === "1") await import("./mock");
 
-  applyTheme(initialTheme());
+  applyTheme(getThemeChoice());
 
   // One retry, and none on a 4xx: the default three retries kept an error
   // state seven seconds away, which reads as a hang rather than a failure.

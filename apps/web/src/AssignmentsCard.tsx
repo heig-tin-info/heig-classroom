@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Archive,
   ArchiveRestore,
   CalendarClock,
@@ -20,6 +21,7 @@ import { api, apiErrorMessage } from "./api";
 import { AssignmentForm, compactDuration } from "./AssignmentForm";
 import { useConfirm } from "./confirm";
 import {
+  Alert,
   Badge,
   Button,
   Card,
@@ -48,19 +50,21 @@ function StateBadge({ a, now }: { a: Assignment; now: number }) {
 function AssignmentRow({
   classroomId,
   assignment: a,
+  now,
   onEdit,
   onOpen,
   archived = false,
 }: {
   classroomId: string;
   assignment: Assignment;
+  /** One clock for the whole list, ticked by the section. */
+  now: number;
   onEdit: () => void;
   onOpen: () => void;
   archived?: boolean;
 }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
-  const now = useNow(60_000);
   const invalidate = () => qc.invalidateQueries({ queryKey: ["assignments", classroomId] });
   const base = `/app/api/classrooms/${classroomId}/assignments/${a.id}`;
   const archive = useMutation({
@@ -80,17 +84,23 @@ function AssignmentRow({
     onSuccess: invalidate,
   });
 
+  const repoLinks: MenuItem[] = [
+    { label: "Source repository", icon: ExternalLink, href: `https://github.com/${a.sourceFullName}` },
+    ...(a.squashedFullName
+      ? [{ label: "Distributed repository", icon: ExternalLink, href: `https://github.com/${a.squashedFullName}` }]
+      : []),
+  ];
+
   const menu: MenuItem[] = archived
-    ? [{ label: "Restore", icon: ArchiveRestore, onSelect: () => unarchive.mutate() }]
+    ? // An archived assignment keeps its repositories on GitHub: the links are
+      // the only way back to them from here.
+      [{ label: "Restore", icon: ArchiveRestore, onSelect: () => unarchive.mutate() }, ...repoLinks]
     : [
         // Editable at every stage: moving the deadline of an expired
         // assignment into the future reopens it (repos unlocked, grading
         // resumes until the new deadline).
         { label: "Edit", icon: Pencil, onSelect: onEdit },
-        { label: "Source repository", icon: ExternalLink, href: `https://github.com/${a.sourceFullName}` },
-        ...(a.squashedFullName
-          ? [{ label: "Distributed repository", icon: ExternalLink, href: `https://github.com/${a.squashedFullName}` }]
-          : []),
+        ...repoLinks,
         {
           label: "Archive",
           icon: Archive,
@@ -213,13 +223,7 @@ function AssignmentRow({
             <Send /> Publish
           </Button>
         ) : null}
-        {archived ? (
-          <IconButton label="Restore" onClick={() => unarchive.mutate()} disabled={unarchive.isPending}>
-            <ArchiveRestore />
-          </IconButton>
-        ) : (
-          <Menu items={menu} label={`Actions for ${a.name}`} />
-        )}
+        <Menu items={menu} label={`Actions for ${a.name}`} />
       </div>
       {failure ? <p className="w-full text-[13px] text-danger">{failure}</p> : null}
     </li>
@@ -229,19 +233,29 @@ function AssignmentRow({
 export function AssignmentsSection({
   classroomId,
   appInstalled,
+  blockedElsewhere = false,
   onOpenAssignment,
 }: {
   classroomId: string;
   appInstalled: boolean;
+  /** The page already explains why assignments are blocked (organization
+      missing): skip the App notice, one banner on a bad screen is enough. */
+  blockedElsewhere?: boolean;
   onOpenAssignment: (assignmentId: string) => void;
 }) {
   const [sheet, setSheet] = useState<"create" | Assignment | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const now = useNow(60_000);
   const list = useQuery<Assignment[]>({
     queryKey: ["assignments", classroomId, showArchived ? "archived" : "active"],
     queryFn: () =>
       api(`/app/api/classrooms/${classroomId}/assignments${showArchived ? "?archived=1" : ""}`),
   });
+  /** Only a loaded, genuinely empty list; loading and error are not "empty". */
+  const isEmpty = list.isSuccess && list.data.length === 0;
+  // The empty state below says the same thing with its own words; two copies
+  // of one sentence on one screen is one too many.
+  const noticeInEmptyState = !appInstalled && isEmpty && !showArchived;
 
   return (
     <div className="space-y-4">
@@ -254,9 +268,10 @@ export function AssignmentsSection({
             <IconButton label="Archives" active={showArchived} onClick={() => setShowArchived((v) => !v)}>
               <Archive />
             </IconButton>
-            {/* The empty state below already carries this action; two accent
-                buttons for the same thing is one too many. */}
-            {appInstalled && list.data?.length ? (
+            {/* Hidden only when the empty state below carries this very
+                action: while the list loads or fails, the teacher still gets
+                their way to create an assignment. */}
+            {appInstalled && !isEmpty ? (
               <Button onClick={() => setSheet("create")}>
                 <Plus /> Create assignment
               </Button>
@@ -264,6 +279,14 @@ export function AssignmentsSection({
           </>
         }
       />
+
+      {/* The missing App blocks every assignment action, loaded list or not:
+          it belongs above the list, not inside one of its states. */}
+      {!appInstalled && !noticeInEmptyState && !blockedElsewhere ? (
+        <Alert tone="warning" icon={AlertTriangle} title="Assignments need the GitHub App">
+          Install the GitHub App on the organization to create assignments.
+        </Alert>
+      ) : null}
 
       {list.isLoading ? (
         <Card className="divide-y divide-line">
@@ -289,6 +312,7 @@ export function AssignmentsSection({
                 key={a.id}
                 classroomId={classroomId}
                 assignment={a}
+                now={now}
                 archived={showArchived}
                 onEdit={() => setSheet(a)}
                 onOpen={() => onOpenAssignment(a.id)}

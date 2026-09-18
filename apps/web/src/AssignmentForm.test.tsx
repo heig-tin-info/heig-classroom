@@ -50,17 +50,10 @@ const renderForm = (onDone = vi.fn()) => {
 
 const submitButton = () => screen.getByRole("button", { name: "Create assignment" });
 
-/**
- * Picks the source repository and waits for its tree to land.
- *
- * The select is reached by role, not by its label: `<Select help=…>` puts the
- * help button inside the <label>, which makes that button the label's control
- * and leaves the select without an accessible name (see the report). Switch
- * this back to `getByLabelText("Source repository")` once that is fixed.
- */
+/** Picks the source repository and waits for its tree to land. */
 const pickSource = async () => {
   await screen.findByRole("option", { name: REPO });
-  await userEvent.selectOptions(screen.getByRole("combobox"), REPO);
+  await userEvent.selectOptions(screen.getByLabelText("Source repository"), REPO);
   // The tree query fills the protected files and the branch.
   await screen.findByText(/2 files · 1 protected/);
 };

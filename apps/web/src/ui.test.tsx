@@ -12,13 +12,16 @@ import {
   Field,
   Menu,
   Modal,
+  pressable,
   QueryError,
   Segmented,
   Select,
   Sheet,
   Switch,
   Tabs,
+  Textarea,
   Tip,
+  Z,
   type MenuItem,
 } from "./ui";
 
@@ -166,6 +169,29 @@ describe("Modal", () => {
     fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(last);
   });
+
+  it("keeps its clicks to itself: the row that opened it never hears them", async () => {
+    const onRowClick = vi.fn();
+    renderWithProviders(
+      // The dialog is portalled out of this div in the DOM, but it is still
+      // its child in the React tree, which is what carries the bubbling.
+      <div onClick={onRowClick}>
+        <LayerHarness
+          render={(close) => (
+            <Modal title="Adjust grade" onClose={close} footer={<Button>Save</Button>}>
+              <Field label="Points" defaultValue="4.5" />
+            </Modal>
+          )}
+        />
+      </div>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    onRowClick.mockClear();
+    await userEvent.click(screen.getByLabelText("Points"));
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onRowClick).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
 });
 
 describe("Sheet", () => {
@@ -226,6 +252,25 @@ describe("Sheet", () => {
     create.focus();
     fireEvent.keyDown(create, { key: "Tab" });
     expect(document.activeElement).toBe(close);
+  });
+
+  it("keeps its clicks to itself, like the dialog", async () => {
+    const onRowClick = vi.fn();
+    renderWithProviders(
+      <div onClick={onRowClick}>
+        <LayerHarness
+          render={(close) => (
+            <Sheet title="Add students" onClose={close}>
+              <Textarea label="Roster CSV" defaultValue="" />
+            </Sheet>
+          )}
+        />
+      </div>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    onRowClick.mockClear();
+    await userEvent.click(screen.getByLabelText("Roster CSV"));
+    expect(onRowClick).not.toHaveBeenCalled();
   });
 });
 
@@ -317,6 +362,41 @@ describe("Menu", () => {
     expect(link).toHaveAttribute("target", "_blank");
     expect(within(menu).getByRole("menuitem", { name: "Export" })).toBeDisabled();
   });
+
+  it("stacks its panel above the dialog layer, not under it", async () => {
+    const { trigger } = renderMenu();
+    await userEvent.click(trigger);
+    // The account menu opens from inside the mobile drawer, which is a z-50
+    // layer: a popover below that is simply invisible.
+    expect(screen.getByRole("menu")).toHaveClass(Z.popover);
+    expect(Number(Z.popover.replace("z-", ""))).toBeGreaterThan(
+      Number(Z.modal.replace("z-", "")),
+    );
+    expect(Number(Z.popover.replace("z-", ""))).toBeLessThan(
+      Number(Z.overlay.replace("z-", "")),
+    );
+  });
+
+  it("carries a description as a second line under the label", async () => {
+    renderWithProviders(
+      <Menu
+        label="Assignment actions"
+        items={[
+          {
+            label: "Clone script",
+            description: "Clones every student repository into one folder",
+          },
+        ]}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Assignment actions" }));
+    const item = within(screen.getByRole("menu")).getByRole("menuitem", {
+      name: /Clone script/,
+    });
+    expect(
+      within(item).getByText("Clones every student repository into one folder"),
+    ).toBeVisible();
+  });
 });
 
 type DemoTab = "assignments" | "students" | "staff";
@@ -373,6 +453,32 @@ describe("Tabs", () => {
     expect(onChange).toHaveBeenLastCalledWith("staff");
     fireEvent.keyDown(tablist, { key: "Home" });
     expect(onChange).toHaveBeenLastCalledWith("assignments");
+  });
+
+  it("keeps the strip reachable when the value matches no tab", () => {
+    const onChange = vi.fn();
+    renderWithProviders(
+      <Tabs
+        value={"nonsense" as DemoTab}
+        onChange={onChange}
+        label="Classroom sections"
+        items={[
+          { value: "assignments", label: "Assignments" },
+          { value: "students", label: "Students" },
+        ]}
+      />,
+    );
+    // No tab is selected, but the first one still holds the Tab order,
+    // otherwise a hand-edited ?tab= takes the whole strip off the keyboard.
+    expect(screen.getByRole("tab", { name: "Assignments" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Assignments" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+    fireEvent.keyDown(screen.getByRole("tablist", { name: "Classroom sections" }), {
+      key: "ArrowRight",
+    });
+    expect(onChange).toHaveBeenLastCalledWith("students");
   });
 
   it("wires every tab to its panel through idPrefix", () => {
@@ -449,12 +555,14 @@ describe("Field and Select", () => {
         <Field label="Stretched" fullWidth />
       </>,
     );
+    // The wrapper is a plain div: a <label> around the control would swallow
+    // the help button, so the label points at the control with htmlFor.
     const byLabel = (label: string) => screen.getByLabelText(label);
     expect(byLabel("Default")).toHaveClass("h-8.5");
-    expect(byLabel("Default").closest("label")).toHaveClass("w-52");
+    expect(byLabel("Default").parentElement).toHaveClass("w-52");
     expect(byLabel("Dense")).toHaveClass("h-7");
-    expect(byLabel("Dense").closest("label")).toHaveClass("w-32");
-    expect(byLabel("Stretched").closest("label")).toHaveClass("w-full");
+    expect(byLabel("Dense").parentElement).toHaveClass("w-32");
+    expect(byLabel("Stretched").parentElement).toHaveClass("w-full");
   });
 
   it("labels a Select and carries its width on the control wrapper", async () => {
@@ -470,6 +578,54 @@ describe("Field and Select", () => {
     expect(select).toHaveClass("h-8.5");
     await userEvent.selectOptions(select, "heig-prg1-2026");
     expect(onChange).toHaveBeenCalled();
+  });
+});
+
+describe("Field help", () => {
+  it("names the control even next to a help button, which stays its own button", async () => {
+    renderWithProviders(
+      <>
+        <Field label="Classroom name" help="classrooms" defaultValue="" />
+        <Select label="Source repository" help="assignment-source" defaultValue="">
+          <option value="">Pick one</option>
+          <option value="labo-02">labo-02</option>
+        </Select>
+        <Textarea label="Roster CSV" help="import-roster" defaultValue="" />
+      </>,
+    );
+    // A <label> wrapping the "?" would make that button the labelled control
+    // and leave the real ones nameless.
+    expect(screen.getByLabelText("Classroom name").tagName).toBe("INPUT");
+    expect(screen.getByLabelText("Source repository").tagName).toBe("SELECT");
+    expect(screen.getByLabelText("Roster CSV").tagName).toBe("TEXTAREA");
+    expect(screen.getAllByRole("button", { name: "Help" })).toHaveLength(3);
+    // Clicking the label text lands on the input, not on the help drawer.
+    await userEvent.click(screen.getByText("Classroom name"));
+    expect(document.activeElement).toBe(screen.getByLabelText("Classroom name"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("pressable", () => {
+  it("activates on Enter and on Space, and Space does not scroll the page", () => {
+    const onActivate = vi.fn();
+    renderWithProviders(
+      <div {...pressable(onActivate)} onClick={onActivate}>
+        PRG1 2026
+      </div>,
+    );
+    const card = screen.getByRole("button", { name: "PRG1 2026" });
+    expect(card).toHaveAttribute("tabindex", "0");
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(onActivate).toHaveBeenCalledTimes(1);
+    const space = fireEvent.keyDown(card, { key: " " });
+    expect(onActivate).toHaveBeenCalledTimes(2);
+    // fireEvent returns false when the handler called preventDefault.
+    expect(space).toBe(false);
+  });
+
+  it("leaves the role alone for a row, which must stay a row", () => {
+    expect(pressable(() => {}, "row").role).toBe("row");
   });
 });
 

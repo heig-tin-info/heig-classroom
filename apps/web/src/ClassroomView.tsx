@@ -15,7 +15,7 @@ import {
   UsersRound,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ClassroomDetail, ClassroomGradesPayload, ClassroomStaffRole } from "@hgc/contracts";
 
@@ -52,11 +52,21 @@ import {
 
 type Tab = "assignments" | "students" | "staff" | "settings";
 
+/** The only `?tab=` values the page answers to; anything else is ignored. */
+const TABS: Tab[] = ["assignments", "students", "staff", "settings"];
+
 /** Rename, archive, delete — inline on the Settings tab, no modal. */
 function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => void }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const [name, setName] = useState(room.name);
+  const [saved, setSaved] = useState(false);
+  // A refetch (our own invalidation, a live event, another tab) can bring a
+  // new name in: the field follows it instead of holding the stale one and
+  // keeping Rename disabled against a value nobody sees any more.
+  useEffect(() => {
+    setName(room.name);
+  }, [room.name]);
   const rename = useMutation({
     mutationFn: () =>
       api(`/app/api/classrooms/${room.id}`, {
@@ -64,6 +74,7 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
         body: JSON.stringify({ name }),
       }),
     onSuccess: () => {
+      setSaved(true);
       void qc.invalidateQueries({ queryKey: ["classroom", room.id] });
       void qc.invalidateQueries({ queryKey: ["classrooms"] });
     },
@@ -95,7 +106,16 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
           }}
         >
           <div className="min-w-56 flex-1">
-            <Field label="Classroom name" value={name} onChange={(e) => setName(e.target.value)} required fullWidth />
+            <Field
+              label="Classroom name"
+              value={name}
+              onChange={(e) => {
+                setSaved(false);
+                setName(e.target.value);
+              }}
+              required
+              fullWidth
+            />
           </div>
           <Button
             type="submit"
@@ -110,9 +130,9 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
               {apiErrorMessage(rename.error, "Could not rename this classroom.")}
             </p>
           ) : null}
-          {rename.isSuccess && name === room.name ? (
-            <p className="w-full text-[13px] text-success">Name saved.</p>
-          ) : null}
+          {/* Only right after a save of our own: the old condition also lit up
+              on any visit where the field happened to match the classroom. */}
+          {saved ? <p className="w-full text-[13px] text-success">Name saved.</p> : null}
         </form>
       </Card>
 
@@ -488,7 +508,10 @@ function StudentsTab({ room }: { room: ClassroomDetail }) {
 export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
   const toast = useToast();
-  const [tab, setTab] = useSearchParam("tab", "assignments");
+  const [rawTab, setTab] = useSearchParam("tab", "assignments");
+  // `?tab=` comes from the URL bar, so it is user input: an unknown value
+  // used to select no tab at all and leave the page showing an empty panel.
+  const tab: Tab = (TABS as string[]).includes(rawTab) ? (rawTab as Tab) : "assignments";
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
@@ -496,6 +519,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
   // Grade sheet (issue #4): roster x graded assignments, the sheet a GAPS
   // import starts from. Fetched on click — nothing to prefetch on open.
   const gradeSheet = useMutation({
+    // The action lives in an overflow menu, which closes the moment it is
+    // picked: a `disabled` on the item can never be seen, so the toasts are
+    // the whole progress report.
+    onMutate: () => toast(t("classroom.gradeSheetStarted"), "progress"),
     mutationFn: async () => {
       const data = await api<ClassroomGradesPayload>(`/app/api/classrooms/${id}/grades`);
       const XLSX = await import("xlsx");
@@ -518,8 +545,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       XLSX.utils.book_append_sheet(wb, ws, "Notes");
       XLSX.writeFile(wb, `${data.classroom.name} — grades.xlsx`);
     },
-    // The action lives in the overflow menu, which is gone by the time it
-    // fails: the toast is the only place left to say so.
+    onSuccess: () => toast(t("classroom.gradeSheetReady"), "success"),
     onError: (err) => toast(apiErrorMessage(err, "Could not build the grade sheet."), "error"),
   });
 
@@ -628,9 +654,9 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             items={[
               {
                 label: t("classroom.gradeSheet"),
+                description: t("classroom.gradeSheetTip"),
                 icon: FileSpreadsheet,
                 onSelect: () => gradeSheet.mutate(),
-                disabled: gradeSheet.isPending,
               },
               { label: "Settings", icon: SettingsIcon, onSelect: () => setTab("settings") },
             ]}
@@ -644,7 +670,8 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           no longer exists — it was deleted or renamed on GitHub. Grades and the roster remain
           available here, but repositories, assignments and grading are unreachable. Recreate the
           organization under the same name and reinstall the GitHub App, or create a new
-          classroom on another organization.
+          classroom on another organization. If the organization was only renamed while the App
+          was uninstalled, recreate the link by reinstalling the App on the new name.
         </Alert>
       ) : !installed ? (
         <InstallWizard room={room} />
@@ -696,7 +723,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       ) : null}
 
       <Tabs
-        value={tab as Tab}
+        value={tab}
         onChange={setTab}
         idPrefix="classroom"
         label="Classroom sections"
@@ -721,6 +748,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
           <AssignmentsSection
             classroomId={room.id}
             appInstalled={installed}
+            blockedElsewhere={orgMissing}
             onOpenAssignment={(aid) =>
               navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
             }

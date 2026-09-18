@@ -26,7 +26,16 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     resolve: (ok: boolean) => void;
   } | null>(null);
   const confirm = useCallback<ConfirmFn>(
-    (options) => new Promise<boolean>((resolve) => setPending({ options, resolve })),
+    (options) =>
+      new Promise<boolean>((resolve) =>
+        setPending((previous) => {
+          // One dialog at a time: a second confirm() replaces the first, so
+          // settle the one leaving the screen instead of leaving its caller
+          // waiting on a promise nothing will ever resolve.
+          previous?.resolve(false);
+          return { options, resolve };
+        }),
+      ),
     [],
   );
   const settle = (ok: boolean) => {

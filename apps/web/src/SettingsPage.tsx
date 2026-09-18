@@ -9,7 +9,7 @@ import { useI18n, LOCALES } from "./i18n";
 import { DATE_FORMATS, EMAIL_KINDS, type DateFormat, type EmailKind, type Me, type NoticeKind } from "@hgc/contracts";
 
 import { NOTICE_KINDS, notifyPrefs, setNotifyPref } from "./notify";
-import { applyTheme, initialTheme, type ThemeChoice } from "./theme";
+import { setThemeChoice, useThemeChoice } from "./theme";
 import {
   Avatar,
   Badge,
@@ -33,7 +33,8 @@ import {
 function PreferencesCard({ me }: { me: Me }) {
   const { t, locale, setLocale } = useI18n();
   const qc = useQueryClient();
-  const [theme, setTheme] = useState<ThemeChoice>(initialTheme);
+  // Shared store: the account menu toggle reads the same value.
+  const theme = useThemeChoice();
   const saveDate = useMutation({
     mutationFn: (dateFormat: DateFormat) =>
       api("/app/api/me", { method: "PATCH", body: JSON.stringify({ dateFormat }) }),
@@ -57,10 +58,7 @@ function PreferencesCard({ me }: { me: Me }) {
           <Segmented
             name="theme"
             value={theme}
-            onChange={(v) => {
-              setTheme(v);
-              applyTheme(v);
-            }}
+            onChange={setThemeChoice}
             options={[
               { value: "light", label: t("settings.theme.light") },
               { value: "dark", label: t("settings.theme.dark") },

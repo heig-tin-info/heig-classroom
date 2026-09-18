@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -47,6 +47,40 @@ describe("TeacherHome", () => {
     mockFetch({ [`GET ${CLASSROOMS}`]: ok(rooms) });
     const { navigate } = renderHome();
     await userEvent.click(await screen.findByRole("heading", { name: "SYE 2026" }));
+    expect(navigate).toHaveBeenCalledWith({ view: "classroom", id: "c2" });
+  });
+
+  it("opens a classroom card from the keyboard, with Enter and with Space", async () => {
+    mockFetch({ [`GET ${CLASSROOMS}`]: ok(rooms) });
+    const { navigate } = renderHome();
+    await screen.findByRole("heading", { name: "PRG1 2026" });
+    const card = screen
+      .getAllByRole("button")
+      .find((b) => (b.textContent ?? "").includes("PRG1 2026"))!;
+    expect(card).toHaveAttribute("tabindex", "0");
+
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith({ view: "classroom", id: "c1" });
+
+    navigate.mockClear();
+    // Space used to do nothing here, which is the key a keyboard user reaches
+    // for on a role="button"; and it must not scroll the page either.
+    expect(fireEvent.keyDown(card, { key: " " })).toBe(false);
+    expect(navigate).toHaveBeenCalledWith({ view: "classroom", id: "c1" });
+  });
+
+  it("opens a classroom row of the list view from the keyboard, keeping it a row", async () => {
+    mockFetch({ [`GET ${CLASSROOMS}`]: ok(rooms) });
+    const { navigate } = renderHome();
+    await screen.findByRole("heading", { name: "PRG1 2026" });
+    await userEvent.click(screen.getByRole("radio", { name: "List view" }));
+    const row = (await screen.findAllByRole("row")).find((r) =>
+      (r.textContent ?? "").includes("SYE 2026"),
+    )!;
+    expect(row).toHaveAttribute("tabindex", "0");
+    expect(row).toHaveAttribute("role", "row");
+    fireEvent.keyDown(row, { key: "Enter" });
     expect(navigate).toHaveBeenCalledWith({ view: "classroom", id: "c2" });
   });
 
