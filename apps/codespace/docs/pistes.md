@@ -61,6 +61,55 @@ Ce que cela ne règle pas, et qui reste en piste 2 ci-dessus : « Fermer » ouvr
 un onglet vers l'URL de retour, il ne termine pas la session. Une vraie route
 « terminer » (arrêt du conteneur, volume conservé) reste à écrire côté portail.
 
+## Retours des sessions réelles du 2026-09-17 au soir (traités le 2026-09-18, branche `feat/codespace-git-identity`)
+
+Deux sessions d'étudiants sur la VM `code.chevallier.io`, plus une session de
+fumée. Quatre constats, tous traités ; preuves et limites dans
+[images/c-dev/README.md](../images/c-dev/README.md).
+
+1. **Aucune identité git dans le conteneur.** Un étudiant n'a pas pu commiter
+   depuis VS Code : `git config user.name` vide, alors que le portail connaît
+   son nom et son adresse académique. **Fait** : le `podman run` pose
+   `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME`,
+   `GIT_COMMITTER_EMAIL` depuis `users.display_name` et `users.email` — git les
+   honore sans fichier de configuration, et l'extension git de VS Code lance
+   git avec `process.env` en base (relevé dans le paquet). En plus,
+   `work/.git/config` reçoit `user.name` / `user.email` s'ils manquent, depuis
+   l'hôte avant le premier `:U`, par `engine.exec` ensuite. Une identité posée
+   par l'étudiant n'est jamais écrasée. `CONTAINER_ENV_KEYS` passe de trois à
+   sept clés, aucune n'étant un secret (invariant 1).
+
+2. **Invite « Use the fonts on your computer » à l'ouverture de l'éditeur.**
+   **Fait** : `terminal.integrated.stickyScroll.enabled: false`. La cause a été
+   cherchée dans le paquet embarqué : le défilement collant du terminal charge
+   `@xterm/addon-ligatures` **sans condition** — il ne regarde pas
+   `terminal.integrated.fontLigatures.enabled` —, et cet addon appelle
+   `window.queryLocalFonts()`. Le réglage vaut `true` en amont, d'où l'invite
+   sans que personne n'ait demandé de ligatures. Le second appelant de
+   `queryLocalFonts` (suggestions de polices de l'éditeur de réglages) est gardé
+   par `isElectron`, faux en web : il ne s'exécute pas. Effet visuel à constater
+   au navigateur : `TODO(verify)`.
+
+3. **Relais vers une organisation sans GitHub App : 517 tentatives, un `warn`
+   par minute, indéfiniment.** Le comportement « `pending`, jamais `failed` »
+   est voulu — le rendu n'a jamais eu de destination, ce n'est pas une panne —,
+   la cadence non. **Fait** : pour une `ForgeUnconfiguredError`, backoff propre,
+   exponentiel depuis une minute et **plafonné à une heure**, et un seul `warn`
+   par changement de cause au lieu d'un par tentative. Les autres erreurs
+   gardent la politique existante (budget de tentatives, `failed` à
+   épuisement, `warn` par tentative).
+
+4. **Ligne du devoir dans la vue étudiant de classroom.** La pastille
+   « Environnement en ligne » sur la ligne du nom encombrait le titre, et le
+   bouton « Ouvrir votre dépôt » n'a pas d'objet en mode en ligne (l'étudiant
+   n'a que la lecture, voire rien sous SEB). **Fait** : le mode passe sous le
+   nom en petit texte avec une icône discrète, le bouton du dépôt disparaît dès
+   que le mode n'est pas libre (le nom reste un lien discret en mode `online`,
+   rien en `online_seb`), et « Démarrer » reste seul bouton principal, aligné
+   comme les autres actions. Vue cartes et vue liste. **Le mode libre est
+   strictement inchangé**, et un test l'affirme
+   (`apps/web/src/StudentHome.test.ts`).
+
 ## Correction au cadrage relevée par le test SEB
 
 Le filtre d'URL de SEB doit autoriser le domaine du fournisseur d'identité (Switch edu-ID) en plus de celui du portail, sinon la page de connexion est bloquée. Le cadrage parlait d'une règle de domaine unique.

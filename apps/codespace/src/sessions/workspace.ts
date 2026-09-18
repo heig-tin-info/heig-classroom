@@ -41,12 +41,30 @@ const IDENTITY = {
   GIT_COMMITTER_EMAIL: "portal@codespace.local",
 } as const;
 
+/**
+ * Identité git de l'étudiant, telle que la table `users` la connaît
+ * (`display_name`, `email`). Elle n'est pas un secret : c'est le nom et
+ * l'adresse académique que l'étudiant lit déjà dans classroom.
+ */
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
 export interface WorkspaceOptions {
   paths: StagingPaths;
   sessionId: string;
   /** `portal.internal` : le nom que `--add-host` donne à la passerelle. */
   gitRemoteHost: string;
   gitRemotePort: number;
+  /**
+   * Identité à écrire dans `work/.git/config` si elle n'y est pas déjà. Les
+   * variables `GIT_AUTHOR_*` / `GIT_COMMITTER_*` du conteneur suffisent à
+   * `git commit`, mais l'étudiant qui tape `git config user.name` doit lire
+   * quelque chose, et une identité posée par l'étudiant lui-même n'est
+   * jamais écrasée.
+   */
+  identity?: GitIdentity;
   log?: { info: (o: object, m: string) => void; warn: (o: object, m: string) => void };
 }
 
@@ -124,6 +142,50 @@ export async function inspectWorkspace(workDir: string): Promise<WorkspaceState>
   };
 }
 
+/** Une valeur quelconque, rendue inoffensive pour `sh -lc`. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Pose `user.name` / `user.email` dans `work/.git/config`, **sans jamais
+ * écraser** ce qui s'y trouve déjà : si l'étudiant a posé la sienne, elle
+ * reste. Appelée depuis l'hôte, donc seulement tant que `work/` nous
+ * appartient (avant le premier `:U`).
+ */
+async function writeIdentity(workDir: string, identity: GitIdentity): Promise<void> {
+  const present = async (key: string): Promise<boolean> =>
+    (await gitWork(workDir, ["config", "--local", "--get", key]).catch(() => "")).trim() !== "";
+  if (!(await present("user.name"))) {
+    await gitWork(workDir, ["config", "--local", "user.name", identity.name]);
+  }
+  if (!(await present("user.email"))) {
+    await gitWork(workDir, ["config", "--local", "user.email", identity.email]);
+  }
+}
+
+/**
+ * Même chose, jouée **dans le conteneur** quand `work/` ne nous appartient
+ * plus. Aucun secret n'y entre : un nom et une adresse académique.
+ *
+ * Le script sort sans rien faire quand `/work` n'est pas un dépôt — c'est le
+ * cas d'un devoir sans dépôt de transit — et ne touche à rien quand l'étudiant
+ * a déjà posé son identité.
+ */
+export function identityScript(identity: GitIdentity): string {
+  const name = shellQuote(identity.name);
+  const email = shellQuote(identity.email);
+  return [
+    "set -e",
+    "cd /work",
+    "git rev-parse --git-dir >/dev/null 2>&1 || exit 0",
+    `git config --local --get user.name >/dev/null 2>&1 || git config --local user.name ${name}`,
+    `git config --local --get user.email >/dev/null 2>&1 || git config --local user.email ${email}`,
+    "git config --local --get user.name",
+    "git config --local --get user.email",
+  ].join("\n");
+}
+
 /**
  * Script d'achèvement, joué **dans le conteneur** quand `work/` ne nous
  * appartient plus. Il fait ce que `ensureWorkspace` fait depuis l'hôte, avec
@@ -161,6 +223,11 @@ export interface EnsureWorkspaceResult {
    * après le démarrage.
    */
   needsContainer: boolean;
+  /**
+   * L'identité git reste à poser et ne peut pas l'être depuis l'hôte, pour la
+   * même raison. `manager.ts` joue alors `identityScript` par `engine.exec`.
+   */
+  needsIdentity: boolean;
 }
 
 export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWorkspaceResult> {
@@ -168,25 +235,42 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
   const origin = remoteUrl(opts.gitRemoteHost, opts.gitRemotePort, opts.sessionId);
   const state = await inspectWorkspace(work);
 
+  // L'identité se pose sur un dépôt qui existe déjà ; pour un dépôt créé plus
+  // bas, elle est écrite juste après l'`init`. Elle ne dépend ni des commits
+  // ni de la branche : un étudiant dont l'espace de travail est complet doit
+  // pouvoir commiter, et c'est précisément le cas observé en production.
+  let needsIdentity = false;
+  if (opts.identity && state.present) {
+    if (state.writable) await writeIdentity(work, opts.identity);
+    else needsIdentity = true;
+  }
+
   // Un dépôt qui porte des commits appartient à l'étudiant : on n'y touche pas.
   if (state.present && state.born) {
-    return { created: false, completed: false, branch: state.branch, needsContainer: false };
+    return {
+      created: false,
+      completed: false,
+      branch: state.branch,
+      needsContainer: false,
+      needsIdentity,
+    };
   }
 
   const branch = await stagingHeadBranch(opts.paths.gitDir);
   if (state.present && branch === null) {
     // Dépôt de transit toujours sans référence (dépôt cible vide en mode TP) :
     // rien à poser, l'espace de travail reste celui de l'étudiant.
-    return { created: false, completed: false, branch: null, needsContainer: false };
+    return { created: false, completed: false, branch: null, needsContainer: false, needsIdentity };
   }
   if (state.present && !state.writable) {
     // Reprise d'une session déjà démarrée : `:U` a donné `work/` au conteneur.
-    return { created: false, completed: false, branch, needsContainer: true };
+    return { created: false, completed: false, branch, needsContainer: true, needsIdentity };
   }
 
   if (!state.present) {
     await git(["init", "-q", "--initial-branch=main", work], { env: IDENTITY });
     await git(["-C", work, "remote", "add", "origin", origin], { env: IDENTITY });
+    if (opts.identity) await writeIdentity(work, opts.identity);
   }
   // Le contenu vient du dépôt de transit par le chemin local : le portail n'a
   // pas à passer par son propre serveur HTTP pour se parler à lui-même.
@@ -232,5 +316,6 @@ export async function ensureWorkspace(opts: WorkspaceOptions): Promise<EnsureWor
     completed: state.present,
     branch: local,
     needsContainer: false,
+    needsIdentity,
   };
 }

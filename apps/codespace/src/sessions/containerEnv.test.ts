@@ -12,7 +12,9 @@ import { describe, expect, it } from "vitest";
 import { createEngine } from "../engine/index.js";
 import type { AssignmentRow, SessionRow } from "../db/schema.js";
 
-import { CONTAINER_ENV_KEYS, containerEnvFor } from "./manager.js";
+import type { UserRow } from "../db/schema.js";
+
+import { CONTAINER_ENV_KEYS, containerEnvFor, gitIdentityOf } from "./manager.js";
 
 const URLS = { classroomUrl: "https://classroom.chevallier.io", publicUrl: "https://code.chevallier.io" };
 
@@ -24,10 +26,39 @@ function session(patch: Partial<SessionRow> = {}): Pick<SessionRow, "launchJti">
   return { launchJti: null, ...patch };
 }
 
-describe("containerEnvFor — les trois variables, pas une de plus", () => {
+function user(
+  patch: Partial<UserRow> = {},
+): Pick<UserRow, "displayName" | "email" | "login"> {
+  return {
+    displayName: "Pierre Bressy",
+    email: "pierre.bressy@heig-vd.ch",
+    login: "pierre.bressy",
+    ...patch,
+  };
+}
+
+describe("containerEnvFor — ces variables, pas une de plus", () => {
   it("ne produit jamais de clé hors de CONTAINER_ENV_KEYS", () => {
-    const env = containerEnvFor(session({ launchJti: "jti-1" }), assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }), URLS);
+    const env = containerEnvFor(
+      session({ launchJti: "jti-1" }),
+      assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }),
+      URLS,
+      user(),
+    );
     expect(Object.keys(env).sort()).toEqual([...CONTAINER_ENV_KEYS].sort());
+  });
+
+  it("n'a aucun secret dans ses valeurs : ni jeton, ni clé, ni mot de passe", () => {
+    const env = containerEnvFor(
+      session({ launchJti: "jti-1" }),
+      assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }),
+      URLS,
+      user(),
+    );
+    for (const key of Object.keys(env)) {
+      expect(key).toMatch(/^(CODESPACE|GIT)_/);
+    }
+    expect(Object.values(env).join(" ")).not.toMatch(/token|secret|password|ghs_|ghp_/i);
   });
 
   it("transmet l'échéance du devoir en ISO 8601", () => {
@@ -63,7 +94,32 @@ describe("containerEnvFor — les trois variables, pas une de plus", () => {
   });
 });
 
-describe("engine.runArgs — l'environnement du conteneur ne porte que ces trois variables", () => {
+describe("identité git de l'étudiant", () => {
+  it("pose auteur et committer depuis display_name et email", () => {
+    const env = containerEnvFor(session(), assignment(), URLS, user());
+    expect(env.GIT_AUTHOR_NAME).toBe("Pierre Bressy");
+    expect(env.GIT_AUTHOR_EMAIL).toBe("pierre.bressy@heig-vd.ch");
+    expect(env.GIT_COMMITTER_NAME).toBe("Pierre Bressy");
+    expect(env.GIT_COMMITTER_EMAIL).toBe("pierre.bressy@heig-vd.ch");
+  });
+
+  it("retombe sur le login institutionnel quand display_name est vide", () => {
+    expect(gitIdentityOf(user({ displayName: "  " }))?.name).toBe("pierre.bressy");
+  });
+
+  it("tout ou rien : sans adresse, aucune des quatre variables", () => {
+    const env = containerEnvFor(session(), assignment(), URLS, user({ email: "" }));
+    expect(gitIdentityOf(user({ email: "" }))).toBeNull();
+    expect(Object.keys(env).some((k) => k.startsWith("GIT_"))).toBe(false);
+  });
+
+  it("n'en pose aucune quand la session n'a pas d'utilisateur connu", () => {
+    const env = containerEnvFor(session(), assignment(), URLS);
+    expect(Object.keys(env).some((k) => k.startsWith("GIT_"))).toBe(false);
+  });
+});
+
+describe("engine.runArgs — l'environnement du conteneur ne porte que ces variables", () => {
   const engine = createEngine({
     podmanUrl: "unix:///run/podman/podman.sock",
     network: "codespace",
@@ -79,6 +135,7 @@ describe("engine.runArgs — l'environnement du conteneur ne porte que ces trois
     session({ launchJti: "jti-1" }),
     assignment({ closesAt: new Date("2026-10-01T12:00:00Z") }),
     URLS,
+    user(),
   );
   const args = engine.runArgs({ sessionId: "s1", name: "cs-s1", workDir: "/vol/a/b/work", env });
 
@@ -87,13 +144,25 @@ describe("engine.runArgs — l'environnement du conteneur ne porte que ces trois
     return argv.filter((_, i) => argv[i - 1] === "-e" || argv[i - 1] === "--env");
   }
 
-  it("pose exactement les trois variables attendues", () => {
+  it("pose exactement les variables attendues", () => {
     expect(envArgs(args).map((a) => a.split("=")[0]).sort()).toEqual([...CONTAINER_ENV_KEYS].sort());
   });
 
   it("porte les valeurs décidées par le gestionnaire de sessions", () => {
     expect(envArgs(args)).toContain("CODESPACE_DEADLINE=2026-10-01T12:00:00.000Z");
     expect(envArgs(args)).toContain("CODESPACE_RETURN_URL=https://classroom.chevallier.io/");
+    expect(envArgs(args)).toContain("GIT_AUTHOR_NAME=Pierre Bressy");
+    expect(envArgs(args)).toContain("GIT_COMMITTER_EMAIL=pierre.bressy@heig-vd.ch");
+  });
+
+  it("passe un nom à espaces tel quel : execFile, aucun shell", () => {
+    const spaced = engine.runArgs({
+      sessionId: "s3",
+      name: "cs-s3",
+      workDir: "/vol/a/b/work",
+      env: containerEnvFor(session(), assignment(), URLS, user({ displayName: "Jean-Luc D'Arc" })),
+    });
+    expect(envArgs(spaced)).toContain("GIT_AUTHOR_NAME=Jean-Luc D'Arc");
   });
 
   it("n'utilise jamais --env-file : la liste doit rester lisible dans les arguments", () => {

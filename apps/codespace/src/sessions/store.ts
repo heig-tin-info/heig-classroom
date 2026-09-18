@@ -48,6 +48,16 @@ export function findSession(db: Db, id: string): SessionRow | undefined {
   return db.select().from(sessions).where(eq(sessions.id, id)).get();
 }
 
+/**
+ * L'utilisateur d'une session, par sa clé primaire. Le gestionnaire de
+ * sessions en a besoin au `podman run` : l'identité git posée sur le
+ * conteneur (`display_name`, `email`) vient de cette ligne, et `launch()` ne
+ * reçoit que la session.
+ */
+export function findUser(db: Db, id: string): UserRow | undefined {
+  return db.select().from(users).where(eq(users.id, id)).get();
+}
+
 /** La session vivante du couple, s'il y en a une. */
 export function findLiveSession(
   db: Db,
