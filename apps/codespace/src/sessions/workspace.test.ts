@@ -32,7 +32,7 @@ import {
   WorkspaceBootstrapError,
   type ManagerDeps,
 } from "./manager.js";
-import { completionScript } from "./workspace.js";
+import { completionScript, identityScript, shellQuote } from "./workspace.js";
 import { findAnySession } from "./store.js";
 
 /** Moteur simulé : il n'applique pas `:U`, les droits sont posés à la main. */
@@ -325,6 +325,62 @@ describe("reprise : dépôt de transit vide, espace de travail à compléter", (
 
     expect((await git(["-C", work, "rev-parse", "HEAD"])).trim()).toBe(sha);
     expect(engine.execs).toEqual([]);
+  });
+});
+
+describe("identité git de l'étudiant dans work/.git/config", () => {
+  async function config(work: string, key: string): Promise<string> {
+    return (await git(["-C", work, "config", "--local", "--get", key]).catch(() => "")).trim();
+  }
+
+  it("est posée à l'amorçage, depuis l'hôte, avant le podman run", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const { session } = await manager.start(user, assignment);
+    const work = join(session.volumeDir, "work");
+    expect(await config(work, "user.name")).toBe("Sacha Student");
+    expect(await config(work, "user.email")).toBe("student@heig-vd.ch");
+    // Rien n'est passé par le conteneur : l'hôte pouvait encore écrire.
+    expect(engine.execs).toEqual([]);
+  });
+
+  it("n'écrase jamais l'identité que l'étudiant a posée lui-même", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const { session } = await manager.start(user, assignment);
+    const work = join(session.volumeDir, "work");
+    await git(["-C", work, "config", "--local", "user.name", "Pseudonyme"]);
+    engine.kill(containerNameFor(session.id));
+    await makeManager().start(user, assignment);
+    expect(await config(work, "user.name")).toBe("Pseudonyme");
+  });
+
+  it("passe par podman exec quand work/ appartient déjà au conteneur", async () => {
+    if (process.getuid?.() === 0) return; // root ignore les droits.
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const { session } = await manager.start(user, assignment);
+    const work = join(session.volumeDir, "work");
+    await chmod(work, 0o555);
+    try {
+      engine.kill(containerNameFor(session.id));
+      await makeManager().start(user, assignment);
+    } finally {
+      await chmod(work, 0o755);
+    }
+    const exec = engine.execs.find((e) => e.argv[2]?.includes("user.email"));
+    expect(exec?.argv[0]).toBe("sh");
+    expect(exec?.argv[2]).toBe(identityScript({ name: "Sacha Student", email: "student@heig-vd.ch" }));
+    // Aucun secret n'entre dans le conteneur (invariant 1).
+    expect(exec?.argv[2]).not.toMatch(/Authorization|ghs_|token/);
+  });
+
+  it("le script n'écrase rien, sort sans bruit hors dépôt, et cite proprement", () => {
+    const script = identityScript({ name: "Jean-Luc D'Arc", email: "j@heig-vd.ch" });
+    expect(script).toContain("git rev-parse --git-dir >/dev/null 2>&1 || exit 0");
+    expect(script).toContain("git config --local --get user.name >/dev/null 2>&1 ||");
+    expect(script).toContain(`user.name 'Jean-Luc D'\\''Arc'`);
+    expect(shellQuote("a'b")).toBe(`'a'\\''b'`);
   });
 });
 

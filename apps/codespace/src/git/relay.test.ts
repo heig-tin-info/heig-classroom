@@ -15,6 +15,7 @@ import {
   createRelayWorker,
   refspecFor,
   stagingTargets,
+  UNCONFIGURED_BACKOFF,
 } from "./relay.js";
 import { ensureStagingRepo } from "./staging.js";
 import type { RepoRef, StagingSession } from "./types.js";
@@ -79,6 +80,16 @@ describe("passage du jeton", () => {
     // No `-c`, no `--config-env`, no temporary file: the three ways a token
     // would have become visible in `ps` or on disk.
     expect(Object.keys(env)).toEqual(["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]);
+  });
+});
+
+describe("cadence d'une forge non configurée", () => {
+  it("part d'une minute, double, et plafonne à une heure", () => {
+    expect(UNCONFIGURED_BACKOFF(1)).toBe(60_000);
+    expect(UNCONFIGURED_BACKOFF(2)).toBe(120_000);
+    expect(UNCONFIGURED_BACKOFF(6)).toBe(1_920_000);
+    expect(UNCONFIGURED_BACKOFF(7)).toBe(3_600_000);
+    expect(UNCONFIGURED_BACKOFF(517)).toBe(3_600_000);
   });
 });
 
@@ -180,6 +191,7 @@ describe("createRelayWorker", () => {
       forge: createUnconfiguredGithubForge(),
       targets: stagingTargets(s.volumesRoot, s.repoOf),
       backoffMs: () => 0,
+      unconfiguredBackoffMs: () => 0,
       maxAttempts: 2,
     });
     await recordPush({ store: s.store }, SESSION, [
@@ -192,6 +204,65 @@ describe("createRelayWorker", () => {
     expect(row.state).toBe("pending");
     expect(row.attempts).toBe(4);
     expect(row.lastError).toMatch(/GitHub App non configurée/);
+    s.close();
+  });
+
+  it("forge non configurée : une tentative par heure au plus, et un seul warn", async () => {
+    // Mesuré en production : 517 tentatives et 517 `warn`, un par minute. Le
+    // « pending, jamais failed » est voulu ; la cadence, non.
+    const s = await scenario();
+    const warns: string[] = [];
+    let clock = new Date("2026-09-18T08:00:00Z");
+    const worker = createRelayWorker({
+      store: s.store,
+      forge: createUnconfiguredGithubForge(),
+      targets: stagingTargets(s.volumesRoot, s.repoOf),
+      maxAttempts: 2,
+      now: () => clock,
+      log: { info: () => undefined, warn: (_o, m) => warns.push(m) },
+    });
+    await recordPush({ store: s.store }, SESSION, [
+      { ref: "refs/heads/main", oldSha: null, sha: s.src.sha },
+    ]);
+
+    const waits: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      expect(await worker.runOnce()).toEqual({ relayed: 0, retried: 1, failed: 0 });
+      const row = (await s.store.bySession(SESSION.sessionId))[0] as PushEventRow;
+      waits.push((row.nextAttemptAt as Date).getTime() - clock.getTime());
+      clock = row.nextAttemptAt as Date; // on saute directement à l'échéance
+    }
+
+    // 1 min, 2, 4, 8, 16, 32, puis le plafond d'une heure.
+    expect(waits.slice(0, 6)).toEqual([60_000, 120_000, 240_000, 480_000, 960_000, 1_920_000]);
+    expect(waits.slice(6)).toEqual(Array(6).fill(3_600_000));
+    // Douze tentatives, un seul warn : le journal reste lisible.
+    expect(warns).toEqual(["relais en attente : la forge n'est pas configurée pour ce dépôt"]);
+    // Et la ligne n'est toujours pas `failed` : elle n'a jamais eu de destination.
+    expect((await s.store.bySession(SESSION.sessionId))[0]?.state).toBe("pending");
+    s.close();
+  });
+
+  it("une panne ordinaire garde sa cadence et son warn par tentative", async () => {
+    const s = await scenario();
+    const warns: string[] = [];
+    const worker = createRelayWorker({
+      store: s.store,
+      forge: fakeForge(() => join(s.base, "jamais.git")),
+      targets: stagingTargets(s.volumesRoot, s.repoOf),
+      backoffMs: () => 0,
+      maxAttempts: 5,
+      log: { info: () => undefined, warn: (_o, m) => warns.push(m) },
+    });
+    await recordPush({ store: s.store }, SESSION, [
+      { ref: "refs/heads/main", oldSha: null, sha: s.src.sha },
+    ]);
+    await worker.runOnce();
+    await worker.runOnce();
+    expect(warns).toEqual([
+      "relais en échec, nouvelle tentative programmée",
+      "relais en échec, nouvelle tentative programmée",
+    ]);
     s.close();
   });
 

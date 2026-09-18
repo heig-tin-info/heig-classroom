@@ -31,12 +31,19 @@ import {
   type StagingSource,
 } from "../git/index.js";
 
-import { completionScript, ensureWorkspace, type EnsureWorkspaceResult } from "./workspace.js";
+import {
+  completionScript,
+  ensureWorkspace,
+  identityScript,
+  type EnsureWorkspaceResult,
+  type GitIdentity,
+} from "./workspace.js";
 import { snapshot } from "./shadow.js";
 import {
   findAnySession,
   findAssignment,
   findSession,
+  findUser,
   listLiveSessions,
   targetRepoOfSession,
   updateSession,
@@ -148,13 +155,23 @@ export function stagingSourceFor(
  * conteneur étudiant, en plus de celles de l'image. Invariant 1 : aucun secret
  * ne sort du portail, et cette liste est ce qu'un test affirme.
  *
- * Elles sont lues par `heig.codespace-statusbar`, l'extension de barre d'état
- * cuite dans l'image (`images/c-dev/extension`).
+ * Les trois `CODESPACE_` sont lues par `heig.codespace-statusbar`, l'extension
+ * de barre d'état cuite dans l'image (`images/c-dev/extension`).
+ *
+ * Les quatre `GIT_` sont l'identité de l'étudiant (`users.display_name`,
+ * `users.email`). Git les honore **sans aucun fichier de configuration**, donc
+ * un `git commit` depuis le terminal comme depuis l'extension git de VS Code
+ * porte le nom et l'adresse académique de l'étudiant. Ce ne sont pas des
+ * secrets : l'étudiant lit déjà les deux dans classroom.
  */
 export const CONTAINER_ENV_KEYS = [
   "CODESPACE_DEADLINE",
   "CODESPACE_RETURN_URL",
   "CODESPACE_ASSIGNMENT_NAME",
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
 ] as const;
 
 /** Base d'URL rendue absolue, ou `undefined` si elle n'est pas exploitable. */
@@ -184,6 +201,7 @@ export function containerEnvFor(
   session: Pick<SessionRow, "launchJti">,
   assignment: Pick<AssignmentRow, "title" | "closesAt">,
   urls: { classroomUrl?: string; publicUrl?: string },
+  user?: Pick<UserRow, "displayName" | "email" | "login"> | undefined,
 ): Record<string, string> {
   const env: Record<string, string> = {};
   if (assignment.closesAt) env.CODESPACE_DEADLINE = assignment.closesAt.toISOString();
@@ -192,7 +210,32 @@ export function containerEnvFor(
   const back = rootUrl(session.launchJti ? urls.classroomUrl : urls.publicUrl);
   if (back) env.CODESPACE_RETURN_URL = back;
   if (assignment.title.trim() !== "") env.CODESPACE_ASSIGNMENT_NAME = assignment.title;
+  const identity = user ? gitIdentityOf(user) : null;
+  if (identity) {
+    env.GIT_AUTHOR_NAME = identity.name;
+    env.GIT_AUTHOR_EMAIL = identity.email;
+    env.GIT_COMMITTER_NAME = identity.name;
+    env.GIT_COMMITTER_EMAIL = identity.email;
+  }
   return env;
+}
+
+/**
+ * Identité git d'un étudiant, ou `null` s'il n'en a pas d'exploitable.
+ *
+ * **Tout ou rien** : une adresse sans nom, ou l'inverse, ferait tomber git sur
+ * sa détection automatique (`student@<nom du conteneur>`) pour la moitié
+ * manquante, ce qui est pire qu'une absence franche. `display_name` est ce que
+ * le jeton de lancement de classroom apporte ; le login institutionnel prend
+ * le relais quand il est vide.
+ */
+export function gitIdentityOf(
+  user: Pick<UserRow, "displayName" | "email" | "login">,
+): GitIdentity | null {
+  const name = user.displayName.trim() !== "" ? user.displayName.trim() : user.login.trim();
+  const email = user.email.trim();
+  if (name === "" || email === "") return null;
+  return { name, email };
 }
 
 export interface ManagerDeps extends ManagerOptions {
@@ -419,12 +462,39 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     }
   }
 
+  /**
+   * Pose l'identité git **dans le conteneur** quand l'hôte ne peut plus écrire
+   * dans `work/.git/config` (même contrainte que `finishWorkspace`).
+   *
+   * Aucun secret n'y entre : un nom d'étudiant et une adresse académique. Un
+   * échec est journalisé et ne ferme rien — les variables `GIT_*` posées au
+   * `podman run` suffisent déjà à `git commit`, ceci n'est que la version
+   * lisible par `git config user.name`.
+   */
+  async function ensureIdentityInContainer(
+    session: SessionRow,
+    identity: GitIdentity | null,
+  ): Promise<void> {
+    if (!identity) return;
+    const name = session.containerName ?? containerNameFor(session.id);
+    try {
+      await engine.exec(name, ["sh", "-lc", identityScript(identity)]);
+    } catch (err) {
+      log.warn(
+        { sessionId: session.id, err: redactSecrets(String((err as Error).message ?? err)) },
+        "identité git non posée dans work/.git/config",
+      );
+    }
+  }
+
   /** Lance le conteneur et attend son `/healthz`. */
   async function launch(
     session: SessionRow,
     assignment: AssignmentRow,
   ): Promise<{ session: SessionRow; healthyInMs: number }> {
     const paths = stagingPaths(opts.volumesRoot, session.student, assignment.id);
+    const user = findUser(db, session.userId);
+    const identity = user ? gitIdentityOf(user) : null;
     // **Avant** le `podman run` : après lui, `:U` a donné `work/` à la plage
     // d'UID du conteneur et le portail n'y écrit plus (voir workspace.ts).
     const workspace = await ensureWorkspace({
@@ -432,6 +502,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       sessionId: session.id,
       gitRemoteHost: opts.gitRemoteHost,
       gitRemotePort: opts.gitRemotePort,
+      ...(identity ? { identity } : {}),
       log: opts.log,
     });
     const name = containerNameFor(session.id);
@@ -439,10 +510,15 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
       sessionId: session.id,
       name,
       workDir: paths.workDir,
-      env: containerEnvFor(session, assignment, {
-        ...(opts.classroomUrl !== undefined ? { classroomUrl: opts.classroomUrl } : {}),
-        ...(opts.publicUrl !== undefined ? { publicUrl: opts.publicUrl } : {}),
-      }),
+      env: containerEnvFor(
+        session,
+        assignment,
+        {
+          ...(opts.classroomUrl !== undefined ? { classroomUrl: opts.classroomUrl } : {}),
+          ...(opts.publicUrl !== undefined ? { publicUrl: opts.publicUrl } : {}),
+        },
+        user,
+      ),
       ...(assignment.image ? { image: assignment.image } : {}),
     });
     if (!info.ip) {
@@ -460,6 +536,8 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     });
     // Reprise d'un volume dont `work/` appartient déjà au conteneur : c'est le
     // seul moment où l'achèvement est possible, le conteneur venant de naître.
+    // L'identité d'abord : elle conditionne tout commit à venir.
+    if (workspace.needsIdentity) await ensureIdentityInContainer(updated, identity);
     await finishWorkspace(updated, workspace);
     return { session: updated, healthyInMs };
   }
@@ -501,6 +579,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         // essai réel du 2026-09-17. On le refait, et on complète l'espace de
         // travail dans le conteneur vivant. Rien ne peut être écrasé : par
         // construction, il n'y avait rien.
+        const identity = gitIdentityOf(user);
         const refs = await refSnapshot(paths.gitDir).catch(() => new Map<string, string>());
         if (refs.size === 0) {
           await seedStaging(existing, assignment);
@@ -509,10 +588,15 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
             sessionId: existing.id,
             gitRemoteHost: opts.gitRemoteHost,
             gitRemotePort: opts.gitRemotePort,
+            ...(identity ? { identity } : {}),
             log: opts.log,
           });
           await finishWorkspace(existing, workspace);
         }
+        // Le conteneur vivant ne recevra pas de nouvelles variables `GIT_*` —
+        // elles sont posées au `podman run` —, mais `work/.git/config` peut
+        // encore être réparé, et c'est ce que lit `git config user.name`.
+        await ensureIdentityInContainer(existing, identity);
         const touched = updateSession(db, existing.id, { ...patch, lastSeen: new Date() });
         return {
           session: touched,

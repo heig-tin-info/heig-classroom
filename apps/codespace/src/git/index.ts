@@ -54,6 +54,7 @@ export {
   createRelayWorker,
   refspecFor,
   stagingTargets,
+  UNCONFIGURED_BACKOFF,
   type RelayOptions,
   type RelayTarget,
   type RelayTargets,

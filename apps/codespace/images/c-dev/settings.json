@@ -9,6 +9,8 @@
   "chat.disableAIFeatures": true,
   "workbench.secondarySideBar.defaultVisibility": "hidden",
   "keyboard.dispatch": "keyCode",
+  "terminal.integrated.stickyScroll.enabled": false,
+  "terminal.integrated.fontLigatures.enabled": false,
   "extensions.allowed": {
     "*": false,
     "llvm-vs-code-extensions.vscode-clangd": true,

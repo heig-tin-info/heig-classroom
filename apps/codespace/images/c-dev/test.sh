@@ -78,17 +78,24 @@ echo "seccomp : ${REPO_ROOT}/infra/seccomp/codespace.json"
 # --------------------------------------------------------------------------
 head2 "0. demarrage sous run-hardened.sh et mesure jusqu'a /healthz"
 # --------------------------------------------------------------------------
-# Les trois variables que le portail pose au `podman run` (sessions/manager.ts,
-# CONTAINER_ENV_KEYS). Le conteneur A les porte, le conteneur B non : la
-# section 9 compare les deux environnements et exige exactement trois lignes
-# d'ecart. Aucun secret n'y entre, c'est tout le propos de l'invariant 1.
+# Les sept variables que le portail pose au `podman run` (sessions/manager.ts,
+# CONTAINER_ENV_KEYS) : trois CODESPACE_ pour l'extension de barre d'etat,
+# quatre GIT_ pour l'identite de l'etudiant. Le conteneur A les porte, le
+# conteneur B non : la section 9 compare les deux environnements et exige
+# exactement sept lignes d'ecart. Aucun secret n'y entre, invariant 1.
 ENV_DEADLINE=2026-10-01T12:00:00.000Z
 ENV_RETURN_URL=https://classroom.chevallier.io/
 # Sans espace : run-hardened.sh decoupe EXTRA_ARGS par le shell. Le portail,
 # lui, passe la valeur telle quelle a execFile (aucun shell), donc un titre
 # avec des espaces lui convient ; c'est ce script qui est contraint.
 ENV_ASSIGNMENT_NAME=TP3-pointeurs
+# Identite git de l'etudiant (users.display_name, users.email). Meme contrainte
+# d'absence d'espace : c'est EXTRA_ARGS qui la pose, pas le portail.
+ENV_GIT_NAME=Pierre-Bressy
+ENV_GIT_EMAIL=pierre.bressy@heig-vd.ch
 PORTAL_ENV="-e CODESPACE_DEADLINE=${ENV_DEADLINE} -e CODESPACE_RETURN_URL=${ENV_RETURN_URL} -e CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}"
+PORTAL_ENV="${PORTAL_ENV} -e GIT_AUTHOR_NAME=${ENV_GIT_NAME} -e GIT_AUTHOR_EMAIL=${ENV_GIT_EMAIL}"
+PORTAL_ENV="${PORTAL_ENV} -e GIT_COMMITTER_NAME=${ENV_GIT_NAME} -e GIT_COMMITTER_EMAIL=${ENV_GIT_EMAIL}"
 
 T0=$(date +%s.%N)
 CTR_NAME="$CTR_A" VOL_DIR="${VOL_BASE}/a" IMAGE="$IMAGE" EXTRA_ARGS="$PORTAL_ENV" \
@@ -335,7 +342,9 @@ for f in /run/code-server/User/settings.json /run/code-server/Machine/settings.j
            '"extensions.autoUpdate": false' '"update.mode": "none"' \
            '"telemetry.telemetryLevel": "off"' '"chat.disableAIFeatures": true' \
            '"workbench.secondarySideBar.defaultVisibility": "hidden"' \
-           '"keyboard.dispatch": "keyCode"'; do
+           '"keyboard.dispatch": "keyCode"' \
+           '"terminal.integrated.stickyScroll.enabled": false' \
+           '"terminal.integrated.fontLigatures.enabled": false'; do
     cexec "grep -qF '$k' $f" >/dev/null 2>&1 || fail "reglage absent de $f : $k"
   done
 done
@@ -361,6 +370,38 @@ cexec "grep -qF '\"workbench.secondarySideBar.defaultVisibility\":{type:\"string
 cexec "grep -qF '\"keyboard.dispatch\":{scope:1,type:\"string\",enum:[\"code\",\"keyCode\"]' $WB" >/dev/null 2>&1 \
   || fail "« keyCode » n'est pas une valeur declaree de keyboard.dispatch"
 ok "les deux reglages existent dans VS Code 1.137.0 embarque, avec les valeurs posees dans leur enumeration"
+
+# Invite « Use the fonts on your computer » : la chaine de cause, relevee dans
+# le paquet embarque (voir README). Le defilement colle du terminal charge
+# l'addon de ligatures **sans condition**, et cet addon appelle
+# queryLocalFonts(). C'est stickyScroll.enabled (defaut true) qui gouverne.
+cexec "grep -qF '\"terminal.integrated.stickyScroll.enabled\":{markdownDescription:' $WB" >/dev/null 2>&1 \
+  || fail "terminal.integrated.stickyScroll.enabled inconnu du paquet VS Code embarque"
+cexec "grep -aqE '\"terminal.integrated.stickyScroll.enabled\":[{][^}]{0,300}default:!0' $WB" >/dev/null 2>&1 \
+  || fail "le defaut amont de terminal.integrated.stickyScroll.enabled n'est plus true : la preuve est perimee"
+cexec "grep -qF 'importAddon(\"ligatures\").then' $WB" >/dev/null 2>&1 \
+  || fail "le defilement colle ne charge plus l'addon de ligatures : la preuve est perimee"
+cexec "grep -aqE 'stickyScroll.enabled.{0,200}hasRichCommandDetection' $WB" >/dev/null 2>&1 \
+  || fail "_shouldBeEnabled ne lit plus terminal.integrated.stickyScroll.enabled"
+cexec "grep -q 'queryLocalFonts' /usr/lib/code-server/lib/vscode/node_modules/@xterm/addon-ligatures/lib/addon-ligatures.js" >/dev/null 2>&1 \
+  || fail "addon-ligatures n'appelle plus queryLocalFonts : la preuve est perimee"
+cexec "grep -aqE '\"terminal.integrated.fontLigatures.enabled\":[{][^}]{0,300}default:!1' $WB" >/dev/null 2>&1 \
+  || fail "le defaut amont de terminal.integrated.fontLigatures.enabled n'est plus false"
+ok "invite des polices : chaine stickyScroll -> addon-ligatures -> queryLocalFonts relevee dans le paquet embarque"
+
+# Les seuls appelants de queryLocalFonts dans ce qui est servi au navigateur :
+# l'addon de ligatures, et le paquet du workbench (suggestions de polices des
+# reglages, gardees par isElectron, faux en web). Toute autre famille de
+# fichiers serait un appelant nouveau, donc une invite possible.
+FONT_CALLERS=$(cexec "grep -rl queryLocalFonts /usr/lib/code-server/lib/vscode/out /usr/lib/code-server/lib/vscode/node_modules 2>/dev/null | sort" | tr -d '\r')
+[ -n "$FONT_CALLERS" ] || fail "aucun appelant de queryLocalFonts trouve : la recherche ne prouve rien"
+STRAY=$(printf '%s\n' "$FONT_CALLERS" | grep -v 'addon-ligatures' | grep -v 'workbench')
+[ -z "$STRAY" ] || fail "appelant inattendu de queryLocalFonts dans le paquet" "$STRAY"
+# Le garde du second appelant : Vhe=Ogo, ou Ogo est isElectron dans le module
+# de plate-forme minifie (voir README). Faux dans un navigateur.
+cexec "grep -qF 'Vhe=Ogo' $WB" >/dev/null 2>&1 \
+  || echo "  note le garde isElectron du second appelant n'a pas ete retrouve tel quel (minification changee)"
+ok "queryLocalFonts n'est appele que par l'addon de ligatures et par un chemin garde par isElectron"
 
 podman_remote logs "$CTR_A" 2>&1 | grep -q 'Using custom extensions gallery' \
   || fail "code-server n'a pas pris EXTENSIONS_GALLERY (galerie par defaut active)"
@@ -405,20 +446,26 @@ python3 -c "import sys; sys.exit(0 if ${RES_ELAPSED} < 2 else 1)" \
 ok "getent hosts example.invalid echoue en ${RES_ELAPSED}s (< 2 s)"
 
 # --------------------------------------------------------------------------
-head2 "9. environnement du conteneur : les trois variables du portail, et rien d'autre"
+head2 "9. environnement du conteneur : les sept variables du portail, et rien d'autre"
 # --------------------------------------------------------------------------
 # Ce que le portail pose au `podman run` (sessions/manager.ts,
-# CONTAINER_ENV_KEYS) : l'echeance, l'URL de retour, le titre du devoir.
-# L'extension `heig.codespace-statusbar` les lit dans `process.env`.
+# CONTAINER_ENV_KEYS) : l'echeance, l'URL de retour, le titre du devoir, puis
+# l'identite git de l'etudiant. L'extension `heig.codespace-statusbar` lit les
+# trois premieres dans `process.env` ; git honore les quatre autres sans
+# aucun fichier de configuration.
 
 for kv in "CODESPACE_DEADLINE=${ENV_DEADLINE}" \
           "CODESPACE_RETURN_URL=${ENV_RETURN_URL}" \
-          "CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}"; do
+          "CODESPACE_ASSIGNMENT_NAME=${ENV_ASSIGNMENT_NAME}" \
+          "GIT_AUTHOR_NAME=${ENV_GIT_NAME}" \
+          "GIT_AUTHOR_EMAIL=${ENV_GIT_EMAIL}" \
+          "GIT_COMMITTER_NAME=${ENV_GIT_NAME}" \
+          "GIT_COMMITTER_EMAIL=${ENV_GIT_EMAIL}"; do
   cexec "tr '\\0' '\\n' < /proc/1/environ | grep -qxF '$kv'" >/dev/null 2>&1 \
     || fail "variable absente de l'environnement de code-server (pid 1) : $kv" \
             "$(cexec "tr '\\0' '\\n' < /proc/1/environ" 2>&1)"
 done
-ok "les trois variables du portail sont dans l'environnement de code-server (pid 1)"
+ok "les sept variables du portail sont dans l'environnement de code-server (pid 1)"
 
 # Exactement trois lignes d'ecart avec un conteneur lance sans EXTRA_ARGS : le
 # portail n'ajoute rien d'autre a l'image, aucun secret au premier chef.
@@ -426,11 +473,40 @@ ENV_A=$(podman_remote exec "$CTR_A" env | sort)
 ENV_B=$(podman_remote exec "$CTR_B" env | sort)
 EXTRA=$(comm -23 <(printf '%s\n' "$ENV_A") <(printf '%s\n' "$ENV_B") | grep -v '^HOSTNAME=' | grep -v '^container=')
 EXTRA_COUNT=$(printf '%s\n' "$EXTRA" | grep -c .)
-[ "$EXTRA_COUNT" = "3" ] \
-  || fail "le conteneur du portail porte $EXTRA_COUNT variable(s) de plus que l'image, attendu 3" "$EXTRA"
-printf '%s\n' "$EXTRA" | grep -qv '^CODESPACE_' \
-  && fail "une variable hors CODESPACE_* est posee sur le conteneur" "$EXTRA"
-ok "exactement trois variables en plus de celles de l'image, toutes en CODESPACE_ : $(printf '%s' "$EXTRA" | tr '\n' ' ')"
+[ "$EXTRA_COUNT" = "7" ] \
+  || fail "le conteneur du portail porte $EXTRA_COUNT variable(s) de plus que l'image, attendu 7" "$EXTRA"
+printf '%s\n' "$EXTRA" | grep -qvE '^(CODESPACE|GIT)_' \
+  && fail "une variable hors CODESPACE_*/GIT_* est posee sur le conteneur" "$EXTRA"
+ok "exactement sept variables en plus de celles de l'image, toutes en CODESPACE_ ou GIT_ : $(printf '%s' "$EXTRA" | tr '\n' ' ')"
+
+# L'identite git, a l'usage : un commit reellement fait dans le conteneur porte
+# le nom et l'adresse de l'etudiant, sans qu'aucun fichier de configuration
+# n'ait ete ecrit. C'est le retour de production du 2026-09-18.
+IDENT=$(cexec 'git -C /work var GIT_AUTHOR_IDENT' 2>&1)
+case "$IDENT" in
+  "${ENV_GIT_NAME} <${ENV_GIT_EMAIL}>"*) : ;;
+  *) fail "git -C /work var GIT_AUTHOR_IDENT ne porte pas l'identite posee par le portail" "$IDENT" ;;
+esac
+ok "git -C /work var GIT_AUTHOR_IDENT : $IDENT"
+
+COMMIT=$(cexec '
+  set -e
+  rm -rf /tmp/idtest && mkdir -p /tmp/idtest && cd /tmp/idtest
+  git init -q -b main .
+  echo bonjour > a.txt
+  git add a.txt
+  git commit -q -m "essai identite"
+  git --no-pager log -1 --pretty=format:"%an|%ae|%cn|%ce"' 2>&1)
+case "$COMMIT" in
+  "${ENV_GIT_NAME}|${ENV_GIT_EMAIL}|${ENV_GIT_NAME}|${ENV_GIT_EMAIL}") : ;;
+  *) fail "git commit sans fichier de configuration n'a pas produit le bon auteur" "$COMMIT" ;;
+esac
+ok "git commit dans le conteneur : auteur et committer = ${ENV_GIT_NAME} <${ENV_GIT_EMAIL}>"
+
+# Et aucune configuration n'a ete ecrite pour cela : ce sont bien les variables.
+CFG=$(cexec 'git -C /tmp/idtest config --local --get user.name || true' 2>&1 | tr -d "[:space:]")
+[ -z "$CFG" ] || fail "une identite a ete ecrite dans la configuration locale : $CFG"
+ok "aucun user.name local : les quatre variables suffisent a git"
 
 # L'hote d'extensions herite de cet environnement en deux temps. Premier
 # temps, mesure : code-server (pid 1) engendre le serveur VS Code, qui porte
