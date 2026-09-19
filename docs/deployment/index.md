@@ -38,9 +38,12 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
    `docker compose -f compose.prod.yml --env-file .env.prod up -d`.
    Migrations run at boot (`MIGRATE_ON_START=1`); check
    `https://<host>/healthz` returns `database: up, jobs: up`.
-6. **Backups** — the compose `backup` service does a daily `pg_dump` with 30
-   days of retention; wire a copy off the VM (rclone to an object store) to
-   meet the RPO.
+6. **Backups** — two layers. DigitalOcean snapshots the droplet daily, off the
+   VM: that covers losing the machine, though a disk image of a running
+   Postgres is crash-consistent rather than a clean dump. The compose `backup`
+   service adds a daily `pg_dump` with 30 days of retention — a logical dump,
+   restorable table by table, but living on the VM it protects. Take a fresh
+   dump before any migration rather than trusting the daily one.
 
 ## Updating
 

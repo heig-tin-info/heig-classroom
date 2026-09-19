@@ -41,9 +41,13 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
    `docker compose -f compose.prod.yml --env-file .env.prod up -d`.
    Les migrations s'exécutent au démarrage (`MIGRATE_ON_START=1`) ; vérifiez que
    `https://<host>/healthz` renvoie `database: up, jobs: up`.
-6. **Sauvegardes** — le service compose `backup` effectue un `pg_dump` quotidien
-   avec 30 jours de rétention ; mettez en place une copie hors de la VM (rclone
-   vers un stockage objet) pour respecter le RPO.
+6. **Sauvegardes** — deux niveaux. DigitalOcean prend un instantané quotidien
+   du droplet, hors de la VM : cela couvre la perte de la machine, même si une
+   image disque d'un Postgres en fonctionnement est cohérente au crash plutôt
+   qu'un dump propre. Le service compose `backup` y ajoute un `pg_dump`
+   quotidien avec 30 jours de rétention — un dump logique, restaurable table par
+   table, mais qui vit sur la VM qu'il protège. Prenez un dump frais avant toute
+   migration plutôt que de vous fier à celui de la veille.
 
 ## Mise à jour
 
