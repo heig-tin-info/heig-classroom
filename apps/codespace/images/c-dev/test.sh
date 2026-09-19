@@ -161,10 +161,15 @@ A2=$(cexec 'cd /work && gdb -batch -ex run ./a.out 2>/dev/null | sed -n "s/^&mai
 ok "two runs under gdb give the same address of main ($A1)"
 
 # Control: with the default containers-common profile, the address must vary.
-# That is what proves the one entry added to the profile is what acts.
+# That is what proves the one entry added to the profile is what acts. The
+# control only swaps the seccomp profile: it keeps the AppArmor profile of the
+# real run (under containers-default gdb cannot ptrace at all, and an empty gdb
+# output would masquerade as a "stable address").
 if [ -r "$SECCOMP_DEFAULT" ]; then
-  CTRL=$(podman_remote run --rm --userns=auto --cap-drop=ALL \
-      --security-opt no-new-privileges --security-opt "seccomp=${SECCOMP_DEFAULT}" \
+  ctrl_aa=()
+  if [ -n "${APPARMOR-codespace}" ]; then ctrl_aa=(--security-opt "apparmor=${APPARMOR-codespace}"); fi
+  CTRL_OUT=$(podman_remote run --rm --userns=auto --cap-drop=ALL \
+      --security-opt no-new-privileges --security-opt "seccomp=${SECCOMP_DEFAULT}" "${ctrl_aa[@]}" \
       --read-only --tmpfs /tmp --tmpfs '/run:rw,nosuid,nodev,mode=1777' \
       --pids-limit 256 --memory 1536m --cpus 1 --network none \
       --entrypoint sh "$IMAGE" -c '
@@ -174,9 +179,12 @@ if [ -r "$SECCOMP_DEFAULT" ]; then
 int main(void) { printf("&main=%p\n", (void *)main); return 0; }
 EOF
         gcc -g -O0 -o h h.c || exit 1
-        for i in 1 2 3; do gdb -batch -ex run ./h 2>/dev/null | sed -n "s/^&main=//p"; done' 2>/dev/null \
-      | sort -u | wc -l)
-  if [ "$CTRL" -gt 1 ]; then
+        for i in 1 2 3; do gdb -batch -ex run ./h 2>/dev/null | sed -n "s/^&main=//p"; done' 2>/dev/null)
+  CTRL_RUNS=$(printf '%s\n' "$CTRL_OUT" | grep -c .)
+  CTRL=$(printf '%s\n' "$CTRL_OUT" | grep . | sort -u | wc -l)
+  if [ "$CTRL_RUNS" -lt 3 ]; then
+    fail "invalid control: gdb printed $CTRL_RUNS address(es) out of 3 under the default profile (ptrace refused?), test 2 proves nothing"
+  elif [ "$CTRL" -gt 1 ]; then
     ok "control: with the default profile the address varies ($CTRL values out of 3) — the personality(0x40000) addition is indeed the cause"
   else
     fail "invalid control: the default profile already gives a stable address, test 2 proves nothing"
@@ -346,9 +354,13 @@ podman_remote rm -f "$CTR_BOMB" >/dev/null 2>&1
 [ "$MAXSEEN" -ge 200 ] || fail "the bomb did not reach the limit ($MAXSEEN processes): the test proves nothing"
 ok "the bomb tops out at $MAXSEEN processes, never above 256"
 
+# The bomb's processes are host processes (rootful Podman, one kernel), so the
+# host count legitimately rises by up to pids-limit. What must hold is that it
+# never rises beyond that bound (nothing escapes the cgroup) and that the host
+# keeps answering.
 DELTA=$((HOST_PROCS_AFTER - HOST_PROCS_BEFORE))
-[ "$DELTA" -lt 100 ] || fail "the host process count jumped by $DELTA during the bomb"
-ok "host: $HOST_PROCS_BEFORE -> $HOST_PROCS_AFTER processes (delta $DELTA), ps answers in ${HOST_OK_ELAPSED}s"
+[ "$DELTA" -le 300 ] || fail "the host process count jumped by $DELTA during the bomb: more than the 256 the cgroup allows"
+ok "host: $HOST_PROCS_BEFORE -> $HOST_PROCS_AFTER processes (delta $DELTA, bounded by pids-limit), ps answers in ${HOST_OK_ELAPSED}s"
 
 OUT=$(podman_remote exec "$CTR_A" curl -sS -m 3 -o /dev/null -w '%{http_code}' http://localhost:8080/healthz 2>&1)
 [ "$OUT" = "200" ] || fail "container A no longer answers after the bomb (http $OUT)"

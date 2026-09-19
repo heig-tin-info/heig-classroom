@@ -18,7 +18,7 @@ invariants 1 and 3 of [CLAUDE.md](../../CLAUDE.md).
 | `resolv.conf` | empty resolver, installed as `/etc/resolv.conf` |
 | `extension/` | source of `heig.codespace-statusbar`, packaged into a `.vsix` at build time |
 | `run-hardened.sh` | `podman run` with the mandatory hardening |
-| `test.sh` | P1 acceptance test (46 assertions) |
+| `test.sh` | P1 acceptance test (47 assertions) |
 | `../../infra/seccomp/codespace.json` | seccomp profile of the project |
 | `../../infra/apparmor/codespace` | AppArmor profile of the project (what makes gdb work again) |
 

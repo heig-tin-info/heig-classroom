@@ -10,7 +10,7 @@ Results already obtained on this workstation, which the agents do not have to de
 
 | Task | State | Proof |
 | --- | --- | --- |
-| P1 hardened image | done | `images/c-dev/test.sh`: 46 green assertions, 1 s start-up |
+| P1 hardened image | done | `images/c-dev/test.sh`: 47 green assertions, 1 s start-up |
 | P2 closed network | done | `sudo infra/net/test.sh`: 11 PASS, 0 FAIL, 0 BLOCKED (9 assertions + 2 regressions), nftables rules loaded |
 | P3 Git channel | done | `vitest src/git`: 56 tests, 5 of which are Podman + Forgejo integration tests |
 | P4 SEB verification | done | `vitest src/seb`: 91 tests, 4 Config Key vectors sourced from Moodle |
