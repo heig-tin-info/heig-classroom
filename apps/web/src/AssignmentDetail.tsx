@@ -6,8 +6,10 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  CircleHelp,
   ClipboardCheck,
   Clock,
+  Copy,
   Download,
   FileCode,
   GitPullRequest,
@@ -21,6 +23,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ShieldCheck,
   Snowflake,
   Trash2,
   UserCheck,
@@ -35,6 +38,7 @@ import type {
   AssignmentMilestone,
   ClassroomDetail,
   GradeView,
+  WorkMode,
 } from "@hgc/contracts";
 import { finalPoints, resolveFinalGrade } from "@hgc/domain";
 
@@ -61,6 +65,7 @@ import {
   GithubIcon,
   IconButton,
   isoDateTime,
+  LinkButton,
   Menu,
   Modal,
   PageHeader,
@@ -613,6 +618,128 @@ function SyncBanner({
         </span>
       ) : null}
     </Alert>
+  );
+}
+
+/**
+ * What the exam-configuration section can show, as a pure function of the
+ * assignment — so the four cases are testable without a DOM.
+ *
+ * `hidden` is not "no exam configuration": it is "this assignment is not an
+ * SEB exam", and the section does not exist at all. The two `unavailable`
+ * cases are the honest ones: `GET /exam/<id>.seb` on the portal answers 404
+ * until the assignment has been pushed to it, so offering the download before
+ * the first successful sync would hand the teacher a broken file.
+ */
+export type SebFileState =
+  | { kind: "hidden" }
+  | { kind: "unavailable"; reason: "portal" | "not-synced" }
+  | { kind: "ready"; url: string; configKey: string | null };
+
+export function sebFileState(a: {
+  workMode: WorkMode;
+  codespaceSebUrl: string | null;
+  codespaceSyncedAt: string | null;
+  codespaceConfigKey: string | null;
+}): SebFileState {
+  if (a.workMode !== "online_seb") return { kind: "hidden" };
+  if (a.codespaceSebUrl === null) return { kind: "unavailable", reason: "portal" };
+  if (a.codespaceSyncedAt === null) return { kind: "unavailable", reason: "not-synced" };
+  return { kind: "ready", url: a.codespaceSebUrl, configKey: a.codespaceConfigKey };
+}
+
+/**
+ * Exam configuration: the `.seb` file the teacher downloads, and the Config
+ * Key to compare it against.
+ *
+ * Its own `Card`, and not a second action inside the codespace `Alert`: an
+ * Alert carries one status line and **one** action (DESIGN.md), and this is
+ * neither a status nor one button — it is a file to fetch plus a
+ * 64-character value to read off the screen. It sits right under that Alert,
+ * before the milestones, because that is where the assignment's portal
+ * settings live.
+ *
+ * The link is a plain `https://` with `download`, **not** the `sebs://` deep
+ * link the student clicks: `sebs://` hands the file to Safe Exam Browser,
+ * which starts in kiosk mode, and the teacher would never get to open it in
+ * the configuration tool (docs/preuve-b-manuelle.md § 1 and § 2). Secondary,
+ * like everything in this card — the page's one primary action stays
+ * "Validate grades", in the header.
+ *
+ * The Config Key is read-only and copyable, never editable: it is computed by
+ * the portal from the `.seb` it generated, and a value typed here would mean
+ * nothing.
+ */
+function SebFileSection({ state }: { state: SebFileState }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  if (state.kind === "hidden") return null;
+
+  const key = state.kind === "ready" ? state.configKey : null;
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+        <SectionHeading
+          icon={ShieldCheck}
+          title={t("exam.sebFile")}
+          help="seb-config"
+          description={
+            state.kind === "unavailable"
+              ? t(state.reason === "portal" ? "exam.noPortal" : "exam.notSynced")
+              : t("exam.sebFileHint")
+          }
+        />
+        <span className="flex-1" />
+        {state.kind === "ready" ? (
+          // The trap this tooltip carries is the one that costs a whole exam:
+          // re-saving the file in the tool regenerates the salt.
+          <Tip label={t("exam.downloadTip")}>
+            <LinkButton size="sm" href={state.url} download>
+              <Download /> {t("exam.download")}
+            </LinkButton>
+          </Tip>
+        ) : null}
+      </div>
+
+      {state.kind === "ready" ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-5 py-3">
+          <span className="flex items-center gap-1 text-[13px] font-medium text-fg-muted">
+            {t("exam.configKey")}
+            <Tip label={t("exam.configKeyTip")}>
+              <CircleHelp className="size-3.5 text-fg-faint" />
+            </Tip>
+          </span>
+          {key ? (
+            <>
+              <code
+                // Selectable and wrapping, never truncated: the teacher
+                // compares it character by character with what the SEB
+                // configuration tool shows.
+                className="min-w-0 break-all rounded-md bg-surface-2 px-2 py-1 font-mono text-xs"
+              >
+                {key}
+              </code>
+              <IconButton
+                label={copied ? t("exam.copied") : t("exam.copy")}
+                onClick={() => {
+                  // `clipboard` is absent over plain http and in old
+                  // browsers: the key stays selectable, so failing silently
+                  // is enough.
+                  void navigator.clipboard?.writeText(key).then(
+                    () => setCopied(true),
+                    () => undefined,
+                  );
+                }}
+              >
+                {copied ? <CheckCircle2 /> : <Copy />}
+              </IconButton>
+            </>
+          ) : (
+            <span className="text-[13px] text-fg-faint">{t("exam.configKeyPending")}</span>
+          )}
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -1245,6 +1372,7 @@ export function AssignmentDetail({
 
       <SyncBanner classroomId={classroomId} a={a} />
       <CodespaceBanner classroomId={classroomId} a={a} />
+      <SebFileSection state={sebFileState(a)} />
 
       {showGrades ? (
         <MilestonesSection

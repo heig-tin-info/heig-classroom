@@ -165,8 +165,69 @@ reads no SEB header at all: it only knows the `exam_session` cookie, which
 for an assignment coming from the YAML seed.
 
 The `.seb` file itself is still served by the portal
-(`GET /exam/<id>.seb`); `sebLink` in the `PUT` response is the `seb://` link
-that the teacher distributes.
+(`GET /exam/<id>.seb`). The `PUT` answers a
+`CodespaceAssignmentSyncResult` — `{ id, configKey, sebLink }` — and those two
+values are the whole reason the answer has a body:
+
+- `sebLink` is the `sebs://` deep link, the **student's** one-click hand-over
+  to SEB. classroom rebuilds it from the portal host it already knows
+  (`StudentHome`), so it does not store it.
+- `configKey` is what classroom cannot compute: it depends on the file the
+  portal generated, `examKeySalt` included. classroom stores it on the
+  assignment (`assignments.codespace_config_key`) and shows it, read-only, next
+  to the teacher's download button, so the teacher can compare it with the
+  Config Key the SEB configuration tool displays for the file they just
+  downloaded (preuve-b-manuelle.md § 2). Two different values mean the file on
+  the machine is not the one the portal will verify against.
+
+**The teacher downloads over `https://`, not `sebs://`.** The assignment page
+of classroom offers `https://<portal>/exam/<id>.seb` with a `download`
+attribute. The `sebs://` scheme hands the file straight to Safe Exam Browser,
+which starts in kiosk mode; the teacher would never get to open it in the
+configuration tool, where the Browser Exam Key is read. Same file, same URL,
+different scheme, opposite purpose.
+
+### Which hosts `SEB_EXTRA_ALLOWED_HOSTS` must carry
+
+SEB's URL filter blocks everything that is not in the three families above,
+and a blocked sign-in page inside kiosk mode is an exam that cannot start.
+`SEB_EXTRA_ALLOWED_HOSTS` is where the identity provider goes.
+
+**Today it is empty, and that is the right value**, not an oversight:
+classroom's `OIDC_ISSUER` is its own Keycloak, mounted under
+`https://classroom.chevallier.io/kc/realms/…` in the transitional phase
+(`.env.prod.example`). Same host as classroom, which `buildSebConfig` already
+allows because it is the host of the `startURL`.
+
+The day the identity provider moves to Switch edu-ID, the list has to be
+established. It is **read, not guessed** — a discovery document names the
+authorization endpoint, but a real sign-in walks through discovery hosts,
+a WAYF/discovery service and possibly the home organisation's own server, and
+only a trace shows all of them:
+
+1. read the discovery document and note the host of every URL in it:
+
+   ```bash
+   curl -s "$OIDC_ISSUER/.well-known/openid-configuration" \
+     | grep -o 'https://[^"/]*' | sort -u
+   ```
+
+2. sign in for real, in an ordinary browser, from the classroom Start button,
+   with the network panel open and "preserve log" on. Note the host of every
+   **document** request (not the sub-resources: those come from the hosts
+   already listed). For SWITCH edu-ID that is at least `login.eduid.ch`;
+3. put the union of the two lists, minus classroom and the portal, into
+   `SEB_EXTRA_ALLOWED_HOSTS` — comma-separated, `host` or `host:port`, no
+   scheme, no path (`sebAllowedHosts` in `classroom/routes.ts` passes them to
+   the filter rules as they are);
+4. **re-synchronise every exam assignment.** The host list enters the `.seb`
+   file, therefore the Config Key: the `.seb` files already handed out become
+   invalid, and their Config Key in classroom changes with the next `PUT`. Do
+   this well before an exam, never during one.
+
+A `.seb` generated with the wrong list fails silently in the worst way: the
+student is in kiosk mode, on a blank page, unable to sign in and unable to
+quit.
 
 ## 6. Quota per teacher
 

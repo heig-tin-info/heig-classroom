@@ -3,6 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
+import { sebFileUrl } from "../../codespace.js";
 import type { AppConfig } from "../../config.js";
 import { enrollments, gradeRuns, studentRepos, users } from "../../db/schema.js";
 import { installationClient } from "../../github/app.js";
@@ -96,7 +97,13 @@ export async function assignmentDetailRoutes(
       return {
         // `classroom`: the detail page names the generated clone script after
         // the assignment and stamps the classroom in its header.
-        assignment: { ...a, classroom: scope.classroomName },
+        // `codespaceSebUrl`: derived from `CODESPACE_URL`, never stored, so a
+        // portal that moves does not leave dead links on old assignments.
+        assignment: {
+          ...a,
+          classroom: scope.classroomName,
+          codespaceSebUrl: sebFileUrl(config, a),
+        },
         students: roster.map((s) => {
           const repo = s.userId ? repos.find((r) => r.userId === s.userId) : undefined;
           return {

@@ -249,6 +249,86 @@ describe("creation and resumption (analyse.md D5)", () => {
   });
 });
 
+/**
+ * Audit L3 of 2026-09-18: `cs_session` used to carry the same token for the
+ * whole life of the volume. A copy taken once — a shoulder-surfed devtools
+ * panel, a shared machine — stayed valid for weeks. The session id is stable
+ * on purpose (the `origin` remote written into `work/` depends on it); the
+ * token is not, and it is the token the proxy checks.
+ */
+describe("the proxy cookie token rotates (audit L3)", () => {
+  it("a resume on a live container hands out a new token and retires the old one", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const first = await manager.start(user, assignment);
+    const second = await manager.start(user, assignment);
+
+    expect(second.session.id).toBe(first.session.id);
+    expect(second.launched).toBe(false);
+    expect(second.cookieToken).not.toBe(first.cookieToken);
+    // What the proxy will do with an older tab's cookie.
+    const row = findAnySession(db, "student", "tp")!;
+    expect(manager.checkCookie(row, second.cookieToken)).toBe(true);
+    expect(manager.checkCookie(row, first.cookieToken)).toBe(false);
+    // The returned row is the one the caller sets the cookie from: it must
+    // already carry the rotated value, not the stale one.
+    expect(second.session.cookieToken).toBe(second.cookieToken);
+  });
+
+  it("a resume after the container vanished rotates too", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const first = await manager.start(user, assignment);
+    engine.kill(containerNameFor(first.session.id));
+
+    const second = await manager.start(user, assignment);
+    expect(second.launched).toBe(true);
+    expect(second.cookieToken).not.toBe(first.cookieToken);
+    expect(manager.checkCookie(findAnySession(db, "student", "tp")!, first.cookieToken)).toBe(
+      false,
+    );
+  });
+
+  it("closing retires the token, and reopening does not bring it back", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const first = await manager.start(user, assignment);
+    await manager.close(first.session.id, "test");
+    expect(manager.checkCookie(findAnySession(db, "student", "tp")!, first.cookieToken)).toBe(
+      false,
+    );
+
+    const second = await manager.start(user, assignment);
+    expect(second.cookieToken).not.toBe(first.cookieToken);
+    expect(manager.checkCookie(second.session, first.cookieToken)).toBe(false);
+  });
+
+  it("a plain reload does not rotate: ensureRunning is not an opening", async () => {
+    // The student reloading `/s/<id>/` goes through the proxy, which calls
+    // `ensureRunning`. Rotating there would invalidate the very cookie the
+    // browser is sending.
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const first = await manager.start(user, assignment);
+    const again = await manager.ensureRunning(first.session.id);
+    expect(manager.checkCookie(again, first.cookieToken)).toBe(true);
+  });
+
+  it("two concurrent starts share one session and one token", async () => {
+    const assignment = await insertAssignment();
+    const manager = makeManager();
+    const [a, b] = await Promise.all([
+      manager.start(user, assignment),
+      manager.start(user, assignment),
+    ]);
+    expect(b!.session.id).toBe(a!.session.id);
+    // The in-flight follower must not hand out a value already rotated away:
+    // both callers set the same, live cookie.
+    expect(b!.cookieToken).toBe(a!.cookieToken);
+    expect(manager.checkCookie(findAnySession(db, "student", "tp")!, a!.cookieToken)).toBe(true);
+  });
+});
+
 describe("garbage collection", () => {
   it("destroys the container after the grace period and keeps the volume", async () => {
     const assignment = await insertAssignment();

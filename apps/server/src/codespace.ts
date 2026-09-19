@@ -19,6 +19,7 @@ import { eq, inArray } from "drizzle-orm";
 
 import type {
   CodespaceAssignmentSync,
+  CodespaceAssignmentSyncResult,
   ServiceTokenClaims,
   TeacherCodespaceGrant,
   WorkMode,
@@ -60,6 +61,32 @@ export function codespaceHost(config: AppConfig): string | null {
 /** A mode that runs inside the portal. */
 export function isOnlineMode(mode: WorkMode): mode is Exclude<WorkMode, "free"> {
   return mode !== "free";
+}
+
+/**
+ * Plain HTTPS URL of the `.seb` configuration file of an exam assignment —
+ * what the **teacher** downloads to read the Browser Exam Key and the Config
+ * Key in the SEB configuration tool (docs/preuve-b-manuelle.md § 1 and § 2).
+ *
+ * Deliberately not the `sebs://` link: that scheme hands the file straight to
+ * Safe Exam Browser, which starts in kiosk mode and never lets the teacher
+ * open it in the configuration tool. The student's link stays `sebs://`
+ * (StudentHome), the teacher's is this one, with `download`.
+ *
+ * Null when the feature is off or the assignment is not an SEB exam: there is
+ * no `.seb` to serve then, and `GET /exam/<id>.seb` would 404.
+ */
+export function sebFileUrl(
+  config: AppConfig,
+  assignment: { id: string; workMode: WorkMode },
+): string | null {
+  if (!codespaceConfigured(config)) return null;
+  if (assignment.workMode !== "online_seb") return null;
+  try {
+    return new URL(`/exam/${encodeURIComponent(assignment.id)}.seb`, config.CODESPACE_URL).href;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -232,9 +259,28 @@ export function makeCodespaceSyncHandler(app: FastifyInstance, config: AppConfig
         .where(eq(assignments.id, assignmentId));
       throw new Error(message);
     }
+    // The portal echoes back what classroom cannot compute: the Config Key of
+    // the `.seb` it generated (`CodespaceAssignmentSyncResult`). It is stored
+    // so the assignment page can show it beside the download button. A body
+    // that cannot be read is not a synchronization failure — the PUT went
+    // through — so the key is simply left as it was.
+    let configKey: string | null = null;
+    try {
+      const result = (await response.json()) as Partial<CodespaceAssignmentSyncResult>;
+      if (typeof result.configKey === "string" && result.configKey !== "") {
+        configKey = result.configKey;
+      }
+    } catch (err) {
+      app.log.warn({ assignmentId, err }, "portal sync: unreadable response body");
+    }
     await app.db
       .update(assignments)
-      .set({ codespaceSyncedAt: new Date(), codespaceSyncError: null })
+      .set({
+        codespaceSyncedAt: new Date(),
+        codespaceSyncError: null,
+        // Leaving exam mode clears the key rather than leaving a stale one.
+        codespaceConfigKey: payload.mode === "online_seb" ? configKey : null,
+      })
       .where(eq(assignments.id, assignmentId));
     await audit(app.db, {
       actorType: "system",

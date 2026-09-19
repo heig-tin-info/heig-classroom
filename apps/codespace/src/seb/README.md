@@ -158,6 +158,16 @@ address different from the one of the initial verification → an
 The cookie is not encrypted: everything it carries is already known to the
 client, and it **never** contains a BEK.
 
+**The address the cookie is bound to is `request.ip`, and that is a
+deployment concern.** Behind a front end, Fastify only reports the client's
+address if the hop is declared: `TRUSTED_PROXY_IPS` (a list, not the boolean
+`TRUST_PROXY`) is what makes `request.ip` the student's address instead of the
+front end's. Without it the whole `address-mismatch` branch of this module is
+dead code — it compares `127.0.0.1` with `127.0.0.1` for every student. That
+was the state of the deployment until 2026-09-19 (audit M1); `loadConfig()`
+now refuses to start in production without the list. See
+[docs/deploy.md § 6](../../docs/deploy.md).
+
 ## The `.seb` file
 
 An **unencrypted** XML plist, served as `application/seb` under the name

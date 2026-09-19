@@ -276,6 +276,20 @@ export interface AssignmentDetailPayload {
     codespaceSyncedAt: string | null;
     /** Failure of the last attempt; null when the last one succeeded. */
     codespaceSyncError: string | null;
+    /**
+     * Config Key the portal computed for this exam assignment's `.seb`, as
+     * returned by the last successful sync. The teacher compares it with the
+     * one the SEB configuration tool displays. Null outside `online_seb`, and
+     * until the first successful sync.
+     */
+    codespaceConfigKey: string | null;
+    /**
+     * Plain HTTPS URL of the `.seb` file, for the teacher to download and
+     * hand to the SEB configuration tool. **Not** the `sebs://` deep link,
+     * which would launch SEB instead of saving the file. Null when no portal
+     * is configured or the assignment is not in `online_seb` mode.
+     */
+    codespaceSebUrl: string | null;
   };
   students: AssignmentDetailStudent[];
 }

@@ -171,7 +171,9 @@ SESSION_GRACE_MS=600000  SESSION_GC_INTERVAL_MS=60000  SHADOW_INTERVAL_MS=864000
 OIDC_ISSUER=            (empty: see § 4)
 FORGE_KIND=github  FORGE_URL=https://github.com  FORGE_TOKEN=   (see § 5)
 GITHUB_APP_ID=<the App identifier>  GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
+TRUSTED_PROXY_IPS=127.0.0.1   (REQUIRED in production, see § 6: the address Caddy dials from)
 TRUST_PROXY=            (forbidden in production: see § 6)
+SEB_EXTRA_ALLOWED_HOSTS=      (empty is correct today, see § 6bis)
 ```
 
 Two keys that are names, not paths, and that the hardening depends on:
@@ -406,39 +408,114 @@ Two safeguards:
 
 ## 6. The client address behind Caddy
 
-`TRUST_PROXY` is, in `src/auth/config.ts`, a **development boolean**: it sets
-`trustProxy: true` on Fastify, which makes `request.ip` controllable by any
-`X-Forwarded-For` coming from anywhere. `loadConfig()` refuses to start with it
-in production. That is correct and it was not touched.
+**Fixed on 2026-09-19** (audit M1 of 2026-09-18). What follows is the state of
+the code, not a proposal.
 
-Accepted consequence here: **behind Caddy, `request.ip` is `127.0.0.1` for
-everyone.** What that changes, exactly:
+The portal listens on 127.0.0.1:3100 and Caddy is the only way in. Without
+anything else, `request.ip` is therefore `127.0.0.1` **for everyone**. What
+that used to break, exactly:
 
-- the Git channel is **not** concerned: it listens on `10.77.0.254:9418`, not
-  behind Caddy, and authentication by the container's source address
-  (invariant 1) is intact;
-- the proxy's session cookie is not concerned: it is bound to the session, not
-  to the address;
-- **exam mode is.** The `exam_session` cookie carries the client address
-  recorded at the SEB verification, and `checkExamRequest` compares it again on
-  every proxy request (analyse.md D5). With `127.0.0.1` on both sides, the
-  comparison is true for everyone: it no longer distinguishes two workstations.
+- the version-control channel was **not** concerned: it listens on
+  `10.77.0.254:9418`, not behind Caddy, and authentication by the container's
+  source address (invariant 1) was intact;
+- the proxy's session cookie was not concerned: it is bound to the session,
+  not to the address;
+- **exam mode was.** The `exam_session` cookie carries the client address
+  recorded at the SEB verification, and `checkExamRequest` compares it again
+  on every proxy request (analyse.md D5). With `127.0.0.1` on both sides the
+  comparison was true for everyone: it no longer distinguished two
+  workstations, and the third variant of proof B (a cookie copied to another
+  machine) could not be refused.
 
-This is not blocking as long as no exam runs on this VM — the current
-deployment only serves lab mode — but **it must be fixed before the first
-exam**. A proposal, to be worked out with its test:
+### What is in place
 
-> A distinct variable, for example `TRUSTED_PROXY_IPS=127.0.0.1,::1`, passed as
-> is to Fastify's `trustProxy`, which accepts a list of addresses or of CIDRs.
-> Fastify then walks the `X-Forwarded-For` chain only for a hop whose address
-> is in the list; a client forging the header from the outside can do nothing,
-> since its immediate hop to Caddy is not trusted. That is the correct setting
-> behind a controlled front end, and it has nothing to do with the boolean
-> `TRUST_PROXY`, which must remain forbidden in production.
+Two variables, and they are not interchangeable.
 
-The code-free fallback, if the deadline pressed: bind the portal to a second
-address and route the exam sessions through a path that does not cross the
-front end. It is not recommended — it breaks TLS.
+| Variable | Value | Fastify | Where |
+| --- | --- | --- | --- |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1` | `trustProxy: ["127.0.0.1"]` | **production** |
+| `TRUST_PROXY` | empty | `trustProxy: true` | development only, refused in production |
+
+`TRUSTED_PROXY_IPS` is a comma-separated list of addresses or CIDRs, handed to
+Fastify's `trustProxy` **as an array** (`src/server.ts`). Fastify then walks
+the `X-Forwarded-For` chain from the right and stops at the first hop whose
+address is not in the list: that hop is `request.ip`. A client forging the
+header from the outside gains nothing, because its own hop to Caddy is not in
+the list. The boolean `TRUST_PROXY`, which would let anybody choose their own
+address, stays forbidden in production — `loadConfig()` throws, and a test
+asserts it. When both are set, the list wins.
+
+Caddy's side needs **no directive**: since Caddy 2, `reverse_proxy` appends
+the client address to `X-Forwarded-For` (and sets `X-Forwarded-Proto` and
+`X-Forwarded-Host`) on every upstream request. `deploy/Caddyfile` says so in a
+comment; adding a `header_up X-Forwarded-For` line there would *override* the
+default rather than add to it, so do not.
+
+### Production refuses to start without it
+
+`loadConfig()` throws when `NODE_ENV=production`, `SEB_VERIFIER=real` and
+`TRUSTED_PROXY_IPS` is empty:
+
+```text
+Invalid configuration: TRUSTED_PROXY_IPS is required in production (set it to
+127.0.0.1 behind the Caddy of deploy/Caddyfile); without it the exam cookie's
+address binding is void — see docs/deploy.md § 6
+```
+
+A refusal, not a warning, and the reasoning is the one of invariant 8. The
+failure mode of a warning is silent: the line scrolls past at boot, an exam
+runs three weeks later, and the address check accepts every stolen cookie
+without anybody noticing. The failure mode of a refusal is loud and lands at
+deploy time, on a machine somebody is watching. `SEB_VERIFIER=simulated` is
+already refused in production, so in practice the condition reduces to "the
+list is required"; the conjunction is written out to say *why* it is required,
+and to keep the guard honest if the set of verifiers ever grows.
+
+Cost of the choice: an environment file written before 2026-09-19 does not
+have the key, and the portal would refuse to start on the next
+`deploy/push.sh`. `deploy/bootstrap.sh` therefore **adds** `TRUSTED_PROXY_IPS`
+to an existing `/etc/codespace/env`, in the same idempotent loop that already
+adds the GitHub App keys. Re-run `bootstrap.sh` — it overwrites no secret —
+before the first deploy that carries this change:
+
+```bash
+ssh root@<vm> /srv/codespace/src/deploy/bootstrap.sh
+grep TRUSTED_PROXY_IPS /etc/codespace/env      # → TRUSTED_PROXY_IPS=127.0.0.1
+```
+
+### Checking it on the VM
+
+The refusal logs of `/launch` and of `/exam/<id>/start` carry `clientAddress`:
+
+```bash
+journalctl -u codespace -n 200 -o cat | grep clientAddress
+```
+
+They must show the address of the workstation that made the request, never
+`127.0.0.1`. Until that has been read on the VM, the fix is proven by unit
+tests only (`src/auth/trustedProxy.test.ts`) — see § 12.
+
+---
+
+## 6bis. `SEB_EXTRA_ALLOWED_HOSTS`, and why it is empty
+
+Inside SEB, only the hosts of the URL filter of the `.seb` file load at all.
+`buildSebConfig` puts three families in it (invariant 11): classroom, the host
+of the `startURL`; the portal, which serves the editor; and whatever
+`SEB_EXTRA_ALLOWED_HOSTS` lists. That third one exists for **the identity
+provider**: SEB opens the `startURL` cold, classroom bounces the student to
+its sign-in page, and a blocked sign-in page inside kiosk mode is an exam that
+cannot start and a student who cannot get out of it.
+
+Today the value is **empty, and that is correct**: classroom's `OIDC_ISSUER`
+is its own Keycloak, mounted on classroom's own host
+(`https://classroom.chevallier.io/kc/realms/…`, `.env.prod.example`). The
+sign-in page is already allowed, as classroom.
+
+The day the identity provider becomes Switch edu-ID, this has to list
+`login.eduid.ch` and every other host the flow actually reaches. The procedure
+to find them is in [integration-classroom.md § 5](integration-classroom.md):
+it is not a guess, it is read off a network trace of a real sign-in.
 
 ---
 
@@ -800,3 +877,10 @@ In order of debt.
   calls to `podman` and to `git`. No rare path (load increase, a `podman build`
   triggered from the portal — which does not exist) has been exercised under
   that filter.
+- `TODO(verify)` **Caddy 2.6.2 (Ubuntu 26.04)** — that `reverse_proxy` really
+  appends `X-Forwarded-For` here, and therefore that `TRUSTED_PROXY_IPS`
+  yields the student's address and not `127.0.0.1` (§ 6). It is the documented
+  default of Caddy 2 and it is covered by unit tests on the Fastify side
+  (`src/auth/trustedProxy.test.ts`), but it has not been read off this VM's
+  logs. One line of `journalctl … | grep clientAddress` after a request from
+  outside settles it, and it must be settled **before the first exam**.

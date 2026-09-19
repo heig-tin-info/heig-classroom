@@ -544,6 +544,24 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     return { session: updated, healthyInMs };
   }
 
+  /**
+   * A fresh proxy cookie token. 32 bytes from the CSPRNG, base64url so that
+   * it needs no escaping in a `Set-Cookie`.
+   *
+   * Audit L3 of 2026-09-18: the token used to be handed out unchanged on
+   * every resume, so a copy of `cs_session` taken once stayed valid for the
+   * whole life of the volume — weeks, across every close and reopen. Every
+   * route that opens or resumes a session now issues a new one and sets it on
+   * the response, which retires the previous value on the spot. Within one
+   * browser this is invisible (the new `Set-Cookie` replaces the old value
+   * for every tab); a copy taken to another browser or another machine stops
+   * working at the next launch, and the proxy answers its "Session non
+   * autorisée" page.
+   */
+  function newCookieToken(): string {
+    return randomBytes(32).toString("base64url");
+  }
+
   /** Fields the launch token brings, set both at creation and at resumption. */
   function launchPatch(startOpts: StartOptions): Partial<SessionRow> {
     const patch: Partial<SessionRow> = {};
@@ -599,19 +617,29 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         // set at `podman run` — but `work/.git/config` can still be repaired,
         // and that is what `git config user.name` reads.
         await ensureIdentityInContainer(existing, identity);
-        const touched = updateSession(db, existing.id, { ...patch, lastSeen: new Date() });
+        // L3: a resume is a new opening, so it is a new token.
+        const touched = updateSession(db, existing.id, {
+          ...patch,
+          lastSeen: new Date(),
+          cookieToken: newCookieToken(),
+        });
         return {
           session: touched,
           launched: false,
           healthyInMs: null,
-          cookieToken: existing.cookieToken,
+          cookieToken: touched.cookieToken,
         };
       }
+      // Rotated here, before the relaunch, and not after it: if the relaunch
+      // fails the session falls back to `stopped` with the old token already
+      // retired, which is the safe side of the choice — nobody was handed the
+      // new one either, and the next start issues yet another.
       const revived = updateSession(db, existing.id, {
         ...patch,
         state: "starting",
         sebVerified: sebVerified || existing.sebVerified,
         lastSeen: new Date(),
+        cookieToken: newCookieToken(),
       });
       try {
         await seedStaging(revived, assignment);
@@ -628,7 +656,7 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
     }
 
     const id = randomUUID();
-    const cookieToken = randomBytes(32).toString("base64url");
+    const cookieToken = newCookieToken();
     const now = new Date();
     const [created] = db
       .insert(sessions)
@@ -742,6 +770,10 @@ export function createSessionManager(opts: ManagerDeps): SessionManager {
         state: "closed",
         containerIp: null,
         containerId: null,
+        // L3: closing retires the token too. The proxy already refuses a
+        // `closed` session, but a session is reopened on the same row and the
+        // old cookie must not come back to life with it.
+        cookieToken: newCookieToken(),
       });
       log.info({ sessionId, reason }, "session closed, volume kept");
     },

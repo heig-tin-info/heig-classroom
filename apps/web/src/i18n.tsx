@@ -205,6 +205,24 @@ const en = {
   "assignment.activity.noTests": "No graded runs with test counters yet.",
   "assignment.activity.passed": "passed",
   "assignment.activity.total": "total",
+
+  // Exam mode (ADR-013): the teacher's `.seb` file and its Config Key.
+  "exam.sebFile": "Exam configuration",
+  "exam.sebFileHint":
+    "The Safe Exam Browser configuration of this exam, to open in the SEB configuration tool.",
+  "exam.download": "Download .seb",
+  "exam.downloadTip":
+    "Downloads the Safe Exam Browser configuration of this exam. Open it in the SEB configuration tool to read the Browser Exam Key — never save it again, that would invalidate the Config Key.",
+  "exam.noPortal": "No workspace portal is configured on this server.",
+  "exam.notSynced":
+    "Synchronise this assignment with the portal before downloading its configuration.",
+  "exam.configKey": "Config Key",
+  "exam.configKeyTip":
+    "Must be identical to the Config Key the SEB configuration tool shows for the downloaded file. If the two differ, the exam start will be refused.",
+  "exam.configKeyPending": "Known after the next successful sync with the portal.",
+  "exam.copy": "Copy",
+  "exam.copied": "Copied",
+
   "status.accepted": "accepted",
   "status.locked": "locked",
   "status.notAccepted": "not accepted",
@@ -445,6 +463,23 @@ const fr: Record<keyof Dict, string> = {
   "assignment.activity.noTests": "Aucun run corrigé avec compteurs de tests pour l’instant.",
   "assignment.activity.passed": "réussis",
   "assignment.activity.total": "total",
+
+  "exam.sebFile": "Configuration d'examen",
+  "exam.sebFileHint":
+    "La configuration Safe Exam Browser de cette épreuve, à ouvrir dans l'outil de configuration SEB.",
+  "exam.download": "Télécharger le .seb",
+  "exam.downloadTip":
+    "Télécharge la configuration Safe Exam Browser de cette épreuve. Ouvrez-la dans l'outil de configuration SEB pour y lire la Browser Exam Key — ne l'enregistrez jamais de nouveau, cela invaliderait la Config Key.",
+  "exam.noPortal": "Aucun portail d'environnements n'est configuré sur ce serveur.",
+  "exam.notSynced":
+    "Synchronisez ce devoir avec le portail avant de télécharger sa configuration.",
+  "exam.configKey": "Config Key",
+  "exam.configKeyTip":
+    "Doit être identique à la Config Key qu'affiche l'outil de configuration SEB pour le fichier téléchargé. Si les deux diffèrent, le démarrage de l'épreuve sera refusé.",
+  "exam.configKeyPending": "Connue après la prochaine synchronisation réussie avec le portail.",
+  "exam.copy": "Copier",
+  "exam.copied": "Copiée",
+
   "status.accepted": "accepté",
   "status.locked": "verrouillé",
   "status.notAccepted": "non accepté",

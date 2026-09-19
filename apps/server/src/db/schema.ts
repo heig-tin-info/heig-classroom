@@ -322,6 +322,13 @@ export const assignments = pgTable(
     codespaceSyncedAt: timestamp("codespace_synced_at", { withTimezone: true }),
     /** Failure of the last synchronization attempt; null when the last one worked. */
     codespaceSyncError: text("codespace_sync_error"),
+    /**
+     * Config Key of the `.seb` the portal serves for this assignment, echoed
+     * back by the last successful PUT (`CodespaceAssignmentSyncResult`). Kept
+     * so the teacher can compare it with what the SEB configuration tool reads
+     * from the downloaded file. Null outside `online_seb`.
+     */
+    codespaceConfigKey: text("codespace_config_key"),
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),

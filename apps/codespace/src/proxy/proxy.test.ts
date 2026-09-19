@@ -174,12 +174,18 @@ describe("proxy refusals", () => {
   });
 
   it("403 with a wrong token for the right session", async () => {
+    // This is also the shape of the audit L3 case: since the token is rotated
+    // at every opening, resumption and close of the session
+    // (`sessions/manager.ts`), a cookie copied earlier — an older tab in
+    // another browser, a stolen value — arrives here with a token that is no
+    // longer the row's, and gets this page.
     const res = await portal.app.inject({
       method: "GET",
       url: "/s/s1/",
       cookies: { [SESSION_COOKIE]: cookieValue("s1", "wrong-token") },
     });
     expect(res.statusCode).toBe(403);
+    expect(res.body).toContain("Session non autorisée");
   });
 
   it("404 for an unknown session", async () => {
