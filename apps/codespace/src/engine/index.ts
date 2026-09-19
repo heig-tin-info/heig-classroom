@@ -32,6 +32,23 @@ export interface EngineOptions {
   network: string;
   gateway: string;
   seccompProfile: string;
+  /**
+   * Name of the AppArmor profile loaded on the host, passed as
+   * `--security-opt apparmor=<name>` — `codespace` in production
+   * (`infra/apparmor/codespace`, installed by `deploy/bootstrap.sh`).
+   *
+   * **Empty string or absent = the flag is not passed**, which is what a host
+   * without AppArmor needs (the WSL2 development workstation). Podman then
+   * falls back to its built-in `containers-default-<version>` profile, or to
+   * nothing at all when the kernel has no AppArmor.
+   *
+   * Why a dedicated profile rather than the built-in one: the built-in one
+   * allows `ptrace peer=<bare profile name>` only, and since kernel
+   * 7.0.0-31 the traced process carries the stacked label `<profile>//&crun`,
+   * so gdb is denied. See `infra/apparmor/codespace` and
+   * `images/c-dev/README.md` § AppArmor.
+   */
+  apparmorProfile?: string;
   image: string;
   memory: string;
   cpus: string;
@@ -155,6 +172,11 @@ export function createEngine(opts: EngineOptions): Engine {
       "no-new-privileges",
       "--security-opt",
       `seccomp=${opts.seccompProfile}`,
+      // Empty or absent: no flag, for a host without AppArmor. Same rule and
+      // same default (`codespace`) as run-hardened.sh.
+      ...(opts.apparmorProfile
+        ? ["--security-opt", `apparmor=${opts.apparmorProfile}`]
+        : []),
       "--read-only",
       "--tmpfs",
       "/tmp",

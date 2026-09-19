@@ -58,6 +58,7 @@ launch token with the shared secret:
 | 5 | user | `codespace`, system, no shell, member of `podman`, `$HOME` in `/srv/codespace/var/home` |
 | 6 | directory tree | see § 2 |
 | 7 | `br_netfilter` | `/etc/modules-load.d/codespace.conf` + `/etc/sysctl.d/99-codespace-bridge.conf` |
+| 7bis | AppArmor profile | `install -m 0644 infra/apparmor/codespace /etc/apparmor.d/codespace` then `apparmor_parser -r`; a host without `apparmor_parser` gets a warning and `CODESPACE_APPARMOR_PROFILE=` (empty) |
 | 8 | configuration | `/etc/codespace/env`, secrets drawn from `/dev/urandom` |
 | 9 | systemd | `codespace.service`, `codespace-net.service`, `codespace-shadow.{service,timer}` |
 | 10 | Caddy | `/etc/caddy/Caddyfile`, automatic Let's Encrypt TLS |
@@ -162,6 +163,7 @@ SEB_VERIFIER=real                      (the simulated mode is refused by loadCon
 DATABASE_PATH=/srv/codespace/var/codespace.sqlite
 VOLUMES_ROOT=/srv/codespace/volumes
 SECCOMP_PROFILE=/srv/codespace/src/infra/seccomp/codespace.json
+CODESPACE_APPARMOR_PROFILE=codespace
 PODMAN_URL=unix:///run/podman/podman.sock
 CODESPACE_NETWORK=codespace  CODESPACE_GATEWAY=10.77.0.254  CODESPACE_GIT_PORT=9418
 CODESPACE_IMAGE=codespace/c-dev:4.137.0  CODESPACE_MEMORY=1536m  CODESPACE_CPUS=1
@@ -171,6 +173,17 @@ FORGE_KIND=github  FORGE_URL=https://github.com  FORGE_TOKEN=   (see § 5)
 GITHUB_APP_ID=<the App identifier>  GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem
 TRUST_PROXY=            (forbidden in production: see § 6)
 ```
+
+Two keys that are names, not paths, and that the hardening depends on:
+
+| Key | Value on this VM | What it does |
+| --- | --- | --- |
+| `SECCOMP_PROFILE` | `/srv/codespace/src/infra/seccomp/codespace.json` | a **path** read by Podman at `run` time |
+| `CODESPACE_APPARMOR_PROFILE` | `codespace` | the **name** of a profile the kernel must already have loaded, from `infra/apparmor/codespace`. Written by `bootstrap.sh` § 7bis, reloaded by every `push.sh`. **Empty = no `--security-opt apparmor` flag**, which is what a host without AppArmor needs (the WSL2 workstation; `.env.example` leaves it empty). A non-empty name that the kernel does not know makes `podman run` fail, so `bootstrap.sh` writes it empty when it could not load the profile. |
+
+Without that profile, gdb inside a student container is denied `ptrace` on
+kernel 7.0.0-31: see [images/c-dev/README.md](../images/c-dev/README.md)
+§ AppArmor.
 
 **Ceiling of simultaneous sessions**: 3.7 GB of RAM, `CODESPACE_MEMORY=1536m`
 per session, about 600 MB for the host and the portal. Two sessions fit, a

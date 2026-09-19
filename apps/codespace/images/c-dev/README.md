@@ -18,8 +18,9 @@ invariants 1 and 3 of [CLAUDE.md](../../CLAUDE.md).
 | `resolv.conf` | empty resolver, installed as `/etc/resolv.conf` |
 | `extension/` | source of `heig.codespace-statusbar`, packaged into a `.vsix` at build time |
 | `run-hardened.sh` | `podman run` with the mandatory hardening |
-| `test.sh` | P1 acceptance test (46 assertions) |
+| `test.sh` | P1 acceptance test (47 assertions) |
 | `../../infra/seccomp/codespace.json` | seccomp profile of the project |
+| `../../infra/apparmor/codespace` | AppArmor profile of the project (what makes gdb work again) |
 
 ## Pinned versions
 
@@ -53,6 +54,10 @@ podman build -t codespace/c-dev:4.137.0 images/c-dev
 
 CTR_NAME=cdev-p1 VOL_DIR=/srv/codespace/volumes/demo images/c-dev/run-hardened.sh
 images/c-dev/test.sh
+
+# on a host without AppArmor (the WSL2 workstation):
+APPARMOR= images/c-dev/run-hardened.sh
+APPARMOR= images/c-dev/test.sh
 ```
 
 `podman` here must be the rootful remote one: either through the
@@ -63,9 +68,10 @@ into another store. Add `-t codespace/c-dev:latest` to get the floating tag as
 well, which is what `deploy/push.sh` does.
 
 `run-hardened.sh` accepts `CTR_NAME`, `VOL_DIR`, `IMAGE`, `NETWORK`,
-`SECCOMP`, `PODMAN_URL`, `EXTRA_ARGS`. It writes the container identifier on
-standard output. `NETWORK` is `none` for P1; P2 will start it with
-`NETWORK=codespace`.
+`SECCOMP`, `APPARMOR`, `PODMAN_URL`, `EXTRA_ARGS`. It writes the container
+identifier on standard output. `NETWORK` is `none` for P1; P2 will start it
+with `NETWORK=codespace`. `APPARMOR` is `codespace` by default and an empty
+value drops the flag entirely, for a host without AppArmor (see § AppArmor).
 
 ## Modifying the image
 
@@ -78,7 +84,7 @@ standard output. `NETWORK` is `none` for P1; P2 will start it with
   - § 1 `gdb` runs a program and produces a backtrace, with no "Operation not permitted";
   - § 2 `personality(ADDR_NO_RANDOMIZE)` passes the project seccomp profile, and the control container on the default profile still varies;
   - § 3 no extension can be installed, and the server knows exactly the three baked-in ones;
-  - § 4 the root filesystem is read-only, `CapEff` is zero, `NoNewPrivs` is 1 and the seccomp filter is loaded;
+  - § 4 the root filesystem is read-only, `CapEff` is zero, `NoNewPrivs` is 1, the seccomp filter is loaded and the AppArmor label is the `codespace` profile (skipped with a note on a host without AppArmor);
   - § 5 uid 1000 inside, host UID outside 0–65535, and two containers side by side get different host UIDs;
   - § 6 a fork bomb is capped by `--pids-limit 256`, the host and the neighbouring container are intact;
   - § 7 code-server: machine settings copied, `extensions.allowed`, the settings found in the embedded package, the font-prompt chain, neutralised gallery, no uncaught exception, toolchain binaries and man pages present;
@@ -507,6 +513,105 @@ Regression covered by `test.sh` § 2: a control container started with the
 runs under gdb; with the project profile the address is stable at
 `0x555555555139`. If the control stopped varying, `test.sh` would fail rather
 than validate an empty assertion.
+
+## AppArmor profile: `infra/apparmor/codespace`
+
+### The defect (2026-09-18)
+
+The portal VM moved to kernel **7.0.0-31-generic** on 2026-09-17. Since then
+`gdb` inside a student container fails on the first `run`:
+
+```text
+warning: ptrace: Permission denied
+```
+
+with, in the kernel audit log:
+
+```text
+apparmor="DENIED" operation="ptrace" class="ptrace"
+  profile="containers-default-0.66.0" pid=52042 comm="gdb"
+  requested_mask="trace" denied_mask="trace"
+  peer="containers-default-0.66.0//&crun"
+apparmor="DENIED" operation="signal" class="signal"
+  profile="containers-default-0.66.0" comm="MainThread"
+  requested_mask="send" denied_mask="send" signal=term
+  peer="containers-default-0.66.0//&crun"
+```
+
+Podman's built-in profile allows `ptrace (trace,read) peer=<its own name>` and
+nothing more. On this kernel the traced process carries a **stacked** label,
+`containers-default-0.66.0//&crun` — the runtime's profile stacked onto the
+container's, `//&` being the stack separator. The bare peer name does not match
+the stacked label, so both the trace and the `SIGTERM` gdb sends to its inferior
+are denied.
+
+### Why `--cap-add=SYS_PTRACE` does not help
+
+Measured on the VM with throwaway containers started by `run-hardened.sh`:
+
+| Run | Result |
+| --- | --- |
+| default (`--cap-drop=ALL`) | `ptrace: Permission denied` |
+| `--cap-add=SYS_PTRACE` | **still** `ptrace: Permission denied` |
+| `--security-opt apparmor=unconfined` | `Breakpoint 1, main () at t.c:1` |
+
+The capability check is passed long before the LSM check, and it is the LSM that
+refuses; `kernel.yama.ptrace_scope=1` is not the cause either, since a process
+tracing its own descendant satisfies Yama. Only the AppArmor peer match is
+missing. Running unconfined is not an option: it would drop every `deny` rule of
+the built-in profile at the same time (mounts, `/proc` and `/sys` writes).
+
+### What the project profile changes
+
+`infra/apparmor/codespace` is the `containers-default` template of
+containers/common, expanded with `.Name = codespace`, transcribed **rule for
+rule**: every `deny` is kept as it is. Two things change, and only those:
+
+```text
+ptrace  (trace,read,tracedby,readby) peer=codespace,
+ptrace  (trace,read,tracedby,readby) peer=codespace//&*,
+signal  (send,receive)               peer=codespace,
+signal  (send,receive)               peer=codespace//&*,
+```
+
+`//&*` matches every stacked label whose first element is this profile,
+`codespace//&crun` included; the unstacked peer keeps the plain case.
+`tracedby`/`readby` are the tracee's side of the mediation, and both ends carry
+a label of this profile. There is **no** `ptrace peer=unconfined` and no
+unqualified `ptrace,`: a student debugs their own processes, never a host
+process and never another profile. The same fix in the same shape was applied
+upstream to the cri-containerd profile for kernel 6.17+ stacking
+([canonical/k8s-snap#2750](https://github.com/canonical/k8s-snap/pull/2750)).
+
+The source of the template could not be fetched at the exact version the VM
+reports (`0.66.0`): containers/common publishes no `v0.66.0` tag. The
+transcription comes from `v0.64.2`, whose
+`pkg/apparmor/apparmor_linux_template.go` is byte-identical to `main`; the file
+has not changed in that window. The profile carries its own header with the
+sources.
+
+### Loading and checking it
+
+```bash
+sudo install -m 0644 infra/apparmor/codespace /etc/apparmor.d/codespace
+sudo apparmor_parser -r /etc/apparmor.d/codespace   # replace: idempotent
+sudo apparmor_parser -Q /etc/apparmor.d/codespace   # parse only, no load
+aa-status | grep codespace
+```
+
+`deploy/bootstrap.sh` § 7bis does the install and the load, and
+`deploy/push.sh` reloads it right after the `infra/` rsync, so a change to the
+profile ships **without** `--bootstrap`. A container already running keeps the
+profile it was started with; the next session picks the new one up.
+
+`run-hardened.sh` passes `--security-opt apparmor=$APPARMOR`, `codespace` by
+default. `APPARMOR=` (empty) drops the flag — that is what the WSL2 development
+workstation, which has no AppArmor, needs — and `APPARMOR=unconfined` gives the
+witness run of the table above. The engine does the same from
+`CODESPACE_APPARMOR_PROFILE`; empty there too means no flag, because `podman
+run` refuses a profile name the kernel has not loaded. `test.sh` § 4 asserts
+that the container's label under `/proc/self/attr/apparmor/current` is
+`codespace`, and skips with a note when the host has no AppArmor.
 
 ## Deviations accepted from the letter of jalon-0 § P1
 

@@ -21,6 +21,8 @@
 #   5. codespace system user
 #   6. /srv/codespace tree           and /etc/codespace
 #   7. persistent br_netfilter       (without it the ICC rule is inoperative)
+#  7bis. AppArmor profile `codespace` (what makes gdb work again, see
+#                                     infra/apparmor/codespace)
 #   8. /etc/codespace/env            (secrets drawn from /dev/urandom, once only)
 #  8bis. GitHub App private key      (checked and set right, never created)
 #   9. systemd units                 (portal, network, root shadow repository)
@@ -158,6 +160,42 @@ sysctl -qw net.bridge.bridge-nf-call-iptables=1
 sysctl -qw net.bridge.bridge-nf-call-ip6tables=1
 ok "br_netfilter loaded, call-iptables and call-ip6tables at 1"
 
+# ------------------------------------------------- 7bis. AppArmor profile ----
+# Podman's built-in containers-default-<version> denies ptrace towards the
+# stacked label `<profile>//&crun` that kernel 7.0.0-31 gives the traced
+# process, and gdb stops working inside the student containers. The project
+# profile keeps every deny rule of the built-in one and only widens the
+# ptrace/signal peers. Rationale and audit line: infra/apparmor/codespace.
+step "AppArmor profile codespace"
+AA_SRC="$SRC_ROOT/infra/apparmor/codespace"
+AA_DST=/etc/apparmor.d/codespace
+# Value written into $ETC/env below; emptied when the profile could not be
+# loaded, because `podman run` refuses a profile name the kernel does not know.
+AA_PROFILE=codespace
+if [ ! -f "$AA_SRC" ]; then
+	AA_PROFILE=
+	info "$AA_SRC missing: rsync infra/ again (deploy/push.sh does it)"
+elif ! command -v apparmor_parser >/dev/null 2>&1; then
+	AA_PROFILE=
+	# Not an error: a kernel without AppArmor is a valid host for the portal,
+	# it simply loses the hardening that this profile adds.
+	info "WARNING: apparmor_parser absent — the profile is NOT loaded."
+	info "  The containers will run under Podman's built-in profile, or none,"
+	info "  and gdb may be denied ptrace. Set CODESPACE_APPARMOR_PROFILE= (empty)"
+	info "  in $ETC/env on such a host, otherwise podman run will refuse an"
+	info "  unknown profile name. This script writes it empty for you."
+else
+	install -m 0644 "$AA_SRC" "$AA_DST"
+	# -r: replace, so a reload is idempotent and a running container keeps the
+	# profile it started with.
+	if apparmor_parser -r "$AA_DST"; then
+		ok "$AA_DST loaded"
+	else
+		echo "  FAIL  apparmor_parser -r $AA_DST refused the profile" >&2
+		exit 1
+	fi
+fi
+
 # ----------------------------------------------------- 8. /etc/codespace/env -
 step "$ETC/env"
 if [ -f "$ETC/env" ]; then
@@ -184,6 +222,11 @@ CODESPACE_GATEWAY=10.77.0.254
 CODESPACE_GIT_PORT=9418
 VOLUMES_ROOT=${PREFIX}/volumes
 SECCOMP_PROFILE=${PREFIX}/src/infra/seccomp/codespace.json
+# Name of a profile loaded in the kernel, not a path. Source:
+# ${PREFIX}/src/infra/apparmor/codespace, installed into /etc/apparmor.d/ by
+# bootstrap.sh and reloaded by every push.sh. Empty = no --security-opt
+# apparmor flag, for a host without AppArmor.
+CODESPACE_APPARMOR_PROFILE=${AA_PROFILE}
 CODESPACE_IMAGE=codespace/c-dev:4.137.0
 CODESPACE_MEMORY=1536m
 CODESPACE_CPUS=1
@@ -253,15 +296,17 @@ chown root:"$SVC_USER" "$ETC/env"
 chmod 0640 "$ETC/env"
 ok "$ETC/env is $(stat -c '%a %U:%G' "$ETC/env")"
 
-# A file written before the GitHub App entered the recipe does not have the two
-# keys. They hold no secret: we add them, overwriting nothing.
-for pair in "GITHUB_APP_ID=" "GITHUB_APP_PRIVATE_KEY_PATH=$ETC/github-app.pem"; do
+# A file written before the GitHub App — or before the AppArmor profile —
+# entered the recipe does not have those keys. They hold no secret: we add them,
+# overwriting nothing.
+for pair in "GITHUB_APP_ID=" "GITHUB_APP_PRIVATE_KEY_PATH=$ETC/github-app.pem" \
+            "CODESPACE_APPARMOR_PROFILE=$AA_PROFILE"; do
 	key="${pair%%=*}"
 	if grep -q "^${key}=" "$ETC/env"; then
 		ok "$key already in $ETC/env"
 	else
 		printf '%s\n' "$pair" >> "$ETC/env"
-		ok "$key added to $ETC/env (to be completed, see docs/deploy.md § 5)"
+		ok "$key added to $ETC/env (value '${pair#*=}', see docs/deploy.md § 3 and § 5)"
 	fi
 done
 

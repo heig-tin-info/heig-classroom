@@ -62,6 +62,19 @@ const EnvSchema = z.object({
   VOLUMES_ROOT: z.string().default("./var/volumes"),
   /** The project's seccomp profile; absolute path passed as is to Podman. */
   SECCOMP_PROFILE: z.string().default("./infra/seccomp/codespace.json"),
+  /**
+   * Name of the AppArmor profile loaded on the host, not a path: Podman
+   * resolves a `--security-opt apparmor=<name>` against the profiles the
+   * kernel has loaded. `infra/apparmor/codespace` is the source,
+   * `deploy/bootstrap.sh` installs it into `/etc/apparmor.d/` and
+   * `deploy/push.sh` reloads it.
+   *
+   * **Empty = the flag is not passed at all**, which is what a host without
+   * AppArmor needs — the WSL2 development workstation, where `.env.example`
+   * leaves it empty. On such a host Podman would refuse a profile name it
+   * cannot find.
+   */
+  CODESPACE_APPARMOR_PROFILE: z.string().default("codespace"),
   CODESPACE_IMAGE: z.string().default("codespace/c-dev:4.137.0"),
   CODESPACE_MEMORY: z.string().default("1536m"),
   CODESPACE_CPUS: z.string().default("1"),
