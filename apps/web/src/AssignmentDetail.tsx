@@ -669,9 +669,12 @@ export function sebFileState(a: {
  * The Config Key is read-only and copyable, never editable: it is computed by
  * the portal from the `.seb` it generated, and a value typed here would mean
  * nothing.
+ *
+ * Strings are plain English, not `t()`: this is a teacher-only surface
+ * (i18n.tsx, DESIGN.md "Voice"). The long explanation that does need both
+ * languages is the help topic `help/seb-config.md`, which has its `.fr.md`.
  */
 function SebFileSection({ state }: { state: SebFileState }) {
-  const t = useT();
   const [copied, setCopied] = useState(false);
   if (state.kind === "hidden") return null;
 
@@ -681,21 +684,23 @@ function SebFileSection({ state }: { state: SebFileState }) {
       <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
         <SectionHeading
           icon={ShieldCheck}
-          title={t("exam.sebFile")}
+          title="Exam configuration"
           help="seb-config"
           description={
             state.kind === "unavailable"
-              ? t(state.reason === "portal" ? "exam.noPortal" : "exam.notSynced")
-              : t("exam.sebFileHint")
+              ? state.reason === "portal"
+                ? "No workspace portal is configured on this server."
+                : "Synchronise this assignment with the portal before downloading its configuration."
+              : "The Safe Exam Browser configuration of this exam, to open in the SEB configuration tool."
           }
         />
         <span className="flex-1" />
         {state.kind === "ready" ? (
           // The trap this tooltip carries is the one that costs a whole exam:
           // re-saving the file in the tool regenerates the salt.
-          <Tip label={t("exam.downloadTip")}>
+          <Tip label="Downloads the Safe Exam Browser configuration of this exam. Open it in the SEB configuration tool to read the Browser Exam Key — never save it again, that would invalidate the Config Key.">
             <LinkButton size="sm" href={state.url} download>
-              <Download /> {t("exam.download")}
+              <Download /> Download .seb
             </LinkButton>
           </Tip>
         ) : null}
@@ -704,8 +709,8 @@ function SebFileSection({ state }: { state: SebFileState }) {
       {state.kind === "ready" ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-5 py-3">
           <span className="flex items-center gap-1 text-[13px] font-medium text-fg-muted">
-            {t("exam.configKey")}
-            <Tip label={t("exam.configKeyTip")}>
+            Config Key
+            <Tip label="Must be identical to the Config Key the SEB configuration tool shows for the downloaded file. If the two differ, the exam start will be refused.">
               <CircleHelp className="size-3.5 text-fg-faint" />
             </Tip>
           </span>
@@ -720,7 +725,7 @@ function SebFileSection({ state }: { state: SebFileState }) {
                 {key}
               </code>
               <IconButton
-                label={copied ? t("exam.copied") : t("exam.copy")}
+                label={copied ? "Copied" : "Copy"}
                 onClick={() => {
                   // `clipboard` is absent over plain http and in old
                   // browsers: the key stays selectable, so failing silently
@@ -735,7 +740,9 @@ function SebFileSection({ state }: { state: SebFileState }) {
               </IconButton>
             </>
           ) : (
-            <span className="text-[13px] text-fg-faint">{t("exam.configKeyPending")}</span>
+            <span className="text-[13px] text-fg-faint">
+              Known after the next successful sync with the portal.
+            </span>
           )}
         </div>
       ) : null}

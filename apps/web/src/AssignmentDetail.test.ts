@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { sebFileState } from "./AssignmentDetail";
-import { DICTS } from "./i18n";
 
 /**
  * The teacher's `.seb` download (2026-09-18 security audit, item 1).
@@ -62,31 +61,5 @@ describe("sebFileState", () => {
     const state = sebFileState(base);
     expect(state.kind).toBe("ready");
     if (state.kind === "ready") expect(state.url.startsWith("https://")).toBe(true);
-  });
-});
-
-describe("exam strings", () => {
-  it("exist in both dictionaries and are actually translated", () => {
-    const keys = [
-      "exam.sebFile",
-      "exam.sebFileHint",
-      "exam.download",
-      "exam.downloadTip",
-      "exam.noPortal",
-      "exam.notSynced",
-      "exam.configKeyTip",
-      "exam.configKeyPending",
-      "exam.copy",
-      "exam.copied",
-    ] as const;
-    for (const key of keys) {
-      expect(DICTS.en[key]).toBeTruthy();
-      expect(DICTS.fr[key]).toBeTruthy();
-      expect(DICTS.fr[key]).not.toBe(DICTS.en[key]);
-    }
-    // "Config Key" is the name SEB itself gives the value: it is not
-    // translated, on purpose — the teacher looks for that exact label in the
-    // configuration tool.
-    expect(DICTS.fr["exam.configKey"]).toBe(DICTS.en["exam.configKey"]);
   });
 });
