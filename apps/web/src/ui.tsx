@@ -197,6 +197,14 @@ export function useLayer(
       if (trap && restoreTo) {
         restore.current = requestAnimationFrame(() => {
           restore.current = null;
+          const active = document.activeElement;
+          // Another layer opened in the same tick and has taken the focus (a
+          // help topic run from the command palette): it owns the focus now,
+          // and pulling it back to our own trigger would strand the reader
+          // behind the new panel. The question can only be answered here, one
+          // frame later: at cleanup time the focused node has just been
+          // unmounted, so the focus is on <body> either way.
+          if (active && active !== document.body) return;
           if (restoreTo.isConnected) restoreTo.focus();
         });
       }
@@ -211,7 +219,7 @@ export function useEscape(onEscape: () => void, enabled = true) {
 }
 
 /** Locks the page scroll while a floating layer is open. */
-function useScrollLock() {
+export function useScrollLock() {
   useLayoutEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -1155,6 +1163,39 @@ export function Progress({ label }: { label: string }) {
       </div>
     </div>
   );
+}
+
+/**
+ * A key cap, for the places that teach a shortcut (the command palette and
+ * its sidebar trigger). `font-sans` on purpose: the mono face is reserved for
+ * SHAs, repository names and the rest of what a student copies, and a key is
+ * none of those — it is a picture of a key, so it takes the hairline, the
+ * recessed surface and the caption weight the rest of the chrome uses.
+ */
+export function Kbd({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <kbd
+      className={cx(
+        "inline-flex items-center rounded-key border border-line bg-surface-2 px-1.5 py-0.5 font-sans text-[11px] font-medium text-fg-muted",
+        className,
+      )}
+    >
+      {children}
+    </kbd>
+  );
+}
+
+/**
+ * The modifier key of a shortcut, spelled the way the reader's own keyboard
+ * spells it. `userAgentData` first because `navigator.platform` is deprecated
+ * and lies on some browsers; both are read defensively, since neither exists
+ * under jsdom and a missing key hint must not take a test down with it.
+ */
+export function modKey(): string {
+  if (typeof navigator === "undefined") return "Ctrl";
+  const agent = navigator as Navigator & { userAgentData?: { platform?: string } };
+  const platform = agent.userAgentData?.platform ?? navigator.platform ?? "";
+  return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘" : "Ctrl";
 }
 
 /** GitHub brand mark (brand icons were removed from lucide). */

@@ -179,3 +179,65 @@ describe("Shell student view banner", () => {
     expect(onToggleStudentView).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("Shell command palette", () => {
+  /** The palette, told apart from the mobile drawer by its own name. */
+  const palette = () => screen.queryByRole("dialog", { name: "Command palette" });
+
+  it("opens and closes the palette on Ctrl+K", async () => {
+    renderShell();
+    expect(palette()).toBeNull();
+    await userEvent.keyboard("{Control>}k{/Control}");
+    expect(palette()).toBeInTheDocument();
+    // The caret is in the search field by then, and the shortcut still answers
+    // from inside a text field — that is the convention everywhere it exists.
+    expect(document.activeElement).toBe(screen.getByRole("combobox"));
+    await userEvent.keyboard("{Control>}k{/Control}");
+    expect(palette()).toBeNull();
+  });
+
+  it("opens the palette on ⌘+K, for the other half of the room", async () => {
+    renderShell();
+    await userEvent.keyboard("{Meta>}k{/Meta}");
+    expect(palette()).toBeInTheDocument();
+  });
+
+  it("leaves Ctrl+Shift+K and Ctrl+Alt+K to the browser", async () => {
+    renderShell();
+    await userEvent.keyboard("{Control>}{Shift>}k{/Shift}{/Control}");
+    expect(palette()).toBeNull();
+    await userEvent.keyboard("{Control>}{Alt>}k{/Alt}{/Control}");
+    expect(palette()).toBeNull();
+  });
+
+  it("opens the palette from the sidebar trigger, which teaches the shortcut", async () => {
+    renderShell();
+    // The only "Search…" button of the desktop sidebar; the mobile one below
+    // sits in the top bar and is named by the label alone.
+    const trigger = within(sidebar().closest("aside")!).getByRole("button", { name: /^Search/ });
+    // One cap per key, as in the palette footer. jsdom reports no platform,
+    // so `modKey()` spells the PC key.
+    expect(within(trigger).getByText("Ctrl").tagName).toBe("KBD");
+    expect(within(trigger).getByText("K").tagName).toBe("KBD");
+    await userEvent.click(trigger);
+    expect(palette()).toBeInTheDocument();
+  });
+
+  it("opens the palette from the search button of the mobile top bar", async () => {
+    renderShell();
+    // The top bar's icon button carries the label alone; the sidebar trigger
+    // spells the shortcut after it, so an exact name tells the two apart.
+    await userEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(palette()).toBeInTheDocument();
+  });
+
+  it("lists the classrooms of the sidebar in the palette", async () => {
+    const { navigate } = renderShell();
+    await userEvent.keyboard("{Control>}k{/Control}");
+    await userEvent.click(
+      within(palette()!).getByRole("option", { name: /Open classroom Classroom 2/ }),
+    );
+    expect(navigate).toHaveBeenCalledWith({ view: "classroom", id: "c2" });
+    expect(palette()).toBeNull();
+  });
+});

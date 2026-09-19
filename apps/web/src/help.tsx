@@ -3,7 +3,7 @@ import { createContext, useContext, useId, useRef, useState, type ReactNode } fr
 
 import { useI18n } from "./i18n";
 import { Markdown } from "./markdown";
-import { Tip, useLayer, Z } from "./ui";
+import { humanize, Tip, useLayer, Z } from "./ui";
 
 /**
  * Contextual help: small "?" icons on the main components open a drawer on
@@ -29,6 +29,67 @@ function helpSource(topic: string, locale: string): string | null {
 }
 
 const HelpContext = createContext<{ open: (key: string) => void }>({ open: () => {} });
+
+/**
+ * The help drawer, for a surface that opens a topic without a "?" icon of its
+ * own (the command palette). Outside a provider it is a no-op, like the icon.
+ */
+export function useHelp(): { open: (topic: string) => void } {
+  return useContext(HelpContext);
+}
+
+/** `./help/<topic>.md` and `./help/<topic>.<locale>.md` both name `<topic>`. */
+const SOURCE_PATH = /^\.\/help\/([^.]+)(?:\.[a-z]{2})?\.md$/;
+
+/** First `# ` heading of a Markdown source, which is how every topic opens. */
+function firstHeading(source: string): string | null {
+  const m = /^#\s+(.+)$/m.exec(source);
+  return m ? m[1]!.trim() : null;
+}
+
+/**
+ * The topics a reader without the teacher UI can reach. The rule: a topic
+ * belongs to a role's palette when that role can reach the `HelpIcon` that
+ * opens it. These two are the only ones hosted by a student surface —
+ * `student-home` on `StudentHome`, `notifications` on `SettingsPage`; every
+ * other source lives on `AssignmentForm`, `ClassroomView`, `TeacherHome`,
+ * `AssignmentsCard`, `AssignmentDetail`, `RosterImport`, `ScheduledTasks` or
+ * `Timeline`, which a student never opens.
+ *
+ * Adding a `HelpIcon` to a student screen means adding its topic here, or the
+ * palette will keep the page's own help out of the one search field that was
+ * supposed to reach everything.
+ */
+const STUDENT_TOPICS = ["student-home", "notifications"];
+
+/**
+ * Every help topic with its title, for the command palette. The title is read
+ * from the source itself rather than kept in a second list beside it: a topic
+ * added as a file would otherwise be a topic the palette never offers.
+ * Sorted by title, because that is the only order the reader can see.
+ *
+ * `teacherUi` filters the list down to `STUDENT_TOPICS`: the "?" icons never
+ * leaked the teacher documentation because they live on teacher screens, and
+ * the palette must not be the one surface that does.
+ */
+export function helpTopics(
+  locale: string,
+  teacherUi = true,
+): { topic: string; title: string }[] {
+  const topics = new Set<string>();
+  for (const path of Object.keys(SOURCES)) {
+    const m = SOURCE_PATH.exec(path);
+    if (m?.[1] && (teacherUi || STUDENT_TOPICS.includes(m[1]))) topics.add(m[1]);
+  }
+  return [...topics]
+    .map((topic) => {
+      // `helpSource` already falls back to the English file; the humanized
+      // slug is the last resort, for a source with no heading at all.
+      const source = helpSource(topic, locale);
+      return { topic, title: (source && firstHeading(source)) || humanize(topic) };
+    })
+    .sort((a, b) => a.title.localeCompare(b.title, locale));
+}
 
 export function HelpIcon({ topic, className = "" }: { topic: string; className?: string }) {
   const { open } = useContext(HelpContext);

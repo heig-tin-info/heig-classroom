@@ -155,6 +155,13 @@ An element made clickable without being a button (a card, a table row) takes
 prevented from scrolling the page. A row keeps `role="row"`; announcing it as
 a button would cost the reader the table around it.
 
+Ctrl+K (⌘+K on Apple keyboards) opens and closes the command palette, from
+anywhere, including from inside a field: that is the convention wherever the
+shortcut exists, and the default is prevented because Firefox otherwise takes
+it to its own search bar. Alt or Shift held, the event is the browser's.
+Inside the palette the arrows move the selection, Home and End jump, Enter
+runs and Escape closes, all without the focus ever leaving the search input.
+
 `Tip` never takes the focus (portal, `pointer-events-none`, `aria-hidden`)
 and Escape dismisses it.
 
@@ -221,6 +228,28 @@ with a keyboard-reachable dismiss button.
   "this has started", which is the only report an action taken from a menu
   can get.
 - Empty state: icon in a `surface-2` circle, title, one line, one action.
+- Kbd: a key cap for the places that teach a shortcut — 6 px radius, hairline,
+  `surface-2`, 11 px / 500 in `fg-muted`, 6 px horizontal padding. `font-sans`,
+  not mono: the mono face is reserved for SHAs, repository names and what a
+  student copies, and a key is a picture, not a string.
+- Command palette: Ctrl/⌘+K, 620 px, anchored at 12 vh instead of centered.
+  Top-anchored because the list grows downward — a centered panel moves its
+  first row every time the query changes — and because 12 vh keeps it clear of
+  the mobile keyboard. It is a navigation layer, so it closes on the backdrop
+  too: it holds nothing the reader wrote beyond a query they retype in a
+  second. The search row carries no field chrome (no border, no ring): the
+  whole 52 px top band is the field, and a second border inside a bordered
+  panel is noise. The active row is the screen's single accent use, the same
+  `accent-soft` chip a selected sidebar item wears, so the squint test shows
+  exactly what Enter will run. Virtual focus: the focus never leaves the
+  input, the rows are out of the Tab order, and `aria-activedescendant` on the
+  input carries the selection. The list is capped at **60 dvh** and scrolls
+  past it — `dvh` and not `vh`, because a soft keyboard shrinks the dynamic
+  viewport and a cap read from the static one leaves the last rows under the
+  keyboard; 60 keeps the 12 vh anchor, the search band and the footer on
+  screen at any height. Like every other `Z.modal` layer it locks the page
+  scroll: a panel anchored at 12 dvh of a viewport moving under it is not
+  anchored to anything.
 
 ## Voice
 
