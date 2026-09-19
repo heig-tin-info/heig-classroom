@@ -45,6 +45,20 @@ export function GithubLinkToast() {
 }
 
 /**
+ * Sign-out, shared by the account menu and the command palette. Dropping the
+ * `me` query is what takes the app back to the landing page, and a second
+ * copy of that would be a second place to get it wrong.
+ */
+export function useSignOut(): () => void {
+  const qc = useQueryClient();
+  const logout = useMutation({
+    mutationFn: () => api("/app/auth/logout", { method: "POST" }),
+    onSuccess: () => qc.setQueryData(["me"], null),
+  });
+  return () => logout.mutate();
+}
+
+/**
  * Account menu: settings, the teacher/student view switch, theme, the two
  * external links and sign-out. One trigger for the sidebar (full row) and
  * the mobile top bar (avatar only).
@@ -64,14 +78,10 @@ export function UserMenu({
   onToggleStudentView?: () => void;
 }) {
   const t = useT();
-  const qc = useQueryClient();
   // Shared store, so the Settings segmented control and this toggle can
   // never disagree about what is on screen.
   const theme = useResolvedTheme();
-  const logout = useMutation({
-    mutationFn: () => api("/app/auth/logout", { method: "POST" }),
-    onSuccess: () => qc.setQueryData(["me"], null),
-  });
+  const signOut = useSignOut();
   const items: MenuItem[] = [
     { label: t("menu.settings"), icon: SettingsIcon, onSelect: onOpenSettings },
     ...(onToggleStudentView
@@ -92,7 +102,7 @@ export function UserMenu({
     },
     { label: t("header.docs"), icon: BookOpen, href: "https://heig-tin-info.github.io/heig-classroom/", separator: true },
     { label: t("header.sources"), icon: GithubIcon, href: "https://github.com/heig-tin-info/heig-classroom" },
-    { label: t("menu.signout"), icon: LogOut, onSelect: () => logout.mutate(), separator: true },
+    { label: t("menu.signout"), icon: LogOut, onSelect: signOut, separator: true },
   ];
   return (
     <Menu

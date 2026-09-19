@@ -5,19 +5,33 @@ import {
   Eye,
   Menu as MenuIcon,
   School,
+  Search,
   Settings as SettingsIcon,
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { ClassroomSummary, Me } from "@hgc/contracts";
 
 import { api } from "./api";
-import { Logo, UserMenu } from "./Header";
-import { useT } from "./i18n";
+import { CommandPalette } from "./CommandPalette";
+import { Logo, UserMenu, useSignOut } from "./Header";
+import { helpTopics, useHelp } from "./help";
+import { useI18n, useT } from "./i18n";
 import type { Route } from "./router";
-import { Button, cx, IconButton, OrgAvatar, useLayer, Z, type IconType } from "./ui";
+import { setThemeChoice, useResolvedTheme, useThemeChoice } from "./theme";
+import {
+  Button,
+  cx,
+  IconButton,
+  Kbd,
+  modKey,
+  OrgAvatar,
+  useLayer,
+  Z,
+  type IconType,
+} from "./ui";
 
 /**
  * Application frame: a 240 px sidebar on desktop (navigation, the teacher's
@@ -184,13 +198,45 @@ export function Shell({
   onToggleStudentView?: () => void;
   children: ReactNode;
 }) {
-  const t = useT();
+  const { t, locale, setLocale } = useI18n();
   const [drawer, setDrawer] = useState(false);
   const drawerPanel = useRef<HTMLDivElement>(null);
   const drawerTitleId = useId();
   // The mobile drawer is a modal dialog: focus moves in, Tab cycles inside,
   // Escape closes it and the "Open menu" button gets the focus back.
   useLayer(drawerPanel, () => setDrawer(false), { enabled: drawer });
+
+  const [palette, setPalette] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // Ctrl+Alt+K and Ctrl+Shift+K belong to the browser (the web console,
+      // among others); only the bare shortcut is ours.
+      if (e.altKey || e.shiftKey) return;
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "k") return;
+      // On `window`, so it answers from inside a field too, which is the
+      // convention everywhere this shortcut exists; and prevented, because
+      // Firefox otherwise takes Ctrl+K to its own search bar.
+      e.preventDefault();
+      setPalette((open) => !open);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // The same query `Nav` runs, deduplicated by react-query on the shared key:
+  // the palette lists the classrooms the sidebar lists, at no extra request.
+  const rooms = useQuery<ClassroomSummary[]>({
+    queryKey: ["classrooms"],
+    queryFn: () => api("/app/api/classrooms"),
+    enabled: teacherUi,
+  });
+  const themeChoice = useThemeChoice();
+  const resolvedTheme = useResolvedTheme();
+  const { open: openHelp } = useHelp();
+  const signOut = useSignOut();
+  // Reads every help source to pull its title out; once per language is
+  // enough. The teacher UI decides which topics are reachable at all.
+  const topics = useMemo(() => helpTopics(locale, teacherUi), [locale, teacherUi]);
 
   /** `titleId` names the drawer through its own brand line. */
   const brand = (titleId?: string) => (
@@ -220,6 +266,30 @@ export function Shell({
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-line bg-canvas lg:flex">
         <div className="px-3 pb-2 pt-4">{brand()}</div>
+        {/* A palette nobody can see does not exist: the shortcut is written
+            on its own trigger, above the navigation it duplicates. */}
+        <div className="px-3 pb-2">
+          <button
+            type="button"
+            onClick={() => setPalette(true)}
+            className="group flex w-full items-center gap-2 rounded-[10px] border border-line bg-surface px-2.5 py-1.5 text-sm text-fg-faint transition-colors hover:text-fg"
+          >
+            <Search className="size-4 shrink-0" />
+            {/* `fg-muted`, not the `fg-faint` the icon rests at: this is the
+                only text the control carries, at body size, so it owes the
+                reader 4.5:1 and not the 3:1 DESIGN.md grants a lone icon. */}
+            <span className="flex-1 text-left text-fg-muted group-hover:text-fg">
+              {t("palette.open")}
+            </span>
+            {/* One cap per key, the way the palette footer spells them: a cap
+                is a picture of a key, and two keys in one is a picture of
+                nothing. */}
+            <span className="flex items-center gap-1">
+              <Kbd>{modKey()}</Kbd>
+              <Kbd>K</Kbd>
+            </span>
+          </button>
+        </div>
         <Nav me={me} route={route} navigate={navigate} teacherUi={teacherUi} />
         <div className="border-t border-line p-2">{userMenu(false)}</div>
       </aside>
@@ -267,6 +337,9 @@ export function Shell({
           </IconButton>
           {brand()}
           <span className="flex-1" />
+          <IconButton label={t("palette.open")} onClick={() => setPalette(true)}>
+            <Search />
+          </IconButton>
           {userMenu(true)}
         </div>
 
@@ -286,6 +359,33 @@ export function Shell({
 
         <main className="mx-auto w-full max-w-280 px-4 py-6 sm:px-8 lg:py-8">{children}</main>
       </div>
+
+      {/* Mounted only while open: nothing of it — the key listener of its
+          layer, the autofocus, the query it holds — exists on a page nobody
+          summoned it on. It still takes `open`, so a test can render it on
+          its own without the Shell around it. */}
+      {palette ? (
+        <CommandPalette
+          open
+          onClose={() => setPalette(false)}
+          t={t}
+          locale={locale}
+          setLocale={setLocale}
+          route={route}
+          navigate={navigate}
+          me={me}
+          teacherUi={teacherUi}
+          studentView={studentView}
+          onToggleStudentView={onToggleStudentView}
+          classrooms={rooms.data ?? []}
+          themeChoice={themeChoice}
+          resolvedTheme={resolvedTheme}
+          setThemeChoice={setThemeChoice}
+          openHelp={openHelp}
+          helpTopics={topics}
+          signOut={signOut}
+        />
+      ) : null}
     </div>
   );
 }

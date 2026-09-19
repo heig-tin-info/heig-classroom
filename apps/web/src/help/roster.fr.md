@@ -1,4 +1,4 @@
-# Roster
+# Liste de classe
 
 ## Ce qu'est cette liste
 

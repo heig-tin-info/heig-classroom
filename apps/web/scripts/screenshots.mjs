@@ -38,6 +38,10 @@ const widths = opt("width").map(Number).filter(Boolean);
 // path   URL under BASE; scene flags of the mock go in the query string
 // ls     extra localStorage entries, written before the first paint
 // act    what to open once the page settled (a sheet, a menu, a dialog)
+// fold   viewport only, whatever --fold says. For a scene whose layer is
+//        `fixed`: full-page, the backdrop covers the viewport and everything
+//        below the fold comes out undimmed, which reads as a bug and is not
+//        what anyone sees.
 
 const scenes = [
   // Teacher home
@@ -101,6 +105,14 @@ const scenes = [
   { name: "student-loading", role: "student", path: "/?slow=1", settle: 300 },
   { name: "student-many", role: "student", path: "/?many=1" },
   { name: "student-settings", role: "student", path: "/settings" },
+
+  // Command palette (Ctrl+K from anywhere; the mock persona decides the groups)
+  { name: "palette", role: "teacher", path: "/", fold: true, act: (p) => p.keyboard.press("Control+k") },
+  { name: "palette-query", role: "teacher", path: "/", fold: true, act: async (p) => { await p.keyboard.press("Control+k"); await p.keyboard.type("set"); } },
+  { name: "palette-no-result", role: "teacher", path: "/", fold: true, act: async (p) => { await p.keyboard.press("Control+k"); await p.keyboard.type("qqqq"); } },
+  { name: "palette-classroom", role: "teacher", path: "/classrooms/c1", fold: true, act: (p) => p.keyboard.press("Control+k") },
+  { name: "palette-many", role: "teacher", path: "/?many=1", fold: true, act: (p) => p.keyboard.press("Control+k") },
+  { name: "palette-student", role: "student", path: "/", fold: true, act: (p) => p.keyboard.press("Control+k") },
 
   // Settings and administration
   { name: "settings", role: "teacher", path: "/settings" },
@@ -174,7 +186,7 @@ for (const width of widths.length ? widths : [1440]) {
     }
     const suffix = `${dark ? "-dark" : ""}${width === 1440 ? "" : `-${width}`}`;
     const file = path.join(OUT, `${scene.name}${suffix}.png`);
-    await page.screenshot({ path: file, fullPage });
+    await page.screenshot({ path: file, fullPage: fullPage && !scene.fold });
     if (problems.length) failures += 1;
     console.log(
       `${path.relative(process.cwd(), file)}${problems.length ? `  PROBLEMS: ${problems.join(" | ").slice(0, 400)}` : ""}`,
