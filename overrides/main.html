@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{#-
+  Bilingual documentation.
+
+  English under `docs/` is the reference; French under `docs/fr/` is generated
+  by `pnpm docs:translate`. Both languages are built from the same theme, so
+  everything language-specific lives here:
+
+  1. a note at the top of every French page saying the page is generated,
+  2. the styling of the EN/FR switch in the header (see
+     `partials/alternate.html`),
+  3. a small script that sends a first-time visitor to the language of their
+     browser and remembers an explicit choice.
+-#}
+
+{% set hgc_language = config.theme.language | d("en", true) %}
+
+{% block extrahead %}
+  {{ super() }}
+  <style>
+    .hgc-alternate__button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      width: auto;
+      padding: 0 0.4rem;
+    }
+    .hgc-alternate__code {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      line-height: 1;
+    }
+    .hgc-alternate__link[aria-current="true"] {
+      font-weight: 700;
+    }
+    .hgc-generated {
+      margin-bottom: 1.2em;
+    }
+  </style>
+{% endblock %}
+
+{% block content %}
+  {% if hgc_language == "fr" %}
+    <div class="admonition info hgc-generated" translate="no">
+      <p class="admonition-title">Traduction générée</p>
+      <p>
+        Version française générée automatiquement à partir de la référence
+        anglaise ; en cas de doute, la version anglaise fait foi.
+      </p>
+    </div>
+  {% endif %}
+  {{ super() }}
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      var KEY = "hgc-docs-language";
+      var ONCE = "hgc-docs-language-redirected";
+      var current = {{ hgc_language | tojson }};
+      var untranslated = {{ (page.url in (config.extra.untranslated | d([], true))) | tojson }};
+      var twins = {
+        {%- for alt in config.extra.alternate %}
+        {{ alt.lang | tojson }}: {{ ((alt.prefix | d("", true)) ~ page.url) | url | tojson }}{{ "," if not loop.last }}
+        {%- endfor %}
+      };
+
+      function read(storage, key) {
+        try {
+          return storage.getItem(key);
+        } catch (error) {
+          return null;
+        }
+      }
+
+      function write(storage, key, value) {
+        try {
+          storage.setItem(key, value);
+        } catch (error) {
+          /* private mode, blocked storage: the switch still works. */
+        }
+      }
+
+      /* Remember an explicit click on the language switch. */
+      document.addEventListener("click", function (event) {
+        var link = event.target.closest && event.target.closest("[data-hgc-lang]");
+        if (link) write(window.localStorage, KEY, link.getAttribute("data-hgc-lang"));
+      });
+
+      /* First visit only: follow the browser language, then never again. */
+      var stored = read(window.localStorage, KEY);
+      var wanted = stored;
+      if (!wanted) {
+        var browser = (navigator.language || "en").toLowerCase();
+        wanted = browser.indexOf("fr") === 0 ? "fr" : "en";
+      }
+      if (
+        !untranslated &&
+        wanted !== current &&
+        twins[wanted] &&
+        !read(window.sessionStorage, ONCE)
+      ) {
+        write(window.sessionStorage, ONCE, "1");
+        window.location.replace(twins[wanted]);
+      }
+    })();
+  </script>
+{% endblock %}

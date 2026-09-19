@@ -7,6 +7,16 @@ Specifications live in [docs/](docs/) (needs analysis, requirements, functional
 specs, architecture) as TeXSmith sources that compile to PDF. Architecture
 decision records are under [docs/adr/](docs/adr/).
 
+The documentation site is bilingual. English under `docs/` is the reference and
+is written by hand; French under `docs/fr/` is *generated* from it by
+`pnpm docs:translate`, a Claude-API translator backed by a committed cache
+(`docs/.translation-cache.json`) keyed by the hash of each English section, so
+editing one page retranslates only that page. A glossary
+([docs/i18n-glossary.md](docs/i18n-glossary.md)) pins the domain vocabulary, CI
+fails when an English page changes without its regenerated French twin, and the
+published site offers an EN/FR switch that keeps the reader on the same page.
+The details are in [docs/TRANSLATION.md](docs/TRANSLATION.md).
+
 ## Development
 
 Prerequisites: Node.js >= 22 (pnpm via corepack), Docker (dev Postgres + Keycloak).

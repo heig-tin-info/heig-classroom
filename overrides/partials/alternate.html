@@ -1,0 +1,42 @@
+{#-
+  Language selector — overrides the stock partial so that each entry points at
+  the *same page* in the other language instead of at that language's home.
+
+  `config.extra.alternate[].prefix` is the path from this build's site root to
+  the other language's site root ("fr/" in the English build, "../" in the
+  French build, "" for the current language). Joined with `page.url` and run
+  through the `url` filter, it yields the twin of the current page.
+-#}
+{% set current = config.theme.language | d("en", true) %}
+{%- set untranslated = page.url in (config.extra.untranslated | d([], true)) %}
+<div class="md-header__option hgc-alternate">
+  <div class="md-select">
+    <button
+      class="md-header__button md-icon hgc-alternate__button"
+      aria-label="Select language / Choisir la langue"
+    >
+      {% include ".icons/lucide/languages.svg" %}
+      <span class="hgc-alternate__code">{{ current | upper }}</span>
+    </button>
+    <div class="md-select__inner">
+      <ul class="md-select__list">
+        {% for alt in config.extra.alternate %}
+          {% if not (untranslated and alt.lang != current) %}
+          {% set prefix = alt.prefix | d("", true) %}
+          <li class="md-select__item">
+            <a
+              href="{{ (prefix ~ page.url) | url }}"
+              hreflang="{{ alt.lang }}"
+              class="md-select__link hgc-alternate__link"
+              data-hgc-lang="{{ alt.lang }}"
+              {% if alt.lang == current %}aria-current="true"{% endif %}
+            >
+              {{ alt.name }}
+            </a>
+          </li>
+          {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
