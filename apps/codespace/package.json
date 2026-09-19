@@ -35,7 +35,7 @@
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.23.0",
     "typescript": "^5.9.3",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.11"
   },
   "description": "Portal for supervised development environments (code-server, Podman, SEB)"
 }
