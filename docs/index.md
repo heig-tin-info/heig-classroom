@@ -18,3 +18,9 @@ records under `docs/adr/` in the repository.
 The stack in one sentence: a Fastify monolith over PostgreSQL, a React SPA,
 Switch edu-ID for identity, and a GitHub App doing the heavy lifting, with
 server-sent events keeping every open view live.
+
+!!! info "Languages"
+
+    English is the reference version of this documentation. The [French
+    version](fr/index.md) is generated automatically from it by
+    `pnpm docs:translate`; in case of doubt, the English version prevails.
