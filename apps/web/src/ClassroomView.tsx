@@ -2,9 +2,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
-  Building2,
   CheckCircle2,
-  Clock,
+  ClipboardList,
+  ExternalLink,
   FileSpreadsheet,
   GraduationCap,
   Settings as SettingsIcon,
@@ -15,42 +15,58 @@ import {
   UsersRound,
   XCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { ClassroomDetail, ClassroomGradesPayload, ClassroomStaffRole } from "@hgc/contracts";
 
-import { api, apiErrorMessage, useMe } from "./api";
-import { AssignmentsCard } from "./AssignmentsCard";
+import { api, ApiError, apiErrorMessage, useMe } from "./api";
+import { AssignmentsSection } from "./AssignmentsCard";
 import { Breadcrumb } from "./Breadcrumb";
-import { HelpIcon } from "./help";
+import { useConfirm } from "./confirm";
+import { fuzzyFilter } from "./fuzzy";
 import { useT } from "./i18n";
-import type { Route } from "./router";
+import { useSearchParam, type Route } from "./router";
+import { useToast } from "./notify";
 import { RosterImport } from "./RosterImport";
 import { RosterTable } from "./RosterTable";
 import {
+  Alert,
   Badge,
   Button,
   Card,
+  EmptyState,
   Field,
   GithubIcon,
-  Modal,
+  LinkButton,
+  Menu,
   OrgAvatar,
+  PageHeader,
+  QueryError,
+  SearchInput,
+  SectionHeading,
   Segmented,
+  Skeleton,
   Spinner,
-  Tip,
+  Tabs,
 } from "./ui";
 
-function ClassroomSettings({
-  room,
-  onClose,
-  onGone,
-}: {
-  room: ClassroomDetail;
-  onClose: () => void;
-  onGone: () => void;
-}) {
+type Tab = "assignments" | "students" | "staff" | "settings";
+
+/** The only `?tab=` values the page answers to; anything else is ignored. */
+const TABS: Tab[] = ["assignments", "students", "staff", "settings"];
+
+/** Rename, archive, delete — inline on the Settings tab, no modal. */
+function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => void }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [name, setName] = useState(room.name);
+  const [saved, setSaved] = useState(false);
+  // A refetch (our own invalidation, a live event, another tab) can bring a
+  // new name in: the field follows it instead of holding the stale one and
+  // keeping Rename disabled against a value nobody sees any more.
+  useEffect(() => {
+    setName(room.name);
+  }, [room.name]);
   const rename = useMutation({
     mutationFn: () =>
       api(`/app/api/classrooms/${room.id}`, {
@@ -58,9 +74,9 @@ function ClassroomSettings({
         body: JSON.stringify({ name }),
       }),
     onSuccess: () => {
+      setSaved(true);
       void qc.invalidateQueries({ queryKey: ["classroom", room.id] });
       void qc.invalidateQueries({ queryKey: ["classrooms"] });
-      onClose();
     },
   });
   const archive = useMutation({
@@ -79,65 +95,119 @@ function ClassroomSettings({
   });
 
   return (
-    <Modal title="Classroom settings" onClose={onClose}>
-      <div className="space-y-6">
+    <div className="max-w-2xl space-y-6">
+      <Card className="p-5">
+        <SectionHeading title="Name" description="Shown to you, your staff and the students." />
         <form
-          className="flex flex-wrap items-end gap-3"
+          className="mt-4 flex flex-wrap items-end gap-3"
           onSubmit={(e) => {
             e.preventDefault();
             rename.mutate();
           }}
         >
-          <Field label="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-          <Button disabled={rename.isPending || name.trim() === "" || name === room.name}>
+          <div className="min-w-56 flex-1">
+            <Field
+              label="Classroom name"
+              value={name}
+              onChange={(e) => {
+                setSaved(false);
+                setName(e.target.value);
+              }}
+              required
+              fullWidth
+            />
+          </div>
+          <Button
+            type="submit"
+            variant="secondary"
+            loading={rename.isPending}
+            disabled={name.trim() === "" || name === room.name}
+          >
             Rename
           </Button>
+          {rename.isError ? (
+            <p className="w-full text-[13px] text-danger">
+              {apiErrorMessage(rename.error, "Could not rename this classroom.")}
+            </p>
+          ) : null}
+          {/* Only right after a save of our own: the old condition also lit up
+              on any visit where the field happened to match the classroom. */}
+          {saved ? <p className="w-full text-[13px] text-success">Name saved.</p> : null}
         </form>
+      </Card>
 
-        {room.isOwner ? (
-          <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800/50">
-            <h3 className="mb-1 font-medium">Archive classroom</h3>
-            <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
-              Removes the classroom from the interface for you and the students. Data and
-              GitHub repositories are kept.
-            </p>
+      {room.isOwner ? (
+        <Card className="divide-y divide-line">
+          <div className="flex flex-wrap items-center gap-4 p-5">
+            {/* A wide minimum keeps the sentence readable: below it the button
+                drops to its own line instead of squeezing the text. */}
+            <div className="min-w-56 flex-1">
+              <h3 className="font-semibold">Archive this classroom</h3>
+              <p className="mt-0.5 text-[13px] text-fg-muted">
+                Removes the classroom from the interface for you and the students. Data and GitHub
+                repositories are kept; you can restore it from the archives.
+              </p>
+            </div>
             <Button
-              variant="subtle"
-              onClick={() => {
-                if (window.confirm(`Archive “${room.name}”?`)) archive.mutate();
-              }}
-              disabled={archive.isPending}
-            >
-              <Archive className="size-4" /> Archive
-            </Button>
-          </div>
-        ) : null}
-
-        {room.isOwner ? (
-          <div className="rounded-lg bg-red-50 p-4 dark:bg-red-500/10">
-            <h3 className="mb-1 font-medium text-red-700 dark:text-red-400">Delete classroom</h3>
-            <p className="mb-3 text-sm text-red-700/80 dark:text-red-400/80">
-              Deletes the classroom, its roster and its assignments from the portal. GitHub
-              repositories are not touched. This cannot be undone.
-            </p>
-            <Button
-              onClick={() => {
+              variant="secondary"
+              loading={archive.isPending}
+              onClick={async () => {
                 if (
-                  window.confirm(
-                    `Delete “${room.name}” permanently? Roster and assignments will be removed from the portal.`,
-                  )
+                  await confirm({
+                    title: `Archive “${room.name}”?`,
+                    message: "The classroom disappears for you and the students until you restore it.",
+                    confirmLabel: "Archive classroom",
+                  })
+                ) {
+                  archive.mutate();
+                }
+              }}
+            >
+              <Archive /> Archive classroom
+            </Button>
+            {archive.isError ? (
+              <p className="w-full text-[13px] text-danger">
+                {apiErrorMessage(archive.error, "Could not archive this classroom.")}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-center gap-4 p-5">
+            {/* A wide minimum keeps the sentence readable: below it the button
+                drops to its own line instead of squeezing the text. */}
+            <div className="min-w-56 flex-1">
+              <h3 className="font-semibold text-danger">Delete this classroom</h3>
+              <p className="mt-0.5 text-[13px] text-fg-muted">
+                Deletes the classroom, its roster and its assignments from the portal. GitHub
+                repositories are not touched. This cannot be undone.
+              </p>
+            </div>
+            <Button
+              variant="danger"
+              loading={remove.isPending}
+              onClick={async () => {
+                if (
+                  await confirm({
+                    title: `Delete “${room.name}” permanently?`,
+                    message: "Roster and assignments are removed from the portal. Repositories stay on GitHub.",
+                    confirmLabel: "Delete permanently",
+                    danger: true,
+                  })
                 ) {
                   remove.mutate();
                 }
               }}
-              disabled={remove.isPending}
             >
-              <Trash2 className="size-4" /> Delete permanently
+              <Trash2 /> Delete permanently
             </Button>
+            {remove.isError ? (
+              <p className="w-full text-[13px] text-danger">
+                {apiErrorMessage(remove.error, "Could not delete this classroom.")}
+              </p>
+            ) : null}
           </div>
-        ) : null}
-      </div>
-    </Modal>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 
@@ -154,151 +224,56 @@ function InstallWizard({ room }: { room: ClassroomDetail }) {
       ? `https://github.com/apps/${room.appSlug}/installations/new/permissions?target_id=${room.org.githubOrgId}&state=${room.id}`
       : `https://github.com/apps/${room.appSlug}/installations/new?state=${room.id}`
     : null;
-  const StepDot = ({ n, done }: { n: number; done?: boolean }) =>
-    done ? (
-      <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-400">
-        <CheckCircle2 className="size-3.5" />
-      </span>
-    ) : (
-      <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-semibold text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
-        {n}
-      </span>
-    );
+  const Step = ({ n, done, children }: { n: number; done?: boolean; children: React.ReactNode }) => (
+    <li className="flex items-start gap-3">
+      {done ? (
+        <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-success-soft text-success">
+          <CheckCircle2 className="size-3.5" />
+        </span>
+      ) : (
+        <span className="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-3 text-[11px] font-bold text-fg-muted">
+          {n}
+        </span>
+      )}
+      <div className="min-w-0 flex-1 text-sm">{children}</div>
+    </li>
+  );
   return (
-    <Card className="p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <GithubIcon className="size-4 text-zinc-400" />
-        <h2 className="font-medium">Connect GitHub</h2>
-      </div>
-      <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+    <Card className="p-5">
+      <SectionHeading icon={GithubIcon} title="Connect GitHub" />
+      <p className="mt-2 max-w-2xl text-sm text-fg-muted">
         Assignments need the HEIG Classroom GitHub App installed on{" "}
-        <span className="font-medium text-zinc-700 dark:text-zinc-200">{room.org?.login}</span>:
-        it creates the student repositories, receives their pushes and collects the grades.
+        <span className="font-medium text-fg">{room.org?.login}</span>: it creates the student
+        repositories, receives their pushes and collects the grades.
       </p>
-      <ol className="space-y-2.5 text-sm">
-        <li className="flex items-start gap-2.5">
-          <StepDot n={1} done />
-          <span className="text-zinc-500 dark:text-zinc-400">
-            The organization <span className="font-mono">{room.org?.login}</span> exists on
+      <ol className="mt-4 space-y-3">
+        <Step n={1} done>
+          <span className="text-fg-muted">
+            The organization <span className="font-mono text-fg">{room.org?.login}</span> exists on
             GitHub.
           </span>
-        </li>
-        <li className="flex items-start gap-2.5">
-          <StepDot n={2} />
-          <span className="flex flex-wrap items-center gap-2">
+        </Step>
+        <Step n={2}>
+          <div className="flex flex-wrap items-center gap-3">
             {installUrl ? (
-              <a
-                href={installUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:-translate-y-px hover:bg-accent-hover"
-              >
-                <GithubIcon className="size-4" /> Install the GitHub App
-              </a>
+              <LinkButton href={installUrl} target="_blank" rel="noreferrer" variant="primary">
+                <GithubIcon /> Install the GitHub App
+              </LinkButton>
             ) : (
-              <span className="text-amber-600 dark:text-amber-400">
+              <span className="text-warning">
                 The platform's GitHub App is not configured — contact the administrator.
               </span>
             )}
-            <span className="text-xs text-zinc-400">
+            <span className="text-xs text-fg-faint">
               You must be an owner of the organization. Pick “All repositories”.
             </span>
-          </span>
-        </li>
-        <li className="flex items-start gap-2.5">
-          <StepDot n={3} />
-          <span className="text-zinc-500 dark:text-zinc-400">
-            Validate on GitHub — the badge here turns green automatically.
-          </span>
-        </li>
+          </div>
+        </Step>
+        <Step n={3}>
+          <span className="text-fg-muted">Validate on GitHub — the status here turns green automatically.</span>
+        </Step>
       </ol>
     </Card>
-  );
-}
-
-/**
- * The classroom's GitHub organization no longer exists (deleted or renamed):
- * detected by the live existence check on open — with no installation left,
- * GitHub sends no webhook for it. Grades and roster stay readable; anything
- * touching GitHub is dead until the org is recreated or the classroom moves.
- */
-function OrgMissing({ orgLogin }: { orgLogin: string }) {
-  return (
-    <Card className="p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <XCircle className="size-4 text-red-500" />
-        <h2 className="font-medium text-red-700 dark:text-red-400">Organization not found</h2>
-      </div>
-      <p className="text-sm text-zinc-600 dark:text-zinc-300">
-        The GitHub organization <span className="font-mono font-medium">{orgLogin}</span> no
-        longer exists — it was deleted or renamed on GitHub. Grades and the roster remain
-        available here, but repositories, assignments and grading are unreachable.
-      </p>
-      <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
-        Recreate the organization under the same name and reinstall the GitHub App, or create a
-        new classroom on another organization. If the organization was only renamed while the
-        App was uninstalled, recreate the link by reinstalling the App on the new name.
-      </p>
-    </Card>
-  );
-}
-
-/**
- * The ANTHROPIC_API_KEY organization secret is missing: every LLM review
- * (deadline grade-final, milestones) will fail on this org until the teacher
- * creates it. Detected live through the App's org Secrets read permission.
- */
-function LlmKeyWarning({ orgLogin }: { orgLogin: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-      <AlertTriangle className="size-4 shrink-0" />
-      <span>
-        The organization secret <span className="font-mono font-medium">ANTHROPIC_API_KEY</span>{" "}
-        is missing on <span className="font-medium">{orgLogin}</span>: the automatic LLM reviews
-        (deadline and milestones) will fail. Add it under Organization settings → Secrets and
-        variables → Actions, with access to private repositories.
-      </span>
-      <span className="flex-1" />
-      <a
-        href={`https://github.com/organizations/${orgLogin}/settings/secrets/actions`}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
-      >
-        Open the org secrets
-      </a>
-    </div>
-  );
-}
-
-/**
- * Organization secrets never reach the private repositories of a Free
- * organization: the LLM review tier fails silently (empty ANTHROPIC_API_KEY).
- * Teachers get GitHub Team at no cost through GitHub Education.
- */
-function FreePlanWarning({ orgLogin }: { orgLogin: string }) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-      <AlertTriangle className="size-4 shrink-0" />
-      <span>
-        <span className="font-medium">{orgLogin}</span> is on the GitHub <span className="font-medium">Free</span> plan,
-        which restricts what private repositories can do. Student repositories are created and
-        handed over as usual, but they get no branch protection — a student can force-push or
-        delete their history — and the deadline falls back to archiving instead of locking.
-        Organization secrets are not delivered either, so the automatic LLM review fails
-        silently. As a teacher you can upgrade the organization to GitHub Team for free through
-        GitHub Education.
-      </span>
-      <span className="flex-1" />
-      <a
-        href="https://education.github.com/globalcampus/teacher"
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-sm font-medium text-amber-900 shadow-sm transition-colors hover:bg-amber-100 dark:border-amber-500/40 dark:bg-transparent dark:text-amber-200 dark:hover:bg-amber-500/10"
-      >
-        Request the education upgrade
-      </a>
-    </div>
   );
 }
 
@@ -307,9 +282,10 @@ function FreePlanWarning({ orgLogin }: { orgLogin: string }) {
  * member does everything inside the classroom; the teacher/assistant role is
  * a label. Only the owner edits the list — other members read it.
  */
-function StaffCard({ room }: { room: ClassroomDetail }) {
+function StaffTab({ room }: { room: ClassroomDetail }) {
   const t = useT();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState<ClassroomStaffRole>("teacher");
   const refresh = () => qc.invalidateQueries({ queryKey: ["classroom", room.id] });
@@ -332,97 +308,210 @@ function StaffCard({ room }: { room: ClassroomDetail }) {
   });
 
   return (
-    <Card>
-      <div className="flex items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
-        <UsersRound className="size-4 text-zinc-400" />
-        <h2 className="font-medium">{t("staff.title")}</h2>
-        <span className="flex-1" />
-        {room.isOwner ? null : (
-          <span className="text-xs text-zinc-400">{t("staff.readonly")}</span>
+    <div className="max-w-2xl space-y-4">
+      <SectionHeading
+        icon={UsersRound}
+        title={t("staff.title")}
+        count={room.staff.length}
+        description={room.isOwner ? null : t("staff.readonly")}
+      />
+      <Card>
+        {room.staff.length === 0 ? (
+          <EmptyState icon={UsersRound} title={t("staff.empty")} className="py-10" />
+        ) : (
+          <ul className="divide-y divide-line">
+            {room.staff.map((m) => (
+              <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold">
+                    {m.claimed ? `${m.givenName ?? ""} ${m.familyName ?? ""}`.trim() || m.email : m.email}
+                  </p>
+                  <p className="text-[13px] text-fg-muted">
+                    {m.claimed ? m.email : t("staff.pending")}
+                  </p>
+                </div>
+                <Badge tone="zinc">{t(`staff.role.${m.role}`)}</Badge>
+                {room.isOwner ? (
+                  <Menu
+                    label={t("staff.remove")}
+                    items={[
+                      {
+                        label: t("staff.remove"),
+                        icon: UserMinus,
+                        danger: true,
+                        onSelect: async () => {
+                          if (
+                            await confirm({
+                              title: t("staff.confirmRemove", { email: m.email }),
+                              confirmLabel: t("staff.remove"),
+                              cancelLabel: t("common.cancel"),
+                              danger: true,
+                            })
+                          ) {
+                            remove.mutate(m.id);
+                          }
+                        },
+                      },
+                    ]}
+                  />
+                ) : null}
+                {remove.isError && remove.variables === m.id ? (
+                  <p className="w-full text-[13px] text-danger">
+                    {apiErrorMessage(remove.error, "Could not remove this member.")}
+                  </p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )}
-      </div>
+        {room.isOwner ? (
+          <form
+            className="flex flex-wrap items-end gap-3 border-t border-line bg-surface-2/50 px-5 py-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              add.mutate();
+            }}
+          >
+            <div className="min-w-56 flex-1">
+              <Field
+                label={t("staff.email")}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="prenom.nom@heig-vd.ch"
+                required
+                fullWidth
+              />
+            </div>
+            <Segmented
+              name="staff-role"
+              value={role}
+              onChange={setRole}
+              options={[
+                { value: "teacher", label: t("staff.role.teacher") },
+                { value: "assistant", label: t("staff.role.assistant") },
+              ]}
+            />
+            <Button type="submit" variant="secondary" loading={add.isPending} disabled={email.trim() === ""}>
+              <UserPlus /> {t("staff.add")}
+            </Button>
+            {add.isError ? (
+              <p className="w-full text-sm text-danger">
+                {apiErrorMessage(add.error, "Could not add this e-mail")}
+              </p>
+            ) : null}
+          </form>
+        ) : null}
+      </Card>
+    </div>
+  );
+}
 
-      {room.staff.length === 0 ? (
-        <p className="px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">{t("staff.empty")}</p>
-      ) : (
-        <ul className="divide-y divide-zinc-100/80 dark:divide-zinc-800/60">
-          {room.staff.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
-              <span className="font-medium">
-                {m.claimed ? `${m.givenName ?? ""} ${m.familyName ?? ""}`.trim() || m.email : m.email}
+function StudentsTab({ room }: { room: ClassroomDetail }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const me = useMe();
+  const [query, setQuery] = useState("");
+  const [importing, setImporting] = useState(false);
+  const join = useMutation({
+    mutationFn: () => api(`/app/api/classrooms/${room.id}/self-enroll`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["classroom", room.id] });
+      void qc.invalidateQueries({ queryKey: ["classrooms"] });
+    },
+  });
+  // The teacher can take a (staff) seat to walk the student flow themselves.
+  const myEmail = me.data?.email.toLowerCase();
+  const joined = myEmail != null && room.roster.some((e) => e.email.toLowerCase() === myEmail);
+  const claimed = room.roster.filter((r) => r.status === "claimed").length;
+  const shown = fuzzyFilter(query, room.roster, (r) => `${r.nom} ${r.prenom} ${r.email} ${r.githubLogin ?? ""}`);
+
+  return (
+    <div className="space-y-4">
+      <SectionHeading
+        icon={Users}
+        title="Students"
+        count={room.roster.length}
+        help="roster"
+        description={room.roster.length ? `${claimed} claimed their seat · ${room.roster.length - claimed} pending` : null}
+        actions={
+          <>
+            {joined ? (
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-muted">
+                <GraduationCap className="size-4 text-fg-faint" /> {t("roster.joined")}
               </span>
-              {m.claimed ? (
-                <span className="text-zinc-500 dark:text-zinc-400">{m.email}</span>
-              ) : (
-                <span className="text-xs text-zinc-400">{t("staff.pending")}</span>
-              )}
-              <span className="flex-1" />
-              <Badge tone="zinc">{t(`staff.role.${m.role}`)}</Badge>
-              {room.isOwner ? (
-                <Tip label={t("staff.remove")}>
-                  <Button
-                    variant="ghost"
-                    aria-label={t("staff.remove")}
-                    disabled={remove.isPending}
-                    onClick={() => {
-                      if (window.confirm(t("staff.confirmRemove", { email: m.email }))) {
-                        remove.mutate(m.id);
-                      }
-                    }}
-                  >
-                    <UserMinus className="size-4" />
-                  </Button>
-                </Tip>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {room.isOwner ? (
-        <form
-          className="flex flex-wrap items-end gap-3 border-t border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60"
-          onSubmit={(e) => {
-            e.preventDefault();
-            add.mutate();
-          }}
-        >
-          <Field
-            label={t("staff.email")}
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="prenom.nom@heig-vd.ch"
-            required
-          />
-          <Segmented
-            name="staff-role"
-            value={role}
-            onChange={setRole}
-            options={[
-              { value: "teacher", label: t("staff.role.teacher") },
-              { value: "assistant", label: t("staff.role.assistant") },
-            ]}
-          />
-          <Button disabled={add.isPending || email.trim() === ""}>
-            <UserPlus className="size-4" /> {t("staff.add")}
-          </Button>
-          {add.isError ? (
-            <p className="w-full text-sm text-red-600 dark:text-red-400">
-              {apiErrorMessage(add.error, "Could not add this e-mail")}
-            </p>
-          ) : null}
-        </form>
+            ) : (
+              <Button variant="secondary" onClick={() => join.mutate()} loading={join.isPending}>
+                <GraduationCap /> {t("roster.join")}
+              </Button>
+            )}
+            {/* The empty state below already carries this action; two accent
+                buttons for the same thing is one too many. */}
+            {room.roster.length ? (
+              <Button onClick={() => setImporting(true)}>
+                <UserPlus /> Add students
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+      {join.isError ? (
+        <p className="text-[13px] text-danger">
+          {apiErrorMessage(join.error, "Could not give you a seat in this classroom.")}
+        </p>
       ) : null}
-    </Card>
+      {room.roster.length === 0 ? (
+        <Card>
+          <EmptyState
+            icon={Users}
+            title="No students yet"
+            action={
+              <Button onClick={() => setImporting(true)}>
+                <UserPlus /> Add students
+              </Button>
+            }
+          >
+            Import the student list from an Excel or CSV file, or add them one by one.
+          </EmptyState>
+        </Card>
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3">
+            <SearchInput
+              placeholder="Search students…"
+              aria-label="Search students"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full sm:w-64"
+            />
+            {/* A long roster never paginates: it says how much of it you see. */}
+            <span className="text-[13px] text-fg-muted">
+              {shown.length === room.roster.length
+                ? `${room.roster.length} students`
+                : `${shown.length} of ${room.roster.length} students`}
+            </span>
+          </div>
+          {shown.length ? (
+            <RosterTable classroomId={room.id} roster={shown} />
+          ) : (
+            <EmptyState icon={Users} title="No student matches" className="py-10">
+              Search by last name, first name, e-mail or GitHub login.
+            </EmptyState>
+          )}
+        </Card>
+      )}
+      {importing ? <RosterImport classroomId={room.id} onClose={() => setImporting(false)} /> : null}
+    </div>
   );
 }
 
 export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Route) => void }) {
   const t = useT();
-  const qc = useQueryClient();
-  const me = useMe();
-  const [showSettings, setShowSettings] = useState(false);
+  const toast = useToast();
+  const [rawTab, setTab] = useSearchParam("tab", "assignments");
+  // `?tab=` comes from the URL bar, so it is user input: an unknown value
+  // used to select no tab at all and leave the page showing an empty panel.
+  const tab: Tab = (TABS as string[]).includes(rawTab) ? (rawTab as Tab) : "assignments";
   const detail = useQuery<ClassroomDetail>({
     queryKey: ["classroom", id],
     queryFn: () => api(`/app/api/classrooms/${id}`),
@@ -430,6 +519,10 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
   // Grade sheet (issue #4): roster x graded assignments, the sheet a GAPS
   // import starts from. Fetched on click — nothing to prefetch on open.
   const gradeSheet = useMutation({
+    // The action lives in an overflow menu, which closes the moment it is
+    // picked: a `disabled` on the item can never be seen, so the toasts are
+    // the whole progress report.
+    onMutate: () => toast(t("classroom.gradeSheetStarted"), "progress"),
     mutationFn: async () => {
       const data = await api<ClassroomGradesPayload>(`/app/api/classrooms/${id}/grades`);
       const XLSX = await import("xlsx");
@@ -452,133 +545,216 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       XLSX.utils.book_append_sheet(wb, ws, "Notes");
       XLSX.writeFile(wb, `${data.classroom.name} — grades.xlsx`);
     },
-  });
-  const join = useMutation({
-    mutationFn: () => api(`/app/api/classrooms/${id}/self-enroll`, { method: "POST" }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["classroom", id] });
-      void qc.invalidateQueries({ queryKey: ["classrooms"] });
-    },
+    onSuccess: () => toast(t("classroom.gradeSheetReady"), "success"),
+    onError: (err) => toast(apiErrorMessage(err, "Could not build the grade sheet."), "error"),
   });
 
-  if (detail.isLoading) return <Spinner className="py-16" />;
-  if (!detail.data) return <p>Classroom not found.</p>;
+  if (detail.isLoading) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-4 w-40" />
+        <Skeleton className="h-8 w-72" />
+        <Skeleton className="h-10 w-full" />
+        <Spinner className="py-16" />
+      </div>
+    );
+  }
+  if (!detail.data) {
+    // A 404 is an answer, not a failure: it gets its own way out.
+    const gone = detail.error instanceof ApiError && detail.error.status === 404;
+    return (
+      <div className="space-y-6">
+        <Breadcrumb
+          items={[
+            { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
+            { label: gone ? "Unknown classroom" : "Classroom" },
+          ]}
+        />
+        {gone ? (
+          <Card>
+            <EmptyState
+              icon={XCircle}
+              title="Classroom not found"
+              action={
+                <Button variant="secondary" onClick={() => navigate({ view: "home" })}>
+                  Back to my classrooms
+                </Button>
+              }
+            >
+              It was deleted, or the link points at a classroom you cannot open.
+            </EmptyState>
+          </Card>
+        ) : (
+          <QueryError
+            title="Could not load this classroom"
+            error={detail.error}
+            onRetry={() => void detail.refetch()}
+            retrying={detail.isFetching}
+          />
+        )}
+      </div>
+    );
+  }
   const room = detail.data;
-  // The teacher can take a (staff) seat to walk the student flow themselves.
-  const myEmail = me.data?.email.toLowerCase();
-  const joined = myEmail != null && room.roster.some((e) => e.email.toLowerCase() === myEmail);
   const orgMissing =
     room.org != null &&
     room.org.installationId === null &&
     (room.org.exists === false || room.org.status === "degraded");
+  const installed = room.org?.installationId != null;
+
+  const status = installed ? (
+    <Badge tone="green" icon={CheckCircle2}>
+      GitHub App installed
+    </Badge>
+  ) : orgMissing ? (
+    <Badge tone="red" icon={XCircle}>
+      organization not found
+    </Badge>
+  ) : (
+    <Badge tone="amber" icon={AlertTriangle}>
+      GitHub App not installed
+    </Badge>
+  );
 
   return (
-    <div className="space-y-4">
-      <Breadcrumb
-        items={[
-          { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
-          { label: room.name },
-        ]}
-      />
-
-      <div className="flex flex-wrap items-center gap-3">
-        {room.org ? <OrgAvatar login={room.org.login} className="size-8" /> : null}
-        <h1 className="text-2xl font-semibold tracking-tight">{room.name}</h1>
-        <span className="flex-1" />
-        {room.org ? (
-          <Tip label={`Open ${room.org.login} on GitHub`}>
-            <a
-              href={`https://github.com/${room.org.login}`}
-              target="_blank"
-              rel="noreferrer"
-              className="transition-opacity hover:opacity-75"
-            >
-              <Badge tone="zinc" icon={Building2}>
-                {room.org.login}
-              </Badge>
-            </a>
-          </Tip>
-        ) : null}
-        {room.org?.installationId ? (
-          <Badge tone="green" icon={CheckCircle2}>
-            GitHub App installed
-          </Badge>
-        ) : orgMissing ? (
-          <Badge tone="red" icon={XCircle}>
-            Organization not found on GitHub
-          </Badge>
-        ) : (
-          <Badge tone="amber" icon={Clock}>
-            GitHub App not installed
-          </Badge>
-        )}
-        <Tip label={t("classroom.gradeSheetTip")}>
-          <Button
-            variant="ghost"
-            aria-label={t("classroom.gradeSheet")}
-            onClick={() => gradeSheet.mutate()}
-            disabled={gradeSheet.isPending}
-          >
-            <FileSpreadsheet className="size-4" /> {t("classroom.gradeSheet")}
-          </Button>
-        </Tip>
-        <Tip label="Classroom settings">
-          <Button variant="ghost" aria-label="Classroom settings" onClick={() => setShowSettings(true)}>
-            <SettingsIcon className="size-4" />
-          </Button>
-        </Tip>
-      </div>
-
-      {showSettings ? (
-        <ClassroomSettings room={room} onClose={() => setShowSettings(false)} onGone={() => navigate({ view: "home" })} />
-      ) : null}
-
-      {orgMissing ? (
-        <OrgMissing orgLogin={room.org!.login} />
-      ) : !room.org?.installationId ? (
-        <InstallWizard room={room} />
-      ) : null}
-
-      {room.org?.installationId && room.org.plan === "free" ? (
-        <FreePlanWarning orgLogin={room.org.login} />
-      ) : null}
-
-      {room.org?.installationId && room.org.llmSecret === "missing" ? (
-        <LlmKeyWarning orgLogin={room.org.login} />
-      ) : null}
-
-      <AssignmentsCard
-        classroomId={room.id}
-        appInstalled={room.org?.installationId != null}
-        onOpenAssignment={(aid) =>
-          navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={
+          <Breadcrumb
+            items={[
+              { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
+              { label: room.name },
+            ]}
+          />
+        }
+        title={
+          <span className="flex items-center gap-3">
+            {room.org ? <OrgAvatar login={room.org.login} className="size-9 rounded-[10px]" /> : null}
+            {room.name}
+          </span>
+        }
+        description={
+          <span className="flex flex-wrap items-center gap-2">
+            {room.org ? (
+              <a
+                href={`https://github.com/${room.org.login}`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 hover:text-fg hover:underline"
+              >
+                {room.org.login} <ExternalLink className="size-3" />
+              </a>
+            ) : null}
+            {status}
+          </span>
+        }
+        actions={
+          <Menu
+            label="Classroom actions"
+            items={[
+              {
+                label: t("classroom.gradeSheet"),
+                description: t("classroom.gradeSheetTip"),
+                icon: FileSpreadsheet,
+                onSelect: () => gradeSheet.mutate(),
+              },
+              { label: "Settings", icon: SettingsIcon, onSelect: () => setTab("settings") },
+            ]}
+          />
         }
       />
 
-      <Card>
-        <div className="flex items-center gap-2 border-b border-zinc-100/80 px-4 py-3 dark:border-zinc-800/60">
-          <Users className="size-4 text-zinc-400" />
-          <h2 className="font-medium">Roster</h2>
-          <HelpIcon topic="roster" />
-          <span className="flex-1" />
-          {joined ? (
-            <Tip label={t("roster.joined")}>
-              <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-                <GraduationCap className="size-3.5" /> {t("roster.staff")}
-              </span>
-            </Tip>
-          ) : (
-            <Button variant="subtle" onClick={() => join.mutate()} disabled={join.isPending}>
-              <GraduationCap className="size-4" /> {t("roster.join")}
-            </Button>
-          )}
-        </div>
-        <RosterTable classroomId={room.id} roster={room.roster} />
-      </Card>
+      {orgMissing ? (
+        <Alert tone="danger" icon={XCircle} title="Organization not found">
+          The GitHub organization <span className="font-mono font-medium">{room.org!.login}</span>{" "}
+          no longer exists — it was deleted or renamed on GitHub. Grades and the roster remain
+          available here, but repositories, assignments and grading are unreachable. Recreate the
+          organization under the same name and reinstall the GitHub App, or create a new
+          classroom on another organization. If the organization was only renamed while the App
+          was uninstalled, recreate the link by reinstalling the App on the new name.
+        </Alert>
+      ) : !installed ? (
+        <InstallWizard room={room} />
+      ) : null}
 
-      <RosterImport classroomId={room.id} />
+      {installed && room.org?.plan === "free" ? (
+        <Alert
+          tone="warning"
+          icon={AlertTriangle}
+          title={`${room.org.login} is on the GitHub Free plan`}
+          action={
+            <LinkButton
+              size="sm"
+              href="https://education.github.com/globalcampus/teacher"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Request the education upgrade
+            </LinkButton>
+          }
+        >
+          Private repositories get no branch protection (a student can force-push or delete their
+          history), the deadline falls back to archiving, and organization secrets are not
+          delivered, so the automatic LLM review fails silently. GitHub Team is free for teachers
+          through GitHub Education.
+        </Alert>
+      ) : null}
 
-      <StaffCard room={room} />
+      {installed && room.org?.llmSecret === "missing" ? (
+        <Alert
+          tone="warning"
+          icon={AlertTriangle}
+          title="ANTHROPIC_API_KEY is missing on the organization"
+          action={
+            <LinkButton
+              size="sm"
+              href={`https://github.com/organizations/${room.org.login}/settings/secrets/actions`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Open the organization secrets
+            </LinkButton>
+          }
+        >
+          The automatic LLM reviews (deadline and milestones) will fail until the secret exists.
+          Add it under Organization settings → Secrets and variables → Actions, with access to
+          private repositories.
+        </Alert>
+      ) : null}
+
+      <Tabs
+        value={tab}
+        onChange={setTab}
+        idPrefix="classroom"
+        label="Classroom sections"
+        items={[
+          { value: "assignments", label: "Assignments", icon: ClipboardList },
+          { value: "students", label: "Students", icon: Users, count: room.roster.length },
+          { value: "staff", label: t("staff.title"), icon: UsersRound, count: room.staff.length },
+          { value: "settings", label: "Settings", icon: SettingsIcon },
+        ]}
+      />
+
+      {/* One panel, named after the selected tab: `idPrefix` on Tabs makes
+          each tab point at it with aria-controls. */}
+      <div role="tabpanel" id={`classroom-panel-${tab}`} aria-labelledby={`classroom-tab-${tab}`}>
+        {tab === "students" ? (
+          <StudentsTab room={room} />
+        ) : tab === "staff" ? (
+          <StaffTab room={room} />
+        ) : tab === "settings" ? (
+          <SettingsTab room={room} onGone={() => navigate({ view: "home" })} />
+        ) : (
+          <AssignmentsSection
+            classroomId={room.id}
+            appInstalled={installed}
+            blockedElsewhere={orgMissing}
+            onOpenAssignment={(aid) =>
+              navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
+            }
+          />
+        )}
+      </div>
     </div>
   );
 }

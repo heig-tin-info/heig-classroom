@@ -2,7 +2,7 @@
 
 ## What this page shows
 
-One card per classroom you belong to, with its assignments in a sortable table: deadline and live countdown, status, tests and grade. The search filters everything; the buttons switch between cards and a flat list.
+**Up next** shows the nearest deadline. Below, one section per classroom you belong to, with its assignments: deadline and live countdown, status, tests and grade. The search filters everything; the switch toggles between sections and a flat sortable list.
 
 ## How to accept an assignment
 
@@ -14,4 +14,4 @@ While the assignment is open, every push runs the tests and shows an **indicativ
 
 ## Teachers only
 
-The graduation-cap button in the header switches back to the teacher view.
+**Back to teacher view** in the banner at the top (or in the account menu) leaves the student view.

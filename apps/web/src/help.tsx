@@ -1,16 +1,20 @@
 import { CircleHelp, X } from "lucide-react";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useId, useRef, useState, type ReactNode } from "react";
 
 import { useI18n } from "./i18n";
 import { Markdown } from "./markdown";
-import { Tip, Z } from "./ui";
+import { Tip, useLayer, Z } from "./ui";
 
 /**
- * Contextual help: small "?" icons on the main components open a collapsible
- * drawer on the right with the description of that component. Content lives in
+ * Contextual help: small "?" icons on the main components open a drawer on
+ * the right with the description of that component. Content lives in
  * editable Markdown files under `src/help/*.md`, loaded at build time; a
  * `<topic>.<locale>.md` variant overrides the English default when present.
- * The drawer is hidden unless summoned and closes on any outside click.
+ * The drawer is hidden unless summoned and closes on any outside click, on
+ * Escape or on its own close button. While open it is a modal dialog: the
+ * focus moves into it, Tab cycles inside it, and closing it gives the focus
+ * back to the "?" icon that summoned it — including when it slides over a
+ * dialog, which stays open underneath.
  */
 const SOURCES = import.meta.glob("./help/*.md", {
   query: "?raw",
@@ -31,12 +35,13 @@ export function HelpIcon({ topic, className = "" }: { topic: string; className?:
   return (
     <Tip label="Help">
       <button
+        type="button"
         aria-label="Help"
         onClick={(e) => {
           e.stopPropagation();
           open(topic);
         }}
-        className={`rounded-full p-0.5 text-zinc-300 transition-colors hover:text-accent dark:text-zinc-600 dark:hover:text-accent ${className}`}
+        className={`rounded-full p-0.5 text-fg-faint transition-colors hover:text-accent ${className}`}
       >
         <CircleHelp className="size-3.5" />
       </button>
@@ -48,47 +53,48 @@ export function HelpProvider({ children }: { children: ReactNode }) {
   const { t, locale } = useI18n();
   const [topic, setTopic] = useState<string | null>(null);
   const source = topic ? helpSource(topic, locale) : null;
-
-  // Any outside click (or Escape) collapses the drawer.
-  useEffect(() => {
-    if (!topic) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setTopic(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [topic]);
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useLayer(panel, () => setTopic(null), { enabled: topic != null });
 
   return (
     <HelpContext.Provider value={{ open: setTopic }}>
       {children}
       {/* Transparent overlay to capture the outside click while open. Above
-          the modals (z-50): help opened from a dialog must not slide UNDER
+          the dialogs (z-50): help opened from a dialog must not slide UNDER
           its backdrop — and closing the help must not close the dialog. */}
       {topic ? <div className={`fixed inset-0 ${Z.helpBackdrop}`} onClick={() => setTopic(null)} /> : null}
       <div
-        className={`fixed inset-y-0 right-0 ${Z.help} w-80 transform bg-white shadow-[-8px_0_32px_rgb(0_0_0/0.12)] transition-transform duration-200 dark:bg-zinc-900 dark:shadow-[-8px_0_32px_rgb(0_0_0/0.5)] ${
+        ref={panel}
+        className={`fixed inset-y-0 right-0 ${Z.help} w-85 max-w-full transform border-l border-line bg-surface shadow-sheet transition-transform duration-200 ease-out-emphasized focus:outline-none ${
           source ? "translate-x-0" : "translate-x-full"
         }`}
-        role="complementary"
-        aria-label={t("help.title")}
+        {...(source
+          ? { role: "dialog" as const, "aria-modal": true, "aria-labelledby": titleId }
+          : // Closed: the panel is still in the DOM for the slide animation, so
+            // it must be neither a dialog nor reachable.
+            { "aria-hidden": true })}
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         {source ? (
           <div className="flex h-full flex-col">
-            <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
+            <div className="flex items-center gap-2 border-b border-line px-5 py-4">
               <CircleHelp className="size-4 text-accent" />
-              <h2 className="font-medium">{t("help.title")}</h2>
+              <h2 id={titleId} className="text-[15px] font-bold tracking-tight">
+                {t("help.title")}
+              </h2>
               <span className="flex-1" />
               <button
+                type="button"
                 aria-label="Close help"
                 onClick={() => setTopic(null)}
-                className="rounded-md p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                className="rounded-full p-1.5 text-fg-faint transition-colors hover:bg-surface-2 hover:text-fg"
               >
                 <X className="size-4" />
               </button>
             </div>
-            <div className="space-y-3 overflow-y-auto px-4 py-4 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
+            <div className="space-y-3 overflow-y-auto px-5 py-4 text-sm leading-relaxed text-fg-muted">
               <Markdown source={source} />
             </div>
           </div>

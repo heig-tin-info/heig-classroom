@@ -6,6 +6,7 @@ import {
   GitCommitHorizontal,
   GitPullRequest,
   GraduationCap,
+  Loader2,
   Lock,
   ShieldAlert,
   UserPlus,
@@ -75,18 +76,25 @@ const ICONS: Record<NoticeKind, typeof UserPlus> = {
   sync: GitPullRequest,
 };
 
-export type ToastTone = "success" | "error" | "warning";
+/**
+ * `progress` is the "this has started" tone: an action taken from an overflow
+ * menu has nowhere else to say so, because the menu closes as it is picked.
+ * It is neutral on purpose — nothing has gone right or wrong yet.
+ */
+export type ToastTone = "success" | "error" | "warning" | "progress";
 
 const TONE_ICONS: Record<ToastTone, typeof CheckCircle2> = {
   success: CheckCircle2,
   error: AlertTriangle,
   warning: AlertTriangle,
+  progress: Loader2,
 };
 
 const TONE_COLORS: Record<ToastTone, string> = {
-  success: "text-emerald-500",
-  error: "text-red-500",
-  warning: "text-amber-500",
+  success: "text-success",
+  error: "text-danger",
+  warning: "text-warning",
+  progress: "animate-spin text-fg-faint",
 };
 
 interface Toast {
@@ -153,24 +161,32 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ notify, toast }}>
       {children}
-      <div className={`pointer-events-none fixed bottom-4 right-4 ${Z.toast} flex flex-col items-end gap-2`}>
+      {/* One polite live region around the stack: a toast appearing is
+          announced, and the dismiss buttons stay reachable with the keyboard
+          (the wrapper is click-through, each toast is not). */}
+      <div
+        aria-live="polite"
+        aria-relevant="additions"
+        className={`pointer-events-none fixed bottom-4 right-4 ${Z.toast} flex flex-col items-end gap-2`}
+      >
         {toasts.map((t) => {
           const Icon = t.icon;
           return (
             <div
               key={t.id}
-              className={`pointer-events-auto flex max-w-sm items-start gap-2 rounded-xl bg-white px-3 py-2.5 text-sm shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 dark:bg-zinc-900 dark:ring-zinc-800 dark:shadow-[0_4px_24px_rgb(0_0_0/0.5)] ${t.leaving ? "toast-leave" : "toast-enter"}`}
+              className={`pointer-events-auto flex max-w-sm items-start gap-2.5 rounded-menu border border-line bg-surface py-2.5 pl-3.5 pr-2 text-sm shadow-overlay ${t.leaving ? "toast-leave" : "toast-enter"}`}
               role="status"
               onAnimationEnd={() => {
                 if (t.leaving) setToasts((prev) => prev.filter((x) => x.id !== t.id));
               }}
             >
               <Icon className={`mt-0.5 size-4 shrink-0 ${t.iconColor}`} />
-              <span className="text-zinc-700 dark:text-zinc-200">{t.message}</span>
+              <span className="text-fg">{t.message}</span>
               <button
-                aria-label="Dismiss"
+                type="button"
+                aria-label="Dismiss notification"
                 onClick={() => dismiss(t.id)}
-                className="ml-1 rounded p-0.5 text-zinc-300 hover:text-zinc-600 dark:text-zinc-600 dark:hover:text-zinc-300"
+                className="ml-1 rounded-full p-1 text-fg-faint transition-colors hover:bg-surface-2 hover:text-fg"
               >
                 <X className="size-3.5" />
               </button>

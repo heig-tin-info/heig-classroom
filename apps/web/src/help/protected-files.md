@@ -16,4 +16,4 @@ snapshot). Repeated tampering is rate-limited and flagged to you.
 ## How to adjust the list
 
 Expand the section and check or uncheck files in the tree. The list can still
-be edited after creation, from the assignment's edit dialog.
+be edited after creation, from the assignment's edit panel.

@@ -10,7 +10,6 @@ import {
   Clock,
   Download,
   FileCode,
-  GitCommitHorizontal,
   GitPullRequest,
   History,
   Lock,
@@ -22,10 +21,10 @@ import {
   Play,
   Plus,
   RefreshCw,
-  Search as SearchIcon,
   Snowflake,
   Trash2,
   UserCheck,
+  Users,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -34,31 +33,51 @@ import type {
   AssignmentDetailPayload,
   AssignmentDetailStudent,
   AssignmentMilestone,
+  ClassroomDetail,
   GradeView,
 } from "@hgc/contracts";
 import { finalPoints, resolveFinalGrade } from "@hgc/domain";
 
 import { ActivityPanel } from "./activity/ActivityPanel";
-import { api, ApiError } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
+import { compactDuration } from "./AssignmentForm";
+import { Breadcrumb } from "./Breadcrumb";
 import { buildCloneScript, cloneScriptFileName } from "./cloneScript";
+import { useConfirm } from "./confirm";
 import { GradeHistoryModal } from "./GradeHistoryModal";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
+import { useToast } from "./notify";
+import type { Route } from "./router";
 import {
+  Alert,
   Badge,
   Button,
   Card,
+  cx,
+  EmptyState,
   Field,
   GithubIcon,
+  IconButton,
   isoDateTime,
+  Menu,
   Modal,
+  PageHeader,
+  pressable,
+  QueryError,
+  SearchInput,
+  SectionHeading,
+  Select,
+  Skeleton,
   SortHeader,
   Spinner,
+  Stat,
+  T,
+  Textarea,
   Tip,
   useNow,
   useSortableTable,
-  Z,
 } from "./ui";
 
 function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: GradeView | null }) {
@@ -76,7 +95,7 @@ function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: Gra
       </Badge>
     );
   }
-  if (!s || s.ciStatus === "none") return <span className="text-zinc-400">—</span>;
+  if (!s || s.ciStatus === "none") return <span className="text-fg-faint">—</span>;
   const checks =
     s.checksPassed !== null && s.checksTotal !== null ? ` ${s.checksPassed}/${s.checksTotal}` : "";
   if (s.ciStatus === "pass")
@@ -98,48 +117,22 @@ function CiBadge({ s, tests }: { s: AssignmentDetailStudent["repo"]; tests?: Gra
   );
 }
 
-const cell = "px-3 py-1.5 whitespace-nowrap align-middle";
-
 /** Plain mark (e.g. "4.5"): the number is the information, no badge chrome. */
 function GradeText({ grade, frozen }: { grade: GradeView | null; frozen: boolean }) {
-  if (!grade) return <span className="text-zinc-400">—</span>;
+  if (!grade) return <span className="text-fg-faint">—</span>;
   if (grade.parseStatus === "ok" && grade.points !== null) {
     return (
-      <span className="inline-flex items-center gap-1 font-medium tabular-nums">
+      <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
         {grade.points.toFixed(1)}
-        {frozen ? <Snowflake className="size-3 text-zinc-400" /> : null}
+        {frozen ? <Snowflake className="size-3 text-fg-faint" /> : null}
       </span>
     );
   }
-  if (grade.parseStatus === "fallback") return <span className="text-zinc-400">—</span>;
+  if (grade.parseStatus === "fallback") return <span className="text-fg-faint">—</span>;
   return (
     <Badge tone="amber" icon={AlertTriangle}>
       {grade.parseStatus === "multiple" ? "multiple GRADE" : grade.parseStatus.replace("_", " ")}
     </Badge>
-  );
-}
-
-/** GitHub-repo link; the student's login shows in a hover popover. */
-function RepoLink({ fullName, login }: { fullName: string; login: string | null }) {
-  return (
-    <span className="group/pop relative inline-flex">
-      <a
-        href={`https://github.com/${fullName}`}
-        target="_blank"
-        rel="noreferrer"
-        onClick={(e) => e.stopPropagation()}
-        aria-label={`Open ${fullName} on GitHub`}
-        className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-900 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
-      >
-        <GithubIcon className="size-4" />
-      </a>
-      <span className={`pointer-events-none absolute left-0 top-full ${Z.popover} mt-1 hidden whitespace-nowrap rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-[0_4px_24px_rgb(0_0_0/0.15)] ring-1 ring-zinc-100 group-hover/pop:block dark:bg-zinc-900 dark:ring-zinc-800`}>
-        {login ? (
-          <span className="font-medium">{login}</span>
-        ) : null}
-        <span className="text-zinc-500 dark:text-zinc-400">{login ? " · " : ""}{fullName}</span>
-      </span>
-    </span>
   );
 }
 
@@ -181,59 +174,55 @@ function GradeOverrideModal({
   });
   const parsed = Number.parseFloat(points);
   return (
-    <Modal title={`Adjust grade — ${student}`} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field
-            label="Points"
-            type="number"
-            step={0.1}
-            min={0}
-            value={points}
-            onChange={(e) => setPoints(e.target.value)}
-            fullWidth
-            required
-          />
-          <p className="self-end pb-1.5 text-sm text-zinc-500 dark:text-zinc-400">
-            {suggested != null ? `Review grade: ${suggested.toFixed(1)}` : "No review grade yet"}
-          </p>
-        </div>
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Comment (optional)</span>
-          <textarea
-            className="min-h-20 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-            value={comment}
-            onChange={(e) => setComment(e.target.value)}
-            maxLength={2000}
-          />
-        </label>
-        <div className="flex items-center justify-end gap-3">
+    <Modal
+      title="Adjust grade"
+      subtitle={student}
+      size="sm"
+      onClose={onClose}
+      footer={
+        <>
           {save.isError ? (
-            <span className="min-w-0 flex-1 text-sm text-red-600 dark:text-red-400">
+            <span className="min-w-0 flex-1 text-sm text-danger">
               {save.error instanceof ApiError ? save.error.message : "Request failed"}
             </span>
           ) : null}
           {repo.teacherPoints != null ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => save.mutate({ points: null })}
-              disabled={save.isPending}
-            >
+            <Button variant="ghost" onClick={() => save.mutate({ points: null })} disabled={save.isPending}>
               Remove adjustment
             </Button>
           ) : null}
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
           <Button
-            type="button"
             onClick={() => save.mutate({ points: parsed, comment: comment || null })}
-            disabled={save.isPending || Number.isNaN(parsed) || parsed < 0}
+            disabled={Number.isNaN(parsed) || parsed < 0}
+            loading={save.isPending}
           >
-            {save.isPending ? <Loader2 className="size-4 animate-spin" /> : null} Save
+            Save
           </Button>
-        </div>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field
+          label="Points"
+          hint={suggested != null ? `review grade ${suggested.toFixed(1)}` : "no review grade yet"}
+          type="number"
+          step={0.1}
+          min={0}
+          value={points}
+          onChange={(e) => setPoints(e.target.value)}
+          fullWidth
+          required
+          autoFocus
+        />
+        <Textarea
+          label="Comment (optional)"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          maxLength={2000}
+        />
       </div>
     </Modal>
   );
@@ -258,6 +247,7 @@ function StudentRow({
   s: AssignmentDetailStudent;
 }) {
   const t = useT();
+  const toast = useToast();
   const [showHistory, setShowHistory] = useState(false);
   const [adjusting, setAdjusting] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -271,6 +261,10 @@ function StudentRow({
         { method: "POST" },
       ),
     onSuccess: invalidate,
+    // The padlock is the repository's STATE; a failed request has not changed
+    // it, so it must keep showing it. The failure goes to a toast instead.
+    onError: (err) =>
+      toast(apiErrorMessage(err, "Could not change the lock on this repository."), "error"),
   });
   const gradeNow = useMutation({
     mutationFn: () =>
@@ -279,277 +273,295 @@ function StudentRow({
         { method: "POST" },
       ),
   });
-  const gradeNowError =
+  // 409 means "this workflow has no manual trigger" — a fact about the
+  // repository, not a failure; anything else is one and says what happened.
+  const gradeNowUnsupported =
     gradeNow.isError && gradeNow.error instanceof ApiError && gradeNow.error.status === 409;
-
+  const gradeNowError = gradeNow.isError && !gradeNowUnsupported;
   const r = s.repo;
   const locked = r?.lockedAt != null;
   const canExpand = r?.provisionStatus === "ok";
+  const name = `${s.prenom} ${s.nom}`.trim();
   return (
     <>
-    <tr
-      onClick={() => canExpand && setExpanded((e) => !e)}
-      className={`${canExpand ? "cursor-pointer" : ""} hover:bg-zinc-50 dark:hover:bg-zinc-800/50 ${locked ? "opacity-55" : ""}`}
-    >
-      <td className={`${cell} font-medium`}>
-        <span className="inline-flex items-center gap-1.5">
-          {canExpand ? (
-            expanded ? (
-              <ChevronDown className="size-3.5 shrink-0 text-zinc-400" />
-            ) : (
-              <ChevronRight className="size-3.5 shrink-0 text-zinc-400" />
-            )
-          ) : (
-            <span className="w-3.5" />
-          )}
-          {`${s.prenom} ${s.nom}`.trim()}
-        </span>
-      </td>
-      <td className={cell}>
-        {r?.provisionStatus === "ok" && r.fullName ? (
-          <RepoLink fullName={r.fullName} login={s.githubLogin} />
-        ) : s.githubLogin ? (
-          <span className="inline-flex items-center gap-1 text-zinc-400">
-            <GithubIcon className="size-3.5" /> {s.githubLogin}
-          </span>
-        ) : (
-          <span className="text-zinc-400">—</span>
-        )}
-      </td>
-      <td className={cell}>
-        {r?.provisionStatus === "ok" ? (
-          /* Repository gone from GitHub (deleted out of band, or unreachable
-             live): one state, shown instead of the acceptance badge. */
-          r.missing ? (
-            <Badge tone="red" icon={XCircle}>
-              {t("status.repoMissing")}
-            </Badge>
-          ) : (
+      <tr
+        onClick={() => canExpand && setExpanded((e) => !e)}
+        {...(canExpand ? pressable(() => setExpanded((e) => !e), "row") : {})}
+        className={cx(T.row, T.rowHover, canExpand && "cursor-pointer", locked && "opacity-60")}
+      >
+        <td className={`${T.td} whitespace-nowrap font-semibold`}>
           <span className="inline-flex items-center gap-1.5">
-            <Badge tone="green" icon={CheckCircle2}>
-              {t("status.accepted")}
-            </Badge>
-            {r.syncPr && r.fullName ? (
-              <Tip label={`Sync pull request #${r.syncPr.number}`}>
-              <a
-                href={`https://github.com/${r.fullName}/pull/${r.syncPr.number}`}
-                target="_blank"
-                rel="noreferrer"
-                aria-label={`Sync pull request #${r.syncPr.number}`}
-              >
-                <Badge
-                  tone={
-                    r.syncPr.state === "merged"
-                      ? "green"
-                      : r.syncPr.state === "open"
-                        ? "amber"
-                        : "zinc"
-                  }
-                  icon={GitPullRequest}
+            {canExpand ? (
+              expanded ? (
+                <ChevronDown className="size-3.5 shrink-0 text-fg-faint" />
+              ) : (
+                <ChevronRight className="size-3.5 shrink-0 text-fg-faint" />
+              )
+            ) : (
+              <span className="w-3.5" />
+            )}
+            {name}
+            {r?.provisionStatus === "ok" && r.fullName ? (
+              // No login: the separator would open the label with a stray " · ".
+              <Tip label={s.githubLogin ? `${s.githubLogin} · ${r.fullName}` : r.fullName}>
+                <a
+                  href={`https://github.com/${r.fullName}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label={`Open ${r.fullName} on GitHub`}
+                  className="ml-1 rounded-full p-1 text-fg-faint transition-colors hover:bg-surface-3 hover:text-fg"
                 >
-                  {r.syncPr.state === "merged"
-                    ? "synced"
-                    : r.syncPr.state === "open"
-                      ? `sync PR #${r.syncPr.number}`
-                      : "sync PR closed"}
-                </Badge>
-              </a>
+                  <GithubIcon className="size-3.5" />
+                </a>
               </Tip>
-            ) : null}
+            ) : s.githubLogin ? (
+              <span className="ml-1 inline-flex items-center gap-1 text-xs font-normal text-fg-faint">
+                <GithubIcon className="size-3" /> {s.githubLogin}
+              </span>
+            ) : (
+              // Neither a repository nor a GitHub account: an empty cell reads
+              // as a layout bug, the em dash reads as "nothing here yet".
+              <span className="ml-1 text-xs font-normal text-fg-faint">—</span>
+            )}
           </span>
-          )
-        ) : r?.provisionStatus === "error" ? (
-          <Tip label={r.provisionError} className="inline-flex cursor-help">
-            <Badge tone="red" icon={XCircle}>
-              {t("status.provisionError")}
+        </td>
+        <td className={T.td}>
+          {r?.provisionStatus === "ok" ? (
+            /* Repository gone from GitHub (deleted out of band, or unreachable
+               live): one state, shown instead of the acceptance badge. */
+            r.missing ? (
+              <Badge tone="red" icon={XCircle}>
+                {t("status.repoMissing")}
+              </Badge>
+            ) : (
+              <span className="inline-flex items-center gap-1.5">
+                <Badge tone="green" icon={CheckCircle2}>
+                  {t("status.accepted")}
+                </Badge>
+                {r.syncPr && r.fullName ? (
+                  <Tip label={`Sync pull request #${r.syncPr.number}`}>
+                    <a
+                      href={`https://github.com/${r.fullName}/pull/${r.syncPr.number}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Sync pull request #${r.syncPr.number}`}
+                    >
+                      <Badge
+                        tone={
+                          r.syncPr.state === "merged"
+                            ? "green"
+                            : r.syncPr.state === "open"
+                              ? "amber"
+                              : "zinc"
+                        }
+                        icon={GitPullRequest}
+                      >
+                        {r.syncPr.state === "merged"
+                          ? "synced"
+                          : r.syncPr.state === "open"
+                            ? `sync PR #${r.syncPr.number}`
+                            : "sync PR closed"}
+                      </Badge>
+                    </a>
+                  </Tip>
+                ) : null}
+              </span>
+            )
+          ) : r?.provisionStatus === "error" ? (
+            <Tip label={r.provisionError} className="inline-flex cursor-help">
+              <Badge tone="red" icon={XCircle}>
+                {t("status.provisionError")}
+              </Badge>
+            </Tip>
+          ) : s.claimStatus === "claimed" ? (
+            <Badge tone="amber" icon={Clock}>
+              {t("status.notAccepted")}
             </Badge>
-          </Tip>
-        ) : s.claimStatus === "claimed" ? (
-          <Badge tone="amber" icon={Clock}>
-            {t("status.notAccepted")}
-          </Badge>
-        ) : (
-          <Badge tone="zinc">{t("status.notClaimed")}</Badge>
-        )}
-      </td>
-      <td className={`${cell} font-mono text-xs`}>
-        {r?.lastCommitSha ? (
-          <Tip label={r.lastCommitSha}>
-            <span>{r.lastCommitSha.slice(0, 7)}</span>
-          </Tip>
-        ) : (
-          <span className="text-zinc-400">—</span>
-        )}
-      </td>
-      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
-        {r?.lastCommitAt ? isoDateTime(r.lastCommitAt) : "—"}
-      </td>
-      <td className={`${cell} text-right`}>{r?.commitCount ?? "—"}</td>
-      <td className={cell}>
-        <CiBadge s={r} tests={frozen ? (r?.frozenGrade ?? r?.grade) : r?.grade} />
-      </td>
-      {showGrades ? (
-      <td className={`${cell} whitespace-nowrap`}>
-        <span className="inline-flex items-center gap-1">
-          {/* Validation flow: the teacher's adjustment IS the final grade. */}
-          {r?.teacherPoints != null ? (
-            <Tip
-              label={`Adjusted by the teacher${r.teacherComment ? ` — ${r.teacherComment}` : ""} (review was ${
-                (r.llmGrade?.points ?? r.frozenGrade?.points)?.toFixed(1) ?? "—"
-              })`}
-            >
-              <span className="inline-flex items-center gap-1 font-medium tabular-nums text-emerald-600 dark:text-emerald-400">
-                <UserCheck className="size-3.5" />
-                {r.teacherPoints.toFixed(1)}
-              </span>
-            </Tip>
-          ) : /* GR-16: the authoritative LLM review, once landed, IS the grade;
-              until then the frozen CI grade shows with a pending marker. */
-          r?.llmGrade && r.llmGrade.parseStatus === "ok" ? (
-            <Tip
-              label={`LLM review — CI grade was ${
-                r.frozenGrade?.points != null ? r.frozenGrade.points.toFixed(1) : "—"
-              }`}
-            >
-              <span className="inline-flex items-center gap-1 font-medium tabular-nums">
-                <Bot className="size-3.5 text-accent" />
-                {r.llmGrade.points!.toFixed(1)}
-              </span>
-            </Tip>
           ) : (
-            <>
-              <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
-              {frozen && r?.frozenGrade ? (
-                <Tip label="LLM review pending">
-                  <Bot className="size-3.5 animate-pulse text-amber-500" />
+            <Badge tone="zinc">{t("status.notClaimed")}</Badge>
+          )}
+        </td>
+        <td className={`${T.td} whitespace-nowrap`}>
+          {r?.lastCommitSha ? (
+            <span className="flex flex-col leading-tight">
+              <Tip label={r.lastCommitSha}>
+                <span className="font-mono text-xs">{r.lastCommitSha.slice(0, 7)}</span>
+              </Tip>
+              <span className="text-xs text-fg-muted">
+                {r.lastCommitAt ? isoDateTime(r.lastCommitAt) : ""}
+              </span>
+            </span>
+          ) : (
+            <span className="text-fg-faint">—</span>
+          )}
+        </td>
+        <td className={`${T.td} text-right tabular-nums`}>
+          {r?.commitCount ?? <span className="text-fg-faint">—</span>}
+        </td>
+        <td className={T.td}>
+          <CiBadge s={r} tests={frozen ? (r?.frozenGrade ?? r?.grade) : r?.grade} />
+        </td>
+        {showGrades ? (
+          <td className={`${T.td} whitespace-nowrap`}>
+            <span className="inline-flex items-center gap-1">
+              {/* Validation flow: the teacher's adjustment IS the final grade. */}
+              {r?.teacherPoints != null ? (
+                <Tip
+                  label={`Adjusted by the teacher${r.teacherComment ? ` — ${r.teacherComment}` : ""} (review was ${
+                    (r.llmGrade?.points ?? r.frozenGrade?.points)?.toFixed(1) ?? "—"
+                  })`}
+                >
+                  <span className="inline-flex items-center gap-1 font-semibold tabular-nums text-success">
+                    <UserCheck className="size-3.5" />
+                    {r.teacherPoints.toFixed(1)}
+                  </span>
+                </Tip>
+              ) : /* GR-16: the authoritative LLM review, once landed, IS the grade;
+                    until then the frozen CI grade shows with a pending marker. */
+              r?.llmGrade && r.llmGrade.parseStatus === "ok" ? (
+                <Tip
+                  label={`LLM review — CI grade was ${
+                    r.frozenGrade?.points != null ? r.frozenGrade.points.toFixed(1) : "—"
+                  }`}
+                >
+                  <span className="inline-flex items-center gap-1 font-semibold tabular-nums">
+                    <Bot className="size-3.5 text-accent" />
+                    {r.llmGrade.points!.toFixed(1)}
+                  </span>
+                </Tip>
+              ) : (
+                <>
+                  <GradeText grade={frozen ? (r?.frozenGrade ?? null) : (r?.grade ?? null)} frozen={frozen} />
+                  {frozen && r?.frozenGrade ? (
+                    <Tip label="LLM review pending">
+                      <Bot className="size-3.5 animate-pulse text-warning" />
+                    </Tip>
+                  ) : null}
+                </>
+              )}
+              {r?.provisionStatus === "ok" ? (
+                <span className="ml-1 inline-flex" onClick={(e) => e.stopPropagation()}>
+                  <IconButton size="sm" label="Grade history" onClick={() => setShowHistory(true)}>
+                    <History />
+                  </IconButton>
+                  {canAdjust ? (
+                    <IconButton size="sm" label="Adjust grade" onClick={() => setAdjusting(true)}>
+                      <Pencil />
+                    </IconButton>
+                  ) : null}
+                </span>
+              ) : null}
+            </span>
+            {showHistory && r ? (
+              <GradeHistoryModal
+                classroomId={classroomId}
+                assignmentId={assignmentId}
+                repoId={r.id}
+                fullName={r.fullName}
+                student={name}
+                onClose={() => setShowHistory(false)}
+              />
+            ) : null}
+            {adjusting && r ? (
+              <GradeOverrideModal
+                classroomId={classroomId}
+                assignmentId={assignmentId}
+                repo={r}
+                student={name}
+                onClose={() => setAdjusting(false)}
+              />
+            ) : null}
+          </td>
+        ) : null}
+        <td className={`${T.td} whitespace-nowrap text-right`}>
+          {r?.provisionStatus === "ok" && r.fullName ? (
+            <span className="inline-flex items-center" onClick={(e) => e.stopPropagation()}>
+              {showGrades ? (
+                <Tip
+                  label={
+                    gradeNowUnsupported
+                      ? t("assignment.gradeNowUnsupported")
+                      : gradeNowError
+                        ? apiErrorMessage(gradeNow.error, "Could not start the grading run.")
+                        : gradeNow.isSuccess
+                          ? t("assignment.gradeNowStarted")
+                          : t("assignment.gradeNow")
+                  }
+                >
+                  <button
+                    type="button"
+                    aria-label={t("assignment.gradeNow")}
+                    onClick={() => gradeNow.mutate()}
+                    disabled={gradeNow.isPending || locked}
+                    className={cx(
+                      "inline-flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none disabled:opacity-40",
+                      gradeNowUnsupported
+                        ? "text-warning"
+                        : gradeNowError
+                          ? "text-danger"
+                          : gradeNow.isSuccess
+                            ? "text-success"
+                            : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+                    )}
+                  >
+                    {gradeNow.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : gradeNow.isError ? (
+                      <AlertTriangle className="size-4" />
+                    ) : gradeNow.isSuccess ? (
+                      <CheckCircle2 className="size-4" />
+                    ) : (
+                      <Play className="size-4" />
+                    )}
+                  </button>
                 </Tip>
               ) : null}
-            </>
-          )}
-          {r?.provisionStatus === "ok" ? (
-            <Tip label="Grade history">
-              <button
-                aria-label="Grade history"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowHistory(true);
-                }}
-                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              >
-                <History className="size-3.5" />
-              </button>
-            </Tip>
+              {/* Padlock shows the STATE: closed red when locked, open
+                  otherwise. It never becomes an error icon — a failed request
+                  left the repository exactly as it was. */}
+              <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
+                <button
+                  type="button"
+                  aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
+                  onClick={() => {
+                    toggleLock.reset();
+                    toggleLock.mutate(locked ? "unlock" : "lock");
+                  }}
+                  disabled={toggleLock.isPending}
+                  className={cx(
+                    "inline-flex size-8 items-center justify-center rounded-full transition-colors disabled:pointer-events-none",
+                    locked
+                      ? "text-danger hover:bg-danger-soft"
+                      : "text-fg-faint hover:bg-surface-2 hover:text-fg",
+                  )}
+                >
+                  {toggleLock.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : locked ? (
+                    <Lock className="size-4" />
+                  ) : (
+                    <LockOpen className="size-4" />
+                  )}
+                </button>
+              </Tip>
+            </span>
           ) : null}
-          {canAdjust && r?.provisionStatus === "ok" ? (
-            <Tip label="Adjust grade">
-              <button
-                aria-label="Adjust grade"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAdjusting(true);
-                }}
-                className="rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-              >
-                <Pencil className="size-3.5" />
-              </button>
-            </Tip>
-          ) : null}
-        </span>
-        {showHistory && r ? (
-          <GradeHistoryModal
-            classroomId={classroomId}
-            assignmentId={assignmentId}
-            repoId={r.id}
-            fullName={r.fullName}
-            student={`${s.prenom} ${s.nom}`.trim()}
-            onClose={() => setShowHistory(false)}
-          />
-        ) : null}
-        {adjusting && r ? (
-          <GradeOverrideModal
-            classroomId={classroomId}
-            assignmentId={assignmentId}
-            repo={r}
-            student={`${s.prenom} ${s.nom}`.trim()}
-            onClose={() => setAdjusting(false)}
-          />
-        ) : null}
-      </td>
-      ) : null}
-      <td className={`${cell} text-right whitespace-nowrap`}>
-        {r?.provisionStatus === "ok" && r.fullName ? (
-          <span className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            {showGrades ? (
-            <Tip
-              label={
-                gradeNowError
-                  ? t("assignment.gradeNowUnsupported")
-                  : gradeNow.isSuccess
-                    ? t("assignment.gradeNowStarted")
-                    : t("assignment.gradeNow")
-              }
-            >
-              <button
-                aria-label={t("assignment.gradeNow")}
-                onClick={() => gradeNow.mutate()}
-                disabled={gradeNow.isPending || locked}
-                className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none disabled:opacity-40 ${
-                  gradeNowError
-                    ? "text-amber-500"
-                    : gradeNow.isSuccess
-                      ? "text-emerald-500"
-                      : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                {gradeNow.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : gradeNowError ? (
-                  <AlertTriangle className="size-4" />
-                ) : gradeNow.isSuccess ? (
-                  <CheckCircle2 className="size-4" />
-                ) : (
-                  <Play className="size-4" />
-                )}
-              </button>
-            </Tip>
-            ) : null}
-            {/* Padlock shows the STATE: closed red when locked, open otherwise. */}
-            <Tip label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}>
-              <button
-                aria-label={locked ? t("assignment.unlockRepo") : t("assignment.lockRepo")}
-                onClick={() => toggleLock.mutate(locked ? "unlock" : "lock")}
-                disabled={toggleLock.isPending}
-                className={`rounded-md p-1.5 transition-colors disabled:pointer-events-none ${
-                  locked
-                    ? "text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                    : "text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-                }`}
-              >
-                {toggleLock.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : locked ? (
-                  <Lock className="size-4" />
-                ) : (
-                  <LockOpen className="size-4" />
-                )}
-              </button>
-            </Tip>
-          </span>
-        ) : null}
-      </td>
-    </tr>
-    {expanded && r ? (
-      <tr className="bg-zinc-50/60 dark:bg-zinc-800/30">
-        <td colSpan={showGrades ? 9 : 8} className="p-0">
-          <ActivityPanel
-            classroomId={classroomId}
-            assignmentId={assignmentId}
-            repoId={r.id}
-            fullName={r.fullName}
-          />
         </td>
       </tr>
-    ) : null}
+      {expanded && r ? (
+        <tr className="border-t border-line bg-surface-2/50">
+          <td colSpan={showGrades ? 7 : 6} className="p-0">
+            <ActivityPanel
+              classroomId={classroomId}
+              assignmentId={assignmentId}
+              repoId={r.id}
+              fullName={r.fullName}
+            />
+          </td>
+        </tr>
+      ) : null}
     </>
   );
 }
@@ -575,28 +587,32 @@ function SyncBanner({
   const syncing = sync.isSuccess && !ahead ? false : sync.isSuccess;
   if (!ahead && !syncing) return null;
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-      <GitPullRequest className="size-4 shrink-0" />
-      <span>
-        The source repository has new commits
-        {a.sourceAheadSha ? (
-          <code className="mx-1 font-mono text-xs">{a.sourceAheadSha.slice(0, 7)}</code>
-        ) : null}
-        . Syncing opens a pull request on each student repository; students merge it themselves.
-      </span>
-      <span className="flex-1" />
-      <Button onClick={() => sync.mutate()} disabled={sync.isPending || syncing}>
-        {sync.isPending || syncing ? (
-          <>
-            <Loader2 className="size-4 animate-spin" /> Syncing…
-          </>
-        ) : (
-          <>
-            <GitPullRequest className="size-4" /> Sync student repositories
-          </>
-        )}
-      </Button>
-    </div>
+    <Alert
+      tone="warning"
+      icon={GitPullRequest}
+      title="The source repository has new commits"
+      action={
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => sync.mutate()}
+          disabled={syncing}
+          loading={sync.isPending}
+        >
+          <GitPullRequest /> {sync.isPending || syncing ? "Syncing…" : "Sync student repositories"}
+        </Button>
+      }
+    >
+      {a.sourceAheadSha ? (
+        <code className="mr-1 font-mono text-xs">{a.sourceAheadSha.slice(0, 7)}</code>
+      ) : null}
+      Syncing opens a pull request on each student repository; students merge it themselves.
+      {sync.isError ? (
+        <span className="mt-1 block text-danger">
+          {apiErrorMessage(sync.error, "Could not start the sync.")}
+        </span>
+      ) : null}
+    </Alert>
   );
 }
 
@@ -621,43 +637,39 @@ function CodespaceBanner({
   if (a.workMode === "free") return null;
   const failed = a.codespaceSyncError !== null;
   return (
-    <div
-      className={`flex flex-wrap items-center gap-3 rounded-lg border px-3 py-2 text-sm ${
-        failed
-          ? "border-red-200 bg-red-50 text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200"
-          : "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/60 dark:text-zinc-300"
-      }`}
+    <Alert
+      tone={failed ? "danger" : "neutral"}
+      icon={MonitorPlay}
+      title={a.workMode === "online_seb" ? "Online workspace, SEB only" : "Online workspace"}
+      action={
+        <Button
+          size="sm"
+          variant="secondary"
+          onClick={() => resync.mutate()}
+          disabled={resync.isSuccess}
+          loading={resync.isPending}
+        >
+          <RefreshCw /> {resync.isSuccess ? "Queued" : "Resync"}
+        </Button>
+      }
     >
-      <MonitorPlay className="size-4 shrink-0" />
-      <span>
-        {a.workMode === "online_seb" ? "Online workspace, SEB only" : "Online workspace"}
-        {a.codespaceImage ? (
-          <code className="mx-1 font-mono text-xs">{a.codespaceImage}</code>
-        ) : (
-          <span className="mx-1 text-xs text-zinc-400">default image</span>
-        )}
-      </span>
-      <span className={failed ? "" : "text-zinc-500 dark:text-zinc-400"}>
-        {failed
-          ? a.codespaceSyncError
-          : a.codespaceSyncedAt
-            ? `Synced with portal at ${isoDateTime(a.codespaceSyncedAt)}`
-            : "Never synced with the portal yet"}
-      </span>
-      <span className="flex-1" />
-      <Button
-        variant="subtle"
-        onClick={() => resync.mutate()}
-        disabled={resync.isPending || resync.isSuccess}
-      >
-        {resync.isPending ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <RefreshCw className="size-4" />
-        )}
-        {resync.isSuccess ? "Resync queued" : "Resync"}
-      </Button>
-    </div>
+      {a.codespaceImage ? (
+        <code className="mr-1 font-mono text-xs">{a.codespaceImage}</code>
+      ) : (
+        <span className="mr-1">default image</span>
+      )}
+      ·{" "}
+      {failed
+        ? a.codespaceSyncError
+        : a.codespaceSyncedAt
+          ? `synced with the portal at ${isoDateTime(a.codespaceSyncedAt)}`
+          : "never synced with the portal yet"}
+      {resync.isError ? (
+        <span className="mt-1 block text-danger">
+          {apiErrorMessage(resync.error, "Could not queue the resync.")}
+        </span>
+      ) : null}
+    </Alert>
   );
 }
 
@@ -678,11 +690,13 @@ function MilestonesSection({
   deadlineAt: string;
 }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const base = `/app/api/classrooms/${classroomId}/assignments/${assignmentId}/milestones`;
   const milestones = useQuery<AssignmentMilestone[]>({
     queryKey: ["milestones", assignmentId],
     queryFn: () => api(base),
   });
+  const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [mode, setMode] = useState<"offset" | "date">("offset");
   // Authored as "n days before the deadline" (J−n), sent as offsetDays = -n.
@@ -701,6 +715,7 @@ function MilestonesSection({
       }),
     onSuccess: () => {
       setName("");
+      setAdding(false);
       void invalidate();
     },
   });
@@ -719,27 +734,51 @@ function MilestonesSection({
     name.trim() !== "" && (mode === "offset" ? offset.trim() !== "" : date !== "");
 
   return (
-    <Card className="p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <MilestoneIcon className="size-4 text-zinc-400" />
-        <h2 className="font-medium">Milestones</h2>
-        <span className="text-xs text-zinc-400">
-          Intermediate LLM reviews of the criteria tagged{" "}
-          <code className="font-mono">milestone:&nbsp;&lt;name&gt;</code> in criteria.yml
-        </span>
+    <Card>
+      <div className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+        <SectionHeading
+          icon={MilestoneIcon}
+          title="Milestones"
+          count={milestones.data?.length}
+          description={
+            <>
+              Intermediate LLM reviews of the criteria tagged{" "}
+              <code className="font-mono text-xs">milestone: &lt;name&gt;</code>
+            </>
+          }
+        />
+        <span className="flex-1" />
+        {!adding ? (
+          <Button size="sm" variant="secondary" onClick={() => setAdding(true)}>
+            <Plus /> Add milestone
+          </Button>
+        ) : null}
       </div>
 
-      {rows.length === 0 ? (
-        <p className="mb-3 text-sm text-zinc-500 dark:text-zinc-400">
+      {milestones.isLoading ? (
+        <div className="border-t border-line px-5 py-3.5">
+          <Skeleton className="h-4 w-56" />
+        </div>
+      ) : milestones.isError ? (
+        <div className="border-t border-line p-4">
+          <QueryError
+            title="Could not load the milestones"
+            error={milestones.error}
+            onRetry={() => void milestones.refetch()}
+            retrying={milestones.isFetching}
+          />
+        </div>
+      ) : rows.length === 0 && !adding ? (
+        <p className="border-t border-line px-5 py-3 text-[13px] text-fg-muted">
           No milestones — the only review happens at the deadline.
         </p>
-      ) : (
-        <ul className="mb-3 divide-y divide-zinc-100 dark:divide-zinc-800">
+      ) : rows.length ? (
+        <ul className="divide-y divide-line border-t border-line">
           {rows.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-3 py-1.5 text-sm">
+            <li key={m.id} className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-[13px]">
               <span className="font-mono font-medium">{m.name}</span>
-              <span className="inline-flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-                <CalendarClock className="size-3.5" />
+              <span className="inline-flex items-center gap-1 text-fg-muted">
+                <CalendarClock className="size-3.5 text-fg-faint" />
                 {isoDateTime(m.dueAt)}
               </span>
               <Badge tone="zinc">{jLabel(m.dueAt)}</Badge>
@@ -753,89 +792,130 @@ function MilestonesSection({
                 </Badge>
               )}
               <span className="flex-1" />
-              <Tip label="Delete milestone">
-                <button
-                  aria-label={`Delete milestone ${m.name}`}
-                  onClick={() => remove.mutate(m.id)}
-                  disabled={remove.isPending}
-                  className="rounded-md p-1 text-zinc-400 transition-colors disabled:pointer-events-none hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-500/10"
-                >
-                  <Trash2 className="size-4" />
-                </button>
-              </Tip>
+              <IconButton
+                size="sm"
+                danger
+                label={`Delete milestone ${m.name}`}
+                disabled={remove.isPending}
+                onClick={async () => {
+                  if (await confirm({ title: `Delete milestone “${m.name}”?`, confirmLabel: "Delete", danger: true })) {
+                    remove.mutate(m.id);
+                  }
+                }}
+              >
+                <Trash2 />
+              </IconButton>
+              {remove.isError && remove.variables === m.id ? (
+                <p className="w-full text-[13px] text-danger">
+                  {apiErrorMessage(remove.error, "Could not delete this milestone.")}
+                </p>
+              ) : null}
             </li>
           ))}
         </ul>
-      )}
+      ) : null}
 
-      <form
-        className="flex flex-wrap items-end gap-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (canSubmit) create.mutate();
-        }}
-      >
-        <Field
-          label="Name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="mid-review"
-          pattern="[a-z0-9][a-z0-9_-]*"
-          title="lowercase letters, digits, - and _"
-          required
-        />
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">When</span>
-          <select
+      {adding ? (
+        <form
+          className="flex flex-wrap items-end gap-3 border-t border-line bg-surface-2/50 px-5 py-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canSubmit) create.mutate();
+          }}
+        >
+          <Field
+            label="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="mid-review"
+            pattern="[a-z0-9][a-z0-9_-]*"
+            title="lowercase letters, digits, - and _"
+            width="w-44"
+            className="font-mono"
+            required
+            autoFocus
+          />
+          <Select
+            label="When"
             value={mode}
             onChange={(e) => setMode(e.target.value as "offset" | "date")}
-            className="rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
+            width="w-44"
           >
             <option value="offset">J−n before deadline</option>
             <option value="date">Exact date</option>
-          </select>
-        </label>
-        {mode === "offset" ? (
-          <Field
-            label="Days before deadline"
-            type="number"
-            min={1}
-            max={365}
-            value={offset}
-            onChange={(e) => setOffset(e.target.value)}
-            required
-          />
-        ) : (
-          <Field
-            label="Date"
-            type="datetime-local"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
-        )}
-        <Button disabled={!canSubmit || create.isPending}>
-          {create.isPending ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
-          Add milestone
-        </Button>
-        {create.isError ? (
-          <span className="text-sm text-red-600 dark:text-red-400">
-            {create.error instanceof ApiError &&
-            typeof (create.error.body as { message?: unknown })?.message === "string"
-              ? ((create.error.body as { message: string }).message)
-              : "Could not add the milestone"}
-          </span>
-        ) : null}
-      </form>
+          </Select>
+          {mode === "offset" ? (
+            <Field
+              label="Days before deadline"
+              type="number"
+              min={1}
+              max={365}
+              value={offset}
+              onChange={(e) => setOffset(e.target.value)}
+              width="w-24"
+              required
+            />
+          ) : (
+            <Field
+              label="Date"
+              type="datetime-local"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              required
+            />
+          )}
+          <Button type="submit" disabled={!canSubmit} loading={create.isPending}>
+            <Plus /> Add
+          </Button>
+          <Button type="button" variant="ghost" onClick={() => setAdding(false)}>
+            Cancel
+          </Button>
+          {create.isError ? (
+            <span className="w-full text-sm text-danger">
+              {create.error instanceof ApiError &&
+              typeof (create.error.body as { message?: unknown })?.message === "string"
+                ? ((create.error.body as { message: string }).message)
+                : "Could not add the milestone"}
+            </span>
+          ) : null}
+        </form>
+      ) : null}
     </Card>
   );
 }
 
 /**
- * Where the authoritative LLM review stands, for the header: counting down
- * to deadline + grace, then "running" until every provisioned repo carries
- * its llm grade, then "reviewed". Nothing before the deadline is enforced.
+ * Where the authoritative LLM review stands: counting down to deadline +
+ * grace, then "running" until every provisioned repo carries its llm grade,
+ * then "reviewed". Nothing before the deadline is enforced.
  */
+function reviewStatus(
+  a: AssignmentDetailPayload["assignment"],
+  students: AssignmentDetailStudent[],
+  now: number,
+  t: ReturnType<typeof useT>,
+): { label: string; hint: string; tone: "green" | "amber" | "zinc" } {
+  const repos = students.filter((s) => s.repo?.provisionStatus === "ok");
+  if (a.state !== "locked" || repos.length === 0) {
+    return { label: "at the deadline", hint: `${a.graceMinutes} min grace, then the full review`, tone: "zinc" };
+  }
+  const reviewAt = new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000;
+  if (repos.every((s) => s.repo!.llmGrade)) {
+    return { label: "done", hint: "every repository carries its LLM grade", tone: "green" };
+  }
+  if (now < reviewAt) {
+    return { label: `in ${formatDuration(reviewAt - now, t)}`, hint: "fires once the grace period ends", tone: "amber" };
+  }
+  return { label: "running…", hint: "grades land as the runs complete", tone: "amber" };
+}
+
+/*
+ * The three surfaces that tick. Each holds its own `useNow` instead of the
+ * page holding one: a clock at the root re-rendered the whole student table
+ * every 15 s, rows, badges, expanded panels and all, to move one countdown.
+ */
+
+/** Header chip: the tone and the grace-period explanation of the LLM review. */
 function ReviewChip({
   a,
   students,
@@ -845,34 +925,52 @@ function ReviewChip({
 }) {
   const t = useT();
   const now = useNow(15_000);
-  if (a.state !== "locked") return null;
-  const repos = students.filter((s) => s.repo?.provisionStatus === "ok");
-  if (repos.length === 0) return null;
-  const reviewAt = new Date(a.deadlineAt).getTime() + a.graceMinutes * 60_000;
-  if (repos.every((s) => s.repo!.llmGrade)) {
-    return (
-      <Badge tone="green" icon={Bot}>
-        LLM reviewed
-      </Badge>
-    );
-  }
-  if (now < reviewAt) {
-    return (
-      <Tip label="The full LLM review fires once the grace period ends">
-        <Badge tone="amber" icon={Bot}>
-          LLM review in {formatDuration(reviewAt - now, t)}
-        </Badge>
-      </Tip>
-    );
-  }
+  const review = reviewStatus(a, students, now, t);
   return (
-    <Tip label="Reviews are dispatched to every repository; grades land as the runs complete">
-      <span className="animate-pulse">
-        <Badge tone="amber" icon={Bot}>
-          LLM review running…
-        </Badge>
-      </span>
+    <Tip label={review.hint}>
+      <Badge tone={review.tone} icon={Bot}>
+        LLM review {review.label}
+      </Badge>
     </Tip>
+  );
+}
+
+function AverageGradeStat({
+  a,
+  students,
+  graded,
+  average,
+}: {
+  a: AssignmentDetailPayload["assignment"];
+  students: AssignmentDetailStudent[];
+  graded: number[];
+  average: number | null;
+}) {
+  const t = useT();
+  const now = useNow(15_000);
+  const review = reviewStatus(a, students, now, t);
+  return (
+    <Stat
+      icon={Bot}
+      label="Average grade"
+      value={average != null ? average.toFixed(1) : "—"}
+      hint={`${graded.length} graded · LLM review ${review.label}`}
+    />
+  );
+}
+
+function DeadlineStat({ a }: { a: AssignmentDetailPayload["assignment"] }) {
+  const now = useNow(15_000);
+  const left = new Date(a.deadlineAt).getTime() - now;
+  return (
+    <Stat
+      icon={a.state === "locked" ? Lock : CalendarClock}
+      label={left > 0 ? "Deadline in" : "Deadline passed"}
+      value={compactDuration(Math.abs(left))}
+      // The hint answers "when?", which the value never does: repeating the
+      // same duration under itself said nothing twice.
+      hint={isoDateTime(a.deadlineAt)}
+    />
   );
 }
 
@@ -881,13 +979,20 @@ type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
 export function AssignmentDetail({
   classroomId,
   assignmentId,
+  navigate,
 }: {
   classroomId: string;
   assignmentId: string;
+  navigate: (r: Route) => void;
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [query, setQuery] = useState("");
+  const room = useQuery<ClassroomDetail>({
+    queryKey: ["classroom", classroomId],
+    queryFn: () => api(`/app/api/classrooms/${classroomId}`),
+  });
   const detail = useQuery<AssignmentDetailPayload>({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
@@ -923,12 +1028,66 @@ export function AssignmentDetail({
   );
   const { sorted, sort, toggle } = useSortableTable(shown, rank, { key: "name", dir: 1 });
 
+  const crumbs = (
+    <Breadcrumb
+      items={[
+        { label: t("nav.classrooms"), onClick: () => navigate({ view: "home" }) },
+        {
+          label: room.data?.name ?? "…",
+          onClick: () => navigate({ view: "classroom", id: classroomId }),
+        },
+        { label: t("nav.assignment") },
+      ]}
+    />
+  );
+
   if (detail.isLoading) {
-    return <Spinner className="py-16" label="Fetching repository states from GitHub…" />;
+    return (
+      <div className="space-y-6">
+        {crumbs}
+        <Skeleton className="h-8 w-80" />
+        <Spinner className="py-16" label="Fetching repository states from GitHub…" />
+      </div>
+    );
   }
-  if (!detail.data) return null;
+  if (!detail.data) {
+    // A deleted or unreachable assignment: an answer, not a failure.
+    const gone = detail.error instanceof ApiError && detail.error.status === 404;
+    return (
+      <div className="space-y-6">
+        {crumbs}
+        {gone ? (
+          <Card>
+            <EmptyState
+              icon={XCircle}
+              title="Assignment not found"
+              action={
+                <Button variant="secondary" onClick={() => navigate({ view: "classroom", id: classroomId })}>
+                  Back to the classroom
+                </Button>
+              }
+            >
+              It was deleted, or the link points at an assignment of another classroom.
+            </EmptyState>
+          </Card>
+        ) : (
+          <QueryError
+            title="Could not load this assignment"
+            error={detail.error}
+            onRetry={() => void detail.refetch()}
+            retrying={detail.isFetching}
+          />
+        )}
+      </div>
+    );
+  }
   const a = detail.data.assignment;
   const accepted = students.filter((s) => s.repo?.provisionStatus === "ok").length;
+  const passing = students.filter((s) => s.repo?.ciStatus === "pass").length;
+  const graded = students
+    .map((s) => (s.repo ? finalPoints(s.repo) : null))
+    .filter((p): p is number => p != null);
+  const average = graded.length ? graded.reduce((x, y) => x + y, 0) / graded.length : null;
   // Grading mode `none`: no grades, no review countdown, no milestones.
   const showGrades = a.gradingMode !== "none";
   // Validation flow: adjust/validate once the grade is frozen (deadline+grace).
@@ -980,74 +1139,111 @@ export function AssignmentDetail({
   const rows = query.trim() !== "" ? shown : sorted;
 
   const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (
-    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium ${right ? "text-right" : ""}`}>
+    <SortHeader k={k} sort={sort} onToggle={toggle} right={right}>
       {children}
     </SortHeader>
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <span className="font-medium">{a.name}</span>
-        <HelpIcon topic="assignment-detail" />
-        <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "red" : "zinc"}>
-          {t(`state.${a.state}` as Parameters<typeof t>[0])}
-        </Badge>
-        {showGrades ? <ReviewChip a={a} students={students} /> : null}
-        {a.gradesValidatedAt ? (
-          <Tip label={`Validated ${isoDateTime(a.gradesValidatedAt)}`}>
-            <Badge tone="green" icon={ClipboardCheck}>
-              {t("assignment.gradesValidated")}
+    <div className="space-y-6">
+      <PageHeader
+        eyebrow={crumbs}
+        title={a.name}
+        description={
+          <span className="flex flex-wrap items-center gap-2">
+            <Badge tone={a.state === "published" ? "green" : a.state === "locked" ? "zinc" : "amber"} icon={a.state === "locked" ? Lock : undefined}>
+              {t(`state.${a.state}` as Parameters<typeof t>[0])}
             </Badge>
-          </Tip>
-        ) : null}
-        <span className="inline-flex items-center gap-1 text-sm text-zinc-500 dark:text-zinc-400">
-          <CalendarClock className="size-3.5" />
-          {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
-        </span>
-        <Badge tone="zinc" icon={GitCommitHorizontal}>
-          {t("assignment.accepted", { n: accepted, total: students.length })}
-        </Badge>
-        <span className="flex-1" />
-        <Tip label={t("assignment.cloneScriptTip")}>
-          <Button
-            variant="ghost"
-            aria-label={t("assignment.cloneScript")}
-            onClick={downloadCloneScript}
-          >
-            <FileCode className="size-4" /> {t("assignment.cloneScript")}
-          </Button>
-        </Tip>
+            {showGrades ? <ReviewChip a={a} students={students} /> : null}
+            {a.gradesValidatedAt ? (
+              <Tip label={`Validated ${isoDateTime(a.gradesValidatedAt)}`}>
+                <Badge tone="green" icon={ClipboardCheck}>
+                  {t("assignment.gradesValidated")}
+                </Badge>
+              </Tip>
+            ) : null}
+            <span className="inline-flex items-center gap-1.5">
+              <CalendarClock className="size-3.5 text-fg-faint" />
+              {isoDateTime(a.startAt)} → {isoDateTime(a.deadlineAt)}
+            </span>
+          </span>
+        }
+        actions={
+          <>
+            <IconButton label={t("common.refresh")} onClick={() => detail.refetch()} disabled={detail.isFetching}>
+              <RefreshCw className={detail.isFetching ? "animate-spin" : ""} />
+            </IconButton>
+            <Menu
+              label="Assignment actions"
+              items={[
+                {
+                  label: t("assignment.cloneScript"),
+                  description: t("assignment.cloneScriptTip"),
+                  icon: FileCode,
+                  onSelect: downloadCloneScript,
+                },
+                ...(showGrades
+                  ? [
+                      {
+                        label: t("assignment.export"),
+                        description: t("assignment.exportTip"),
+                        icon: Download,
+                        onSelect: () => void exportGrades(),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+            {canAdjust ? (
+              <Button
+                variant={a.gradesValidatedAt ? "secondary" : "primary"}
+                loading={validate.isPending}
+                onClick={async () => {
+                  if (
+                    await confirm({
+                      title: a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate"),
+                      message: t("assignment.validateConfirm"),
+                      confirmLabel: a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate"),
+                      cancelLabel: t("common.cancel"),
+                    })
+                  ) {
+                    validate.mutate();
+                  }
+                }}
+              >
+                <ClipboardCheck />
+                {a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate")}
+              </Button>
+            ) : null}
+            {validate.isError ? (
+              <p className="w-full text-right text-[13px] text-danger">
+                {apiErrorMessage(validate.error, "Could not validate the grades.")}
+              </p>
+            ) : null}
+          </>
+        }
+      />
+
+      <div className={cx("grid gap-3 sm:grid-cols-2", showGrades ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
+        <Stat
+          icon={Users}
+          label="Accepted"
+          value={`${accepted} / ${students.length}`}
+          hint={`${students.filter((s) => s.claimStatus === "claimed").length} claimed their seat`}
+        />
+        <Stat
+          icon={CheckCircle2}
+          label="CI passing"
+          value={accepted ? `${passing} / ${accepted}` : "—"}
+          hint="on the last commit"
+        />
         {showGrades ? (
-          <Tip label={t("assignment.exportTip")}>
-            <Button variant="ghost" aria-label={t("assignment.export")} onClick={() => void exportGrades()}>
-              <Download className="size-4" /> {t("assignment.export")}
-            </Button>
-          </Tip>
+          <AverageGradeStat a={a} students={students} graded={graded} average={average} />
         ) : null}
-        {canAdjust ? (
-          <Button
-            variant="subtle"
-            onClick={() => {
-              if (window.confirm(t("assignment.validateConfirm"))) validate.mutate();
-            }}
-            disabled={validate.isPending}
-          >
-            {validate.isPending ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <ClipboardCheck className="size-4" />
-            )}
-            {a.gradesValidatedAt ? t("assignment.revalidate") : t("assignment.validate")}
-          </Button>
-        ) : null}
-        <Button variant="ghost" onClick={() => detail.refetch()} disabled={detail.isFetching}>
-          <RefreshCw className={`size-4 ${detail.isFetching ? "animate-spin" : ""}`} /> {t("common.refresh")}
-        </Button>
+        <DeadlineStat a={a} />
       </div>
 
       <SyncBanner classroomId={classroomId} a={a} />
-
       <CodespaceBanner classroomId={classroomId} a={a} />
 
       {showGrades ? (
@@ -1058,51 +1254,73 @@ export function AssignmentDetail({
         />
       ) : null}
 
-      {/* The search lives with what it filters: right above the student table. */}
-      <label className="relative block w-fit">
-        <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
-        <input
-          type="search"
-          placeholder={t("assignment.searchStudents")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="w-56 rounded-lg border border-zinc-200 bg-white py-1.5 pl-8 pr-3 text-sm shadow-sm focus:border-accent focus:outline-none dark:border-zinc-700 dark:bg-zinc-900"
-          aria-label={t("assignment.searchStudents")}
-        />
-      </label>
-
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
-              <Th k="name">{t("assignment.col.student")}</Th>
-              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.repo")}</th>
-              <Th k="status">{t("assignment.col.status")}</Th>
-              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.lastCommit")}</th>
-              <Th k="lastCommitAt">{t("assignment.col.date")}</Th>
-              <Th k="commitCount" right>
-                {t("assignment.col.commits")}
-              </Th>
-              <th className={`${cell} font-medium uppercase tracking-wide`}>{t("assignment.col.checks")}</th>
-              {showGrades ? <Th k="grade">{t("assignment.col.grade")}</Th> : null}
-              <th className={cell} aria-label="Actions" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {rows.map((s) => (
-              <StudentRow
-                key={s.enrollmentId}
-                classroomId={classroomId}
-                assignmentId={assignmentId}
-                frozen={a.state === "locked"}
-                showGrades={showGrades}
-                canAdjust={canAdjust}
-                s={s}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <Card className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+          <SearchInput
+            placeholder={t("assignment.searchStudents")}
+            aria-label={t("assignment.searchStudents")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-64"
+          />
+          <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-muted">
+            {rows.length === students.length
+              ? `${students.length} students`
+              : `${rows.length} of ${students.length} students`}
+            <HelpIcon topic="assignment-detail" />
+          </span>
+        </div>
+        {students.length === 0 ? (
+          <EmptyState icon={Users} title="No students in this classroom" className="py-12">
+            Add the roster on the classroom page — repositories are created once students accept.
+          </EmptyState>
+        ) : rows.length === 0 ? (
+          <EmptyState icon={Users} title="No student matches" className="py-12">
+            Search by last name, first name, e-mail or GitHub login.
+          </EmptyState>
+        ) : (
+          /* Seven columns never fit a phone: the table scrolls, the page does not. */
+          <div className="overflow-x-auto">
+            <table className={cx(T.table, "min-w-220")}>
+              <thead>
+                <tr className={T.head}>
+                  <Th k="name">{t("assignment.col.student")}</Th>
+                  <Th k="status">{t("assignment.col.status")}</Th>
+                  <Th k="lastCommitAt">{t("assignment.col.lastCommit")}</Th>
+                  <Th k="commitCount" right>
+                    {t("assignment.col.commits")}
+                  </Th>
+                  <th className={T.th}>{t("assignment.col.checks")}</th>
+                  {showGrades ? <Th k="grade">{t("assignment.col.grade")}</Th> : null}
+                  <th className={T.th} aria-label="Actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((s) => (
+                  <StudentRow
+                    key={s.enrollmentId}
+                    classroomId={classroomId}
+                    assignmentId={assignmentId}
+                    frozen={a.state === "locked"}
+                    showGrades={showGrades}
+                    canAdjust={canAdjust}
+                    s={s}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
+}
+
+/** Assignment page: own view, under the classroom breadcrumb. */
+export function AssignmentPage(props: {
+  classroomId: string;
+  assignmentId: string;
+  navigate: (r: Route) => void;
+}) {
+  return <AssignmentDetail {...props} />;
 }

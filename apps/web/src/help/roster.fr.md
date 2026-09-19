@@ -10,8 +10,8 @@ Les étudiants rattachent leur siège automatiquement à la première connexion 
 
 ## Gérer les lignes
 
-Les icônes à droite éditent une ligne, révoquent un rattachement ou retirent l'étudiant. L'enveloppe ouvre votre client mail. Changer un e-mail révoque le rattachement de la ligne.
+Le menu en bout de ligne édite la ligne, révoque un rattachement ou retire l'étudiant. Cliquez un e-mail pour écrire à l'étudiant. Changer un e-mail révoque le rattachement de la ligne. **Add students** ouvre le panneau d'import (fichier, un étudiant, ou CSV collé).
 
 ## Rejoindre votre propre classe
 
-**Me joindre comme étudiant** vous donne un siège *staff*, exclu de l'effectif : combiné au bouton chapeau de diplômé dans l'en-tête, vous parcourez tout le flux étudiant (accepter, pousser, notes) sans second compte.
+**Me joindre comme étudiant** vous donne un siège *staff*, exclu de l'effectif : combiné à **Passer en vue étudiant** dans le menu du compte, vous parcourez tout le flux étudiant (accepter, pousser, notes) sans second compte.

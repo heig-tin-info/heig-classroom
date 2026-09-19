@@ -5,21 +5,32 @@ import {
   CheckCircle2,
   Clock,
   GraduationCap,
-  Mail,
+  Loader2,
   Pencil,
   Trash2,
   UserRoundX,
-  Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import type { RosterEntry } from "@hgc/contracts";
 
 import { api, ApiError, apiErrorMessage } from "./api";
-import { Badge, EmptyState, GithubIcon, IconButton, isoDateTime, SortHeader, Tip, useSortableTable } from "./ui";
-
-const cell = "px-3 py-2";
+import { useConfirm } from "./confirm";
+import {
+  Badge,
+  cx,
+  GithubIcon,
+  IconButton,
+  Initials,
+  inputClass,
+  inputSize,
+  isoDateTime,
+  Menu,
+  SortHeader,
+  T,
+  useSortableTable,
+} from "./ui";
 
 function StudentAvatar({ entry }: { entry: RosterEntry }) {
   const [failed, setFailed] = useState(false);
@@ -34,18 +45,12 @@ function StudentAvatar({ entry }: { entry: RosterEntry }) {
       />
     );
   }
-  const initials = `${entry.prenom.charAt(0)}${entry.nom.charAt(0)}`.toUpperCase();
-  return (
-    <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-xs font-medium text-zinc-600 dark:bg-zinc-700 dark:text-zinc-300">
-      {initials}
-    </span>
-  );
+  return <Initials name={[entry.prenom, entry.nom]} />;
 }
-const input =
-  "w-full rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30 dark:border-zinc-700 dark:bg-zinc-950";
 
 function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ nom: entry.nom, prenom: entry.prenom, email: entry.email });
   const invalidate = () => qc.invalidateQueries({ queryKey: ["classroom", classroomId] });
@@ -72,42 +77,46 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
       save.isError && save.error instanceof ApiError
         ? apiErrorMessage(save.error, "Update failed")
         : null;
+    // Compact: an inline edit sits inside a table row, so it takes the 28 px
+    // control height instead of the 34 px one a form field gets.
+    const small = cx(inputClass, inputSize.sm, "w-full");
     return (
-      <tr className="bg-zinc-50 dark:bg-zinc-800/50">
-        <td className={cell}>
+      <tr className={cx(T.row, "bg-surface-2/60")}>
+        <td className={T.td}>
           <input
-            className={input}
+            className={small}
             aria-label="Last name"
             value={form.nom}
             onChange={(e) => setForm({ ...form, nom: e.target.value })}
+            autoFocus
           />
         </td>
-        <td className={cell}>
+        <td className={T.td}>
           <input
-            className={input}
+            className={small}
             aria-label="First name"
             value={form.prenom}
             onChange={(e) => setForm({ ...form, prenom: e.target.value })}
           />
         </td>
-        <td className={cell} colSpan={3}>
+        <td className={T.td} colSpan={3}>
           <input
-            className={input}
+            className={small}
             aria-label="E-mail"
             type="email"
             value={form.email}
             onChange={(e) => setForm({ ...form, email: e.target.value })}
           />
-          {err ? <p className="mt-1 text-xs text-red-600 dark:text-red-400">{err}</p> : null}
+          {err ? <p className="mt-1 text-xs text-danger">{err}</p> : null}
           {form.email !== entry.email && entry.status === "claimed" ? (
-            <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+            <p className="mt-1 text-xs text-warning">
               Changing the e-mail will revoke the student's claim.
             </p>
           ) : null}
         </td>
-        <td className={`${cell} text-right whitespace-nowrap`}>
+        <td className={`${T.td} whitespace-nowrap text-right`}>
           <IconButton label="Save" onClick={() => save.mutate()} disabled={save.isPending}>
-            <Check className="size-4" />
+            <Check />
           </IconButton>
           <IconButton
             label="Cancel"
@@ -116,94 +125,132 @@ function Row({ classroomId, entry }: { classroomId: string; entry: RosterEntry }
               setForm({ nom: entry.nom, prenom: entry.prenom, email: entry.email });
             }}
           >
-            <X className="size-4" />
+            <X />
           </IconButton>
         </td>
       </tr>
     );
   }
 
+  const busy = unclaim.isPending || remove.isPending;
+
+  // A failed action from the row menu: one line under the row it came from.
+  const failure = unclaim.isError
+    ? apiErrorMessage(unclaim.error, "Could not revoke this claim.")
+    : remove.isError
+      ? apiErrorMessage(remove.error, "Could not remove this student.")
+      : null;
+
   return (
-    <tr className="hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-      <td className={`${cell} font-medium`}>
-        <span className="flex items-center gap-2">
-          <StudentAvatar entry={entry} />
-          {entry.nom}
-        </span>
-      </td>
-      <td className={cell}>{entry.prenom}</td>
-      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
-        <Tip label={`Write to ${entry.prenom} ${entry.nom}`}>
-          <a
-            href={`mailto:${entry.email}`}
-            className="inline-flex items-center gap-1.5 hover:text-accent hover:underline"
-          >
-            <Mail className="size-3.5 text-zinc-300 dark:text-zinc-600" />
+    <Fragment>
+      <tr className={cx(T.row, T.rowHover)}>
+        <td className={`${T.td} font-semibold`}>
+          <span className="flex items-center gap-2.5">
+            <StudentAvatar entry={entry} />
+            {entry.nom}
+          </span>
+        </td>
+        <td className={T.td}>{entry.prenom}</td>
+        <td className={`${T.td} text-fg-muted`}>
+          <a href={`mailto:${entry.email}`} className="hover:text-fg hover:underline">
             {entry.email}
           </a>
-        </Tip>
-      </td>
-      <td className={cell}>
-        <span className="inline-flex items-center gap-1">
-          {entry.conflictFlag ? (
-            <Badge tone="red" icon={AlertTriangle}>
-              conflict
-            </Badge>
-          ) : entry.status === "claimed" ? (
-            <Badge tone="green" icon={CheckCircle2}>
-              claimed
-            </Badge>
-          ) : (
-            <Badge tone="amber" icon={Clock}>
-              pending
-            </Badge>
-          )}
-          {entry.staff ? (
-            <Badge tone="zinc" icon={GraduationCap}>
-              staff
-            </Badge>
-          ) : null}
-        </span>
-      </td>
-      <td className={cell}>
-        {entry.githubLogin ? (
+        </td>
+        <td className={T.td}>
           <span className="inline-flex items-center gap-1">
-            <GithubIcon className="size-3.5" /> {entry.githubLogin}
+            {entry.conflictFlag ? (
+              <Badge tone="red" icon={AlertTriangle}>
+                conflict
+              </Badge>
+            ) : entry.status === "claimed" ? (
+              <Badge tone="green" icon={CheckCircle2}>
+                claimed
+              </Badge>
+            ) : (
+              <Badge tone="amber" icon={Clock}>
+                pending
+              </Badge>
+            )}
+            {entry.staff ? (
+              <Badge tone="zinc" icon={GraduationCap}>
+                staff
+              </Badge>
+            ) : null}
           </span>
-        ) : (
-          <span className="text-zinc-400">—</span>
-        )}
-      </td>
-      <td className={`${cell} text-zinc-500 dark:text-zinc-400`}>
-        {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
-      </td>
-      <td className={`${cell} text-right whitespace-nowrap`}>
-        <IconButton label="Edit" onClick={() => setEditing(true)}>
-          <Pencil className="size-4" />
-        </IconButton>
-        {entry.status === "claimed" || entry.conflictFlag ? (
-          <IconButton
-            label="Revoke claim"
-            onClick={() => unclaim.mutate()}
-            disabled={unclaim.isPending}
-          >
-            <UserRoundX className="size-4" />
-          </IconButton>
-        ) : null}
-        <IconButton
-          label="Remove student"
-          danger
-          onClick={() => {
-            if (window.confirm(`Remove ${entry.prenom} ${entry.nom} from the roster?`)) {
-              remove.mutate();
-            }
-          }}
-          disabled={remove.isPending}
-        >
-          <Trash2 className="size-4" />
-        </IconButton>
-      </td>
-    </tr>
+        </td>
+        <td className={T.td}>
+          {entry.githubLogin ? (
+            <span className="inline-flex items-center gap-1.5 text-fg-muted">
+              <GithubIcon className="size-3.5" /> {entry.githubLogin}
+            </span>
+          ) : (
+            <span className="text-fg-faint">—</span>
+          )}
+        </td>
+        <td className={`${T.td} whitespace-nowrap text-fg-muted`}>
+          {entry.lastLoginAt ? isoDateTime(entry.lastLoginAt) : "—"}
+        </td>
+        <td className={`${T.td} whitespace-nowrap text-right`}>
+          {/* The menu is gone by the time the request answers, so the row
+              itself carries the fact that something is running. */}
+          {busy ? (
+            <Loader2 className="mr-1 inline size-4 animate-spin text-fg-faint" aria-label="Working…" />
+          ) : null}
+          <Menu
+            label={`Actions for ${entry.prenom} ${entry.nom}`}
+            items={[
+              { label: "Edit", icon: Pencil, onSelect: () => setEditing(true) },
+              ...(entry.status === "claimed" || entry.conflictFlag
+                ? [
+                    {
+                      label: "Revoke claim",
+                      icon: UserRoundX,
+                      disabled: unclaim.isPending,
+                      onSelect: async () => {
+                        if (
+                          await confirm({
+                            title: `Revoke ${entry.prenom} ${entry.nom}'s claim?`,
+                            message: "The seat goes back to pending; the student claims it again on their next sign-in.",
+                            confirmLabel: "Revoke",
+                          })
+                        ) {
+                          unclaim.mutate();
+                        }
+                      },
+                    },
+                  ]
+                : []),
+              {
+                label: "Remove from roster",
+                icon: Trash2,
+                danger: true,
+                separator: true,
+                disabled: remove.isPending,
+                onSelect: async () => {
+                  if (
+                    await confirm({
+                      title: `Remove ${entry.prenom} ${entry.nom}?`,
+                      message: "The student leaves the roster. Existing repositories on GitHub are not touched.",
+                      confirmLabel: "Remove",
+                      danger: true,
+                    })
+                  ) {
+                    remove.mutate();
+                  }
+                },
+              },
+            ]}
+          />
+        </td>
+      </tr>
+      {failure ? (
+        <tr>
+          <td colSpan={7} className="px-3 pb-2 text-[13px] text-danger">
+            {failure}
+          </td>
+        </tr>
+      ) : null}
+    </Fragment>
   );
 }
 
@@ -223,33 +270,27 @@ export function RosterTable({
     (x, y) => String(x).localeCompare(String(y), undefined, { sensitivity: "base" }),
   );
   const Th = ({ k, children }: { k: SortKey; children: React.ReactNode }) => (
-    <SortHeader k={k} sort={sort} onToggle={toggle} className={`${cell} font-medium`}>
+    <SortHeader k={k} sort={sort} onToggle={toggle}>
       {children}
     </SortHeader>
   );
 
-  if (roster.length === 0) {
-    return (
-      <EmptyState icon={Users} title="Empty roster">
-        Import the student list from a CSV or Excel file to get started.
-      </EmptyState>
-    );
-  }
   return (
+    /* Seven columns never fit a phone: the table scrolls, the page does not. */
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className={cx(T.table, "min-w-220")}>
         <thead>
-          <tr className="text-left text-xs text-zinc-500 dark:text-zinc-400">
+          <tr className={T.head}>
             <Th k="nom">Last name</Th>
             <Th k="prenom">First name</Th>
             <Th k="email">E-mail</Th>
             <Th k="status">Status</Th>
             <Th k="githubLogin">GitHub</Th>
             <Th k="lastLoginAt">Last sign-in</Th>
-            <th className={cell} aria-label="Actions" />
+            <th className={T.th} aria-label="Actions" />
           </tr>
         </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <tbody>
           {sorted.map((r) => (
             <Row key={r.id} classroomId={classroomId} entry={r} />
           ))}

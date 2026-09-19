@@ -20,7 +20,7 @@ function inline(text: string, keyBase: string): ReactNode[] {
       nodes.push(
         <code
           key={`${keyBase}-${i}`}
-          className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] dark:bg-zinc-800"
+          className="rounded bg-surface-3 px-1 py-0.5 font-mono text-[0.85em]"
         >
           {m[4]}
         </code>,
@@ -53,7 +53,7 @@ export function Markdown({ source }: { source: string }) {
         const trimmed = block.trim();
         if (trimmed.startsWith("## ")) {
           return (
-            <h3 key={bi} className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            <h3 key={bi} className="text-sm font-semibold text-fg">
               {inline(trimmed.slice(3), `h${bi}`)}
             </h3>
           );

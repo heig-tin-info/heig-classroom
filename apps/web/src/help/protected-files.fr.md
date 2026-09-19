@@ -16,4 +16,4 @@ snapshot du devoir). Les altérations répétées sont limitées et signalées.
 ## Ajuster la liste
 
 Dépliez la section et cochez/décochez les fichiers dans l'arborescence. La
-liste reste modifiable après création, depuis le dialogue d'édition du devoir.
+liste reste modifiable après création, depuis le panneau d'édition du devoir.

@@ -7,9 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dev:mock": "VITE_MOCK=1 vite",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
+    "@fontsource-variable/jetbrains-mono": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
     "@hgc/contracts": "workspace:*",
     "@hgc/domain": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
@@ -20,9 +24,14 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^30.1.0",
+    "playwright-core": "^1.63.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "vite": "^8.1.3",
