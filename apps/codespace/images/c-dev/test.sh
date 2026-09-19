@@ -7,7 +7,13 @@
 #
 # Prerequisites: rootful Podman reachable on unix:///run/podman/podman.sock,
 # image codespace/c-dev:4.137.0 built, python3 on the host (to build the fake
-# .vsix). No sudo.
+# .vsix), and the `codespace` AppArmor profile loaded
+# (`sudo apparmor_parser -r /etc/apparmor.d/codespace`, see
+# infra/apparmor/codespace). No sudo otherwise.
+#
+# On a host WITHOUT AppArmor — the WSL2 development workstation — run
+# `APPARMOR= ./images/c-dev/test.sh`: `podman run` refuses a profile name the
+# kernel does not know, and § 4 then skips the label check with a note.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -257,6 +263,27 @@ ok "NoNewPrivs = 1"
 SEC=$(cexec 'grep Seccomp: /proc/self/status' | awk '{print $2}')
 [ "$SEC" = "2" ] || fail "Seccomp is $SEC instead of 2 (filter mode)"
 ok "Seccomp = 2 (filter loaded)"
+
+# The project AppArmor profile, not Podman's built-in containers-default-*:
+# that one denies ptrace towards the stacked label `<profile>//&crun` and § 1
+# would fail. The label is read from /proc/self/attr/apparmor/current, with the
+# pre-5.1 path as a fallback; the value is `codespace (enforce)`, possibly with
+# a `//&…` stack suffix.
+if [ -z "${APPARMOR-codespace}" ]; then
+  printf '  skip  AppArmor label (APPARMOR= : the flag was not passed)\n'
+elif ! cexec 'test -r /proc/self/attr/apparmor/current || test -r /proc/self/attr/current' >/dev/null 2>&1; then
+  printf '  skip  AppArmor label (host without AppArmor: no /proc/self/attr/…/current)\n'
+else
+  LABEL=$(cexec 'cat /proc/self/attr/apparmor/current 2>/dev/null || cat /proc/self/attr/current' | tr -d '\0\r')
+  case "$LABEL" in
+    unconfined*|"")
+      fail "the container is not confined by the codespace profile: [$LABEL]" \
+           "expected 'codespace (enforce)'; check apparmor_parser -r /etc/apparmor.d/codespace" ;;
+    codespace*) : ;;
+    *) fail "AppArmor label is [$LABEL] instead of the codespace profile" ;;
+  esac
+  ok "AppArmor label: $LABEL"
+fi
 
 # --------------------------------------------------------------------------
 head2 "5. user namespace: uid 1000 inside, host UID outside 0-65535"

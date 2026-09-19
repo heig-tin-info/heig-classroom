@@ -17,11 +17,20 @@
 # is no resolver anyway (empty resolv.conf). P2 will run this script with
 # NETWORK=codespace and the flag will be there.
 #
+# --security-opt apparmor=codespace: Podman's built-in profile
+# (containers-default-<version>) allows ptrace only towards its own bare label,
+# and on kernel 7.0.0-31 the traced process carries the stacked label
+# `<profile>//&crun`, so gdb gets `ptrace: Permission denied`. The project
+# profile infra/apparmor/codespace keeps every deny rule of the built-in one and
+# only widens the ptrace/signal peers. Set APPARMOR= (empty) on a host without
+# AppArmor — the WSL2 development workstation — and the flag is not passed.
+#
 # Variables:
 #   CTR_NAME   container name              (default cdev-p1)
 #   NETWORK    podman network              (default none, P1)
 #   VOL_DIR    host work directory         (default /tmp/codespace-vol/<CTR_NAME>)
 #   IMAGE      image to run                (default codespace/c-dev:4.137.0)
+#   APPARMOR   apparmor profile name       (default codespace; empty = no flag)
 #   EXTRA_ARGS extra podman options (string, split by the shell)
 #
 # Writes the container id on standard output.
@@ -31,6 +40,7 @@ CTR_NAME="${CTR_NAME:-cdev-p1}"
 IMAGE="${IMAGE:-codespace/c-dev:4.137.0}"
 VOL_DIR="${VOL_DIR:-/tmp/codespace-vol/${CTR_NAME}}"
 NETWORK="${NETWORK:-none}"
+APPARMOR="${APPARMOR-codespace}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SECCOMP="${SECCOMP:-${REPO_ROOT}/infra/seccomp/codespace.json}"
@@ -51,6 +61,14 @@ if [ "$NETWORK" != "none" ]; then
   net_args+=( --dns=none )
 fi
 
+# Empty APPARMOR = the flag is not passed at all, for a host with no AppArmor.
+# Anything else is passed as it is: `codespace` normally, `unconfined` for a
+# witness run.
+aa_args=()
+if [ -n "$APPARMOR" ]; then
+  aa_args+=( --security-opt "apparmor=${APPARMOR}" )
+fi
+
 podman_remote run -d \
   --name "$CTR_NAME" \
   --label codespace.role=student \
@@ -58,6 +76,7 @@ podman_remote run -d \
   --cap-drop=ALL \
   --security-opt no-new-privileges \
   --security-opt "seccomp=${SECCOMP}" \
+  "${aa_args[@]}" \
   --read-only \
   --tmpfs /tmp \
   --tmpfs '/run:rw,nosuid,nodev,mode=1777' \

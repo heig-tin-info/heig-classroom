@@ -113,3 +113,37 @@ session. Four findings, all dealt with; proofs and limits in
 ## Correction to the framing document raised by the SEB test
 
 SEB's URL filter must allow the domain of the identity provider (Switch edu-ID) in addition to that of the portal, otherwise the login page is blocked. The framing document spoke of a single domain rule.
+
+## Kernel 7.0.0-31 and AppArmor (2026-09-18)
+
+The portal VM moved to `7.0.0-31-generic` on 2026-09-17. On the following day, gdb
+inside the student containers stopped working: `warning: ptrace: Permission denied`,
+with `apparmor="DENIED" operation="ptrace" profile="containers-default-0.66.0"
+comm="gdb" requested_mask="trace" peer="containers-default-0.66.0//&crun"` — and the
+same denial on `signal=term`. On this kernel the traced process carries a **stacked**
+label, `<profile>//&crun`, and Podman's built-in profile only allows
+`ptrace (trace,read) peer=<its own bare name>`. The peer does not match, so the
+operation is refused.
+
+Measured with throwaway containers from `images/c-dev/run-hardened.sh`: default →
+denied; `--cap-add=SYS_PTRACE` → **still** denied (the capability check is passed
+long before the LSM check); `--security-opt apparmor=unconfined` → gdb works. Running
+unconfined was not an option: it would drop every `deny` rule of the built-in profile
+at the same time.
+
+**Fixed** by a dedicated profile, `infra/apparmor/codespace`: the `containers-default`
+template of containers/common transcribed rule for rule, every `deny` kept, with the
+ptrace and signal peers widened to the stacked labels of the same profile
+(`peer=codespace` and `peer=codespace//&*`, plus the tracee side `tracedby,readby`).
+No ptrace towards `unconfined` or any other profile. Same shape as the upstream fix
+for cri-containerd on kernel 6.17+
+([canonical/k8s-snap#2750](https://github.com/canonical/k8s-snap/pull/2750)).
+`bootstrap.sh` installs and loads it, `push.sh` reloads it on every push,
+`CODESPACE_APPARMOR_PROFILE` (empty on the WSL2 workstation) selects it, and
+`test.sh` § 4 asserts the container's label.
+
+**Two things left open.** (1) `containers/common` publishes no `v0.66.0` tag, so the
+template was transcribed from `v0.64.2`, which is byte-identical to `main`; if the
+0.66.0 body ever turns out to differ, the profile has to be rebased on it. (2) The
+profile has **not** been run through `apparmor_parser -Q` here — the development
+workstation is WSL2 and has no AppArmor. That check belongs to the first deployment.

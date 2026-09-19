@@ -11,7 +11,8 @@
 #   2. `pnpm deploy --prod --legacy`: a self-contained tree (pruned
 #      node_modules, workspaces copied in), exactly like classroom's Dockerfile
 #   3. checks that whatever is needed at run time is there
-#   4. rsync of deploy/ infra/ images/ to /srv/codespace/src
+#   4. rsync of deploy/ infra/ images/ to /srv/codespace/src, then reload of
+#      the AppArmor profile (so a profile change ships without --bootstrap)
 #   5. rsync of the tree to /srv/codespace/releases/<timestamp>
 #   6. switch of the /srv/codespace/app symlink
 #   7. build of the student image on the VM if it is missing
@@ -101,6 +102,24 @@ rsync -a --delete "${RSYNC_E[@]}" \
 	"$TARGET:$PREFIX/src/"
 "${SSH[@]}" "chmod +x $PREFIX/src/deploy/*.sh $PREFIX/src/infra/net/*.sh $PREFIX/src/images/c-dev/*.sh"
 ok "deploy/ infra/ images/"
+
+# The AppArmor profile is reloaded on **every** push, not only under
+# --bootstrap: a change to infra/apparmor/codespace must reach the containers
+# started after the restart below. `-r` (replace) is idempotent, and a running
+# container keeps the profile it was started with.
+step "AppArmor profile codespace"
+"${SSH[@]}" bash -s <<'REMOTE'
+set -euo pipefail
+AA=/srv/codespace/src/infra/apparmor/codespace
+if ! command -v apparmor_parser >/dev/null 2>&1; then
+	echo "  ..    apparmor_parser absent: profile NOT loaded (host without AppArmor)"
+	echo "  ..    CODESPACE_APPARMOR_PROFILE must stay empty in /etc/codespace/env"
+	exit 0
+fi
+install -m 0644 "$AA" /etc/apparmor.d/codespace
+apparmor_parser -r /etc/apparmor.d/codespace
+echo "  ok    /etc/apparmor.d/codespace (re)loaded"
+REMOTE
 
 if [ "$DO_BOOTSTRAP" -eq 1 ]; then
 	step "VM bootstrap (idempotent)"

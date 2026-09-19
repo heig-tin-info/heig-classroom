@@ -1,0 +1,159 @@
+# heig-codespace — AppArmor profile for the student containers.
+#
+# Loaded by deploy/bootstrap.sh and by deploy/push.sh into /etc/apparmor.d/codespace,
+# then selected at `podman run` time with `--security-opt apparmor=codespace`
+# (images/c-dev/run-hardened.sh and src/engine/index.ts, CLAUDE.md invariant 3).
+#
+# ---------------------------------------------------------------------------
+# Source
+# ---------------------------------------------------------------------------
+# Transcribed from the `containers-default` template of containers/common:
+#
+#   https://raw.<host>/containers/common/v0.64.2/pkg/apparmor/apparmor_linux_template.go
+#       where <host> is githubusercontent.com
+#
+# The brief asked for the v0.64.2 template's successor, v0.66.0 — the version
+# that names the profile `containers-default-0.66.0` in the kernel audit log of
+# the portal VM. **That tag does not exist in the public containers/common
+# repository** (the published tags jump from v0.64.2 to v1.0.1), so it could not
+# be fetched. The template was therefore taken from the newest reachable point:
+# `v0.64.2` and `main` carry a byte-identical
+# `pkg/apparmor/apparmor_linux_template.go`, which is the text transcribed
+# below. The template has not changed in that file since well before 0.64, so
+# the 0.66.0 body the VM is running is the same.
+#
+# The template is a Go text/template. It was expanded here with:
+#   .Name         = codespace
+#   .Imports      = #include <tunables/global>      (the macro exists on Ubuntu)
+#   .InnerImports = #include <abstractions/base>    (idem)
+#   .Version      >= 208096                         (apparmor_parser 4.x on
+#                                                    Ubuntu 24.04/26.04, so both
+#                                                    conditional blocks are kept)
+#
+# No `abi <abi/N.N>,` rule, deliberately: the generated `containers-default-*`
+# profile has none either and parses on this host today. Adding one would pin a
+# behaviour we have not measured, and would break on a parser that does not ship
+# that abi file.
+#
+# ---------------------------------------------------------------------------
+# Why this profile exists (2026-09-18)
+# ---------------------------------------------------------------------------
+# Since the portal VM moved to kernel 7.0.0-31-generic (2026-09-17), gdb inside
+# a student container fails with `warning: ptrace: Permission denied`:
+#
+#   apparmor="DENIED" operation="ptrace" class="ptrace"
+#     profile="containers-default-0.66.0" pid=52042 comm="gdb"
+#     requested_mask="trace" denied_mask="trace"
+#     peer="containers-default-0.66.0//&crun"
+#
+# The template's rule is `ptrace (trace,read) peer={{.Name}}` — it matches the
+# *bare* profile name only. On this kernel the traced process carries a
+# **stacked** label, `containers-default-0.66.0//&crun`: the container runtime's
+# profile is stacked onto the container profile, and `//&` is the stack
+# separator. The peer therefore does not match and the operation is denied. The
+# same mismatch denies signals (`operation="signal" ... signal=term
+# peer="containers-default-0.66.0//&crun"`), which is why gdb cannot kill its
+# inferior either.
+#
+# `--cap-add=SYS_PTRACE` does not help: the capability check is passed long
+# before the LSM check, and it is the LSM that refuses. Measured on the VM with
+# throwaway containers from images/c-dev/run-hardened.sh: default → denied,
+# `--cap-add=SYS_PTRACE` → still denied, `--security-opt apparmor=unconfined` →
+# gdb works. Running unconfined is not an option: it would drop every deny rule
+# below (mounts, /proc and /sys writes) at the same time.
+#
+# ---------------------------------------------------------------------------
+# What changes against containers-default, and nothing else
+# ---------------------------------------------------------------------------
+# Only the ptrace and signal peers. Every deny rule of the template is kept
+# verbatim. The two deviations are marked `heig-codespace` below:
+#
+#   1. ptrace (trace,read,tracedby,readby) peer=codespace//&*,
+#   2. signal (send,receive)               peer=codespace//&*,
+#
+# `//&*` is the peer pattern for a stacked label. A ptrace/signal peer is an
+# AARE expression (`PTRACE PEER = 'peer' '=' AARE`, apparmor.d(5) §
+# "ptrace rules" / "signal rules", https://apparmor.net/man/5.0/apparmor.d/), so
+# the `*` glob applies to the label text; `codespace//&*` matches every label
+# whose first stack element is this profile, `codespace//&crun` included, and
+# the separate `peer=codespace` rule keeps the unstacked case. The same fix, in
+# the same shape, was applied upstream to the cri-containerd profile for kernel
+# 6.17+ stacking — `ptrace (trace,tracedby,read,readby)
+# peer=cri-containerd.apparmor.d//&*,` and `signal (send,receive)
+# peer=cri-containerd.apparmor.d//&*,` — in canonical/k8s-snap PR #2750
+# (https://github.com/canonical/k8s-snap/pull/2750, for
+# containerd issue #12886).
+#
+# `tracedby` and `readby` are added alongside `trace` and `read` because ptrace
+# is mediated on both ends: the tracer needs `trace`, the tracee needs
+# `tracedby`. Both processes carry a label of this profile, so both permissions
+# must be granted here. (The brief wrote `readedby`; the permission AppArmor
+# actually defines is `readby`.)
+#
+# **No ptrace towards anything else.** There is deliberately no
+# `ptrace peer=unconfined` and no unqualified `ptrace,`: a student may debug
+# their own processes inside their own container, never a host process and
+# never a process of another profile. The template's `signal (receive)
+# peer=unconfined` is kept as it is — receive only, and it is what lets the host
+# stop the container.
+#
+# ---------------------------------------------------------------------------
+# Loading it
+# ---------------------------------------------------------------------------
+#   install -m 0644 infra/apparmor/codespace /etc/apparmor.d/codespace
+#   apparmor_parser -r /etc/apparmor.d/codespace     # -r: replace, idempotent
+#   apparmor_parser -Q /etc/apparmor.d/codespace     # parse only, no load
+#   aa-status | grep codespace                       # check it is loaded
+#
+# deploy/push.sh reloads it on every push, so a change here ships without
+# `--bootstrap`. A container already running keeps the profile it was started
+# with; the next session picks the new one up.
+# ---------------------------------------------------------------------------
+
+#include <tunables/global>
+
+profile codespace flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+
+  network,
+  capability,
+  file,
+  umount,
+
+  # Allow signals from privileged profiles and from within the same profile
+  signal (receive) peer=unconfined,
+  signal (send,receive) peer=codespace,
+  # heig-codespace: and from/to the stacked labels of this same profile
+  # (codespace//&crun). Without it, `signal=term` towards the inferior is
+  # denied and gdb cannot kill what it traces.
+  signal (send,receive) peer=codespace//&*,
+  # Allow certain signals from OCI runtimes (podman, runc and crun)
+  signal (receive) peer={/usr/bin/,/usr/sbin/,}runc,
+  signal (receive) peer={/usr/bin/,/usr/sbin/,}crun*,
+  signal (receive) peer={/usr/bin/,/usr/sbin/,}podman,
+
+  deny @{PROC}/* w,   # deny write for all files directly in /proc (not in a subdir)
+  # deny write to files not in /proc/<number>/** or /proc/sys/**
+  deny @{PROC}/{[^1-9],[^1-9][^0-9],[^1-9s][^0-9y][^0-9s],[^1-9][^0-9][^0-9][^0-9]*}/** w,
+  deny @{PROC}/sys/[^k]** w,  # deny /proc/sys except /proc/sys/k* (effectively /proc/sys/kernel)
+  deny @{PROC}/sys/kernel/{?,??,[^s][^h][^m]**} w,  # deny everything except shm* in /proc/sys/kernel/
+  deny @{PROC}/sysrq-trigger rwklx,
+  deny @{PROC}/kcore rwklx,
+
+  deny mount,
+
+  deny /sys/[^f]*/** wklx,
+  deny /sys/f[^s]*/** wklx,
+  deny /sys/fs/[^c]*/** wklx,
+  deny /sys/fs/c[^g]*/** wklx,
+  deny /sys/fs/cg[^r]*/** wklx,
+  deny /sys/firmware/** rwklx,
+  deny /sys/kernel/security/** rwklx,
+
+  # suppress ptrace denials when using 'ps' inside a container
+  # heig-codespace: the template stops at `(trace,read) peer=codespace`. We add
+  # the tracee side (tracedby, readby) and the stacked labels, which is what
+  # gdb needs on kernel 7.0.0-31. See the header for the audit line.
+  ptrace (trace,read,tracedby,readby) peer=codespace,
+  ptrace (trace,read,tracedby,readby) peer=codespace//&*,
+}

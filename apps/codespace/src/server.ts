@@ -129,6 +129,7 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
       network: config.CODESPACE_NETWORK,
       gateway: config.CODESPACE_GATEWAY,
       seccompProfile: config.seccompProfile,
+      apparmorProfile: config.CODESPACE_APPARMOR_PROFILE,
       image: config.CODESPACE_IMAGE,
       memory: config.CODESPACE_MEMORY,
       cpus: config.CODESPACE_CPUS,
