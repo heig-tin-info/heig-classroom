@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, configure } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 
 /*
@@ -7,6 +7,21 @@ import { afterEach, beforeEach, vi } from "vitest";
  * Kept as small as the components allow: every stub below exists because a
  * primitive genuinely reads that browser API.
  */
+
+/*
+ * Testing Library gives `findBy*` and `waitFor` one second, which assumes a
+ * machine running this suite and nothing else. `pnpm -r test` runs four
+ * workspaces at once, and under that contention a React Query round trip
+ * through a stubbed fetch — resolve, re-render, assert — misses the deadline:
+ * TeacherHome's first `findByRole` failed about two runs in three once the
+ * command palette suites grew the `dom` project by seventy tests. Nothing is
+ * slow on purpose and no query fails to land; only the budget was wrong, and
+ * it was wrong before those tests existed, they just made it visible.
+ *
+ * Five seconds leaves room for a loaded CI runner while keeping a genuinely
+ * broken expectation failing promptly.
+ */
+configure({ asyncUtilTimeout: 5_000 });
 
 /**
  * jsdom runs no layout, so every element reports `offsetWidth`/`offsetHeight`

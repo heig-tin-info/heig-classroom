@@ -69,6 +69,35 @@ curl -sSL https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz \
   | openssl dgst -sha512 -binary | openssl base64 -A
 ```
 
+## Comment Dependabot est configuré ici
+
+`.github/dependabot.yml` existe pour maintenir au plus bas le nombre de pull
+requests nécessitant la réparation ci-dessus.
+
+Pour npm, `open-pull-requests-limit: 0` désactive les mises à jour de
+**version**. Cela paraît contradictoire dans un fichier dont l'objet est de
+configurer des mises à jour, mais c'est le simple fait d'ajouter une entrée npm
+qui les aurait activées, et un lot hebdomadaire de montées de version, c'est un
+lot hebdomadaire de lockfiles cassés à réparer à la main. Les pull requests de
+sécurité ne sont explicitement pas soumises à cette limite : elles continuent
+donc d'arriver — et ce sont celles qui valent le dérangement. Un groupe les
+rassemble ensuite en une seule pull request au lieu d'une par paquet : les trois
+qui s'étaient accumulées ici demandaient exactement la même réparation, faite
+désormais une seule fois.
+
+Ce groupe porte `applies-to: security-updates`, un détail facile à oublier et
+silencieusement fatal : sans lui, un groupe s'applique par défaut aux mises à
+jour de version, et n'aurait donc rien groupé du tout.
+
+GitHub Actions et l'image de base Docker sont configurés à l'inverse, avec les
+mises à jour de version activées, car ni l'un ni l'autre ne touche au lockfile
+pnpm et leurs pull requests se fusionnent telles quelles. Les versions majeures
+de l'image `node` sont ignorées volontairement — faire passer la production à
+une nouvelle version majeure de Node est une décision qui se prend avec
+`engines` et la matrice d'intégration continue, pas qui se découvre dans une
+pull request de dépendance. `ignore` ne s'applique jamais qu'aux mises à jour de
+version, si bien que cela ne coûte rien en sécurité.
+
 ## Avant de fusionner une dépendance du serveur
 
 Une suite verte ne suffit pas, à elle seule, à valider la mise à jour d'un
