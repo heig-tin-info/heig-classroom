@@ -116,10 +116,15 @@ export async function buildPortal(options: BuildOptions = {}): Promise<Portal> {
 
   const app = Fastify({
     logger: { level: config.LOG_LEVEL },
-    // Development only: makes `request.ip` controllable through
-    // `X-Forwarded-For`, which `scripts/e2e.ts` needs in order to simulate a
-    // second machine. `loadConfig` forbids it in production.
-    trustProxy: config.TRUST_PROXY,
+    // `TRUSTED_PROXY_IPS` is the production setting: a list of front-end
+    // addresses, so `request.ip` is the student's address and not Caddy's
+    // (audit M1, docs/deploy.md § 6). It wins over the boolean `TRUST_PROXY`,
+    // which is development only — it makes `request.ip` controllable by
+    // anyone through `X-Forwarded-For`, which `scripts/e2e.ts` needs in order
+    // to simulate a second machine, and which `loadConfig` forbids in
+    // production.
+    trustProxy:
+      config.TRUSTED_PROXY_IPS.length > 0 ? config.TRUSTED_PROXY_IPS : config.TRUST_PROXY,
   });
 
   const engine =

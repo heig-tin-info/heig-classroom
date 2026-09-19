@@ -102,6 +102,7 @@ describe("configuration: what is forbidden in production", () => {
     EXAM_COOKIE_SECRET: "another-production-secret",
     SEB_VERIFIER: "real",
     SEB_PUBLIC_ORIGIN: "https://codespace.heig-vd.ch",
+    TRUSTED_PROXY_IPS: "127.0.0.1",
   };
 
   it("accepts a complete production configuration", () => {
@@ -114,6 +115,24 @@ describe("configuration: what is forbidden in production", () => {
 
   it("refuses TRUST_PROXY, which is a test setting", () => {
     expect(() => loadConfig({ ...base, TRUST_PROXY: "1" })).toThrow(/TRUST_PROXY/);
+    // Even with the real list beside it: the boolean would still let anyone
+    // forge `X-Forwarded-For`, and Fastify takes one of the two settings.
+    expect(() => loadConfig({ ...base, TRUST_PROXY: "true" })).toThrow(/TRUST_PROXY/);
+  });
+
+  it("requires TRUSTED_PROXY_IPS: without it the exam address binding is void (audit M1)", () => {
+    expect(() => loadConfig({ ...base, TRUSTED_PROXY_IPS: "" })).toThrow(/TRUSTED_PROXY_IPS/);
+    expect(() => loadConfig({ ...base, TRUSTED_PROXY_IPS: "  ,  " })).toThrow(
+      /TRUSTED_PROXY_IPS/,
+    );
+  });
+
+  it("parses TRUSTED_PROXY_IPS as a list, trimmed, empty entries dropped", () => {
+    expect(loadConfig({ ...base, TRUSTED_PROXY_IPS: "127.0.0.1, ::1 ,," }).TRUSTED_PROXY_IPS)
+      .toEqual(["127.0.0.1", "::1"]);
+    // Outside production the default is empty: no front end, `request.ip` is
+    // the socket address.
+    expect(loadConfig({}).TRUSTED_PROXY_IPS).toEqual([]);
   });
 
   it("refuses development secrets", () => {

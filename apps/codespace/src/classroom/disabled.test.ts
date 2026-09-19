@@ -104,6 +104,9 @@ describe("classroom integration disabled", () => {
         EXAM_COOKIE_SECRET: "another-real-prod-secret",
         SEB_VERIFIER: "real",
         SEB_PUBLIC_ORIGIN: "https://codespace.heig-vd.ch",
+        // Required in production since the 2026-09-18 audit (M1): without it
+        // `loadConfig` stops earlier and this test would prove nothing.
+        TRUSTED_PROXY_IPS: "127.0.0.1",
         CODESPACE_LAUNCH_SECRET: "dev-launch-secret-change-me-0123456789",
       }),
     ).toThrow(/CODESPACE_LAUNCH_SECRET/);

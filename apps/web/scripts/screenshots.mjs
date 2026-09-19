@@ -83,6 +83,7 @@ const scenes = [
   { name: "assignment-detail-locked", role: "teacher", path: "/classrooms/c1/assignments/a1" },
   { name: "assignment-detail-draft", role: "teacher", path: "/classrooms/c1/assignments/a4" },
   { name: "assignment-detail-ungraded", role: "teacher", path: "/classrooms/c1/assignments/a6" },
+  { name: "assignment-detail-seb", role: "teacher", path: "/classrooms/c2/assignments/b2" },
   { name: "assignment-detail-expanded", role: "teacher", path: "/classrooms/c1/assignments/a2", act: (p) => p.locator("tbody tr").first().click() },
   { name: "assignment-detail-milestone-add", role: "teacher", path: "/classrooms/c1/assignments/a2", act: (p) => p.getByRole("button", { name: /add milestone/i }).first().click() },
   { name: "assignment-detail-history", role: "teacher", path: "/classrooms/c1/assignments/a1", act: (p) => p.getByRole("button", { name: /grade history/i }).first().click() },

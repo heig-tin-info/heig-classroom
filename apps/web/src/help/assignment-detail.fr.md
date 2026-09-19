@@ -18,3 +18,14 @@ Les chiffres en haut résument acceptation, CI, note moyenne et échéance. En d
 ## Synchroniser les dépôts étudiants
 
 Quand le dépôt source avance, une bannière propose d'ouvrir des **pull requests de sync** sur tous les dépôts étudiants ; chacun merge à son rythme. Les fichiers protégés (critères, workflow de correction) sont restaurés automatiquement si un étudiant les modifie.
+
+## Environnement en ligne et mode examen
+
+Un devoir dans un mode **en ligne** vit aussi dans le portail d'environnements ; la bannière affiche la dernière synchronisation réussie, ou l'erreur de la dernière tentative. **Resync** le repousse.
+
+En **mode examen SEB**, la bannière propose en plus :
+
+- **Télécharger le .seb** — la configuration Safe Exam Browser de cette épreuve, en HTTPS simple. Ouvrez-la dans l'outil de configuration SEB pour y lire la Browser Exam Key de chaque machine du parc, et **ne l'enregistrez jamais de nouveau** : enregistrer régénère le sel et invalide tous les fichiers déjà distribués. Les étudiants reçoivent le lien `sebs://` depuis leur propre page ; celui-là lance SEB, ce n'est pas ce qu'il vous faut ici.
+- **Config Key** — l'empreinte que le portail a calculée pour ce fichier. Elle doit être identique à la Config Key qu'affiche l'outil de configuration. Si les deux diffèrent, le démarrage de l'épreuve sera refusé, et aucune BEK n'y changera rien.
+
+Le bouton n'apparaît qu'une fois le devoir arrivé dans le portail : avant la première synchronisation réussie, il n'y a pas de `.seb` à télécharger. Le protocole complet est dans `apps/codespace/docs/preuve-b-manuelle.md`.

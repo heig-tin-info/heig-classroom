@@ -222,6 +222,8 @@ export function makeAssignmentDetail(
       browserExamKeys: [],
       codespaceSyncedAt: null,
       codespaceSyncError: null,
+      codespaceConfigKey: null,
+      codespaceSebUrl: null,
       ...assignment,
     },
     students,

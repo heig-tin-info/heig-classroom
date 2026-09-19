@@ -12,7 +12,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { CodespaceAssignmentSync, LaunchTokenClaims, ServiceTokenClaims } from "@hgc/contracts";
 import { verifyHs256 } from "@hgc/domain";
 
-import { makeCodespaceSyncHandler } from "./codespace.js";
+import { makeCodespaceSyncHandler, sebFileUrl } from "./codespace.js";
 import { loadConfig, type AppConfig } from "./config.js";
 import {
   assignments,
@@ -588,5 +588,100 @@ describe("portal synchronization job", () => {
     vi.stubGlobal("fetch", fetchSpy);
     await makeCodespaceSyncHandler(appStub(), withPortal)({ assignmentId: a.id });
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The teacher's `.seb` download (2026-09-18 audit, item 1): the Config Key the
+ * portal echoes back, and the plain HTTPS URL of the file.
+ */
+describe("the `.seb` a teacher downloads", () => {
+  const appStub = () =>
+    ({ db, log: { info: () => {}, warn: () => {}, error: () => {} } }) as unknown as FastifyInstance;
+
+  async function examAssignment() {
+    const email = `t-${randomUUID()}@heig.test`;
+    const teacher = await seedUser(db, email);
+    await db.insert(teacherGrants).values({
+      id: randomUUID(),
+      email,
+      createdBy: teacher.id,
+      codespaceEnabled: true,
+      codespaceMaxActiveSessions: 2,
+    });
+    const classroomId = await seedClassroom(db, teacher.id);
+    return seedAssignment(db, classroomId, {
+      workMode: "online_seb",
+      state: "published",
+      browserExamKeys: ["b".repeat(64)],
+    });
+  }
+
+  it("is an https:// URL on the portal, never the sebs:// deep link", async () => {
+    const a = await examAssignment();
+    expect(sebFileUrl(withPortal, a)).toBe(`http://localhost:3100/exam/${a.id}.seb`);
+  });
+
+  it("does not exist outside exam mode, nor without a portal", async () => {
+    const a = await examAssignment();
+    for (const workMode of ["free", "online"] as const) {
+      expect(sebFileUrl(withPortal, { ...a, workMode })).toBeNull();
+    }
+    expect(sebFileUrl(withoutPortal, a)).toBeNull();
+  });
+
+  it("stores the Config Key the portal answers with", async () => {
+    const a = await examAssignment();
+    const key = "c".repeat(64);
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response(JSON.stringify({ id: a.id, configKey: key, sebLink: "sebs://p/x.seb" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    await makeCodespaceSyncHandler(appStub(), withPortal)({ assignmentId: a.id });
+    const [row] = await db.select().from(assignments).where(eq(assignments.id, a.id));
+    expect(row!.codespaceConfigKey).toBe(key);
+  });
+
+  it("a sync that succeeds with an unreadable body is still a success", async () => {
+    // The PUT went through; only the echo was lost. Failing the job here
+    // would make pg-boss retry a write the portal has already applied.
+    const a = await examAssignment();
+    vi.stubGlobal("fetch", async () => new Response("not json", { status: 200 }));
+    await makeCodespaceSyncHandler(appStub(), withPortal)({ assignmentId: a.id });
+    const [row] = await db.select().from(assignments).where(eq(assignments.id, a.id));
+    expect(row!.codespaceSyncedAt).not.toBeNull();
+    expect(row!.codespaceSyncError).toBeNull();
+    expect(row!.codespaceConfigKey).toBeNull();
+  });
+
+  it("leaving exam mode clears the key rather than leaving a stale one", async () => {
+    const a = await examAssignment();
+    const key = "d".repeat(64);
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(JSON.stringify({ id: a.id, configKey: key, sebLink: null })),
+    );
+    const handler = makeCodespaceSyncHandler(appStub(), withPortal);
+    await handler({ assignmentId: a.id });
+    expect((await db.select().from(assignments).where(eq(assignments.id, a.id)))[0]!
+      .codespaceConfigKey).toBe(key);
+
+    // The teacher switches the assignment to plain online mode: the portal
+    // stops serving a `.seb` for it and answers `configKey: null`.
+    await db
+      .update(assignments)
+      .set({ workMode: "online", browserExamKeys: [] })
+      .where(eq(assignments.id, a.id));
+    vi.stubGlobal(
+      "fetch",
+      async () => new Response(JSON.stringify({ id: a.id, configKey: null, sebLink: null })),
+    );
+    await handler({ assignmentId: a.id });
+    const [row] = await db.select().from(assignments).where(eq(assignments.id, a.id));
+    expect(row!.codespaceConfigKey).toBeNull();
   });
 });

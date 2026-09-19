@@ -98,3 +98,21 @@ export interface CodespaceSessionSummary {
   lastSeenAt: string | null;
   lastPushAt: string | null;
 }
+
+/**
+ * The portal's answer to `PUT /api/assignments/:id`.
+ *
+ * `configKey` and `sebLink` are the two things classroom cannot compute on its
+ * own: they depend on the `.seb` file the portal generates (its `examKeySalt`
+ * in particular, which is never regenerated). classroom stores the Config Key
+ * on the assignment so that the teacher can compare it, in the SEB
+ * configuration tool, with the one their machine reads from the downloaded
+ * file (docs/preuve-b-manuelle.md § 2). Both are null outside exam mode.
+ */
+export interface CodespaceAssignmentSyncResult {
+  id: string;
+  /** Config Key of the `.seb` served for this assignment: 64 lowercase hex. */
+  configKey: string | null;
+  /** The `sebs://` deep link — the student's one-click hand-over to SEB. */
+  sebLink: string | null;
+}

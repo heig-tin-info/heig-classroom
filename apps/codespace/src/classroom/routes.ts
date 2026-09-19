@@ -25,7 +25,7 @@
 import { randomUUID } from "node:crypto";
 
 import { verifyHs256 } from "@hgc/domain";
-import type { CodespaceSessionSummary } from "@hgc/contracts";
+import type { CodespaceAssignmentSyncResult, CodespaceSessionSummary } from "@hgc/contracts";
 import { eq, lt } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import fp from "fastify-plugin";
@@ -295,11 +295,16 @@ async function classroomRoutesImpl(
         { assignmentId: body.id, mode, classroomId: body.classroomId },
         previous ? "assignment updated from classroom" : "assignment synchronized from classroom",
       );
-      return reply.code(200).send({
+      // `CodespaceAssignmentSyncResult`: the two values classroom cannot
+      // compute on its own. It stores the Config Key so the teacher can
+      // compare it with what the SEB configuration tool reads from the
+      // downloaded file (docs/preuve-b-manuelle.md § 2).
+      const result: CodespaceAssignmentSyncResult = {
         id: body.id,
         configKey,
         sebLink: mode === "exam" ? sebLink(portalOrigin, body.id) : null,
-      });
+      };
+      return reply.code(200).send(result);
     },
   );
 

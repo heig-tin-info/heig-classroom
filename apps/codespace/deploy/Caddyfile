@@ -37,5 +37,16 @@
 		# code-server sends long frames; the open tab is a heartbeat
 		# (proxy/index.ts). No buffering on the stream.
 		flush_interval -1
+
+		# X-Forwarded-For is added HERE, by `reverse_proxy` itself and
+		# with no directive: since Caddy 2 it appends the client address
+		# to that header on every upstream request, together with
+		# X-Forwarded-Proto and X-Forwarded-Host. Nothing to configure —
+		# and nothing to remove either: the portal's exam cookie is bound
+		# to the client address, and it only sees it because of this
+		# header plus TRUSTED_PROXY_IPS=127.0.0.1 on the portal side,
+		# which declares this hop trusted (docs/deploy.md § 6). Adding a
+		# `header_up X-Forwarded-*` line here would override the default
+		# rather than add to it: do not, unless you know why.
 	}
 }

@@ -278,15 +278,36 @@ CODESPACE_DEFAULT_IMAGE=codespace/c-dev:4.137.0
 # --- SEB --------------------------------------------------------------------
 SEB_VERIFIER=real
 SEB_PUBLIC_ORIGIN=https://${DOMAIN}
-# To be completed with the Switch edu-ID hosts the day the IdP is wired in,
-# without which the sign-in page would be blocked by SEB's URL filter.
+# Hosts SEB's URL filter must let through IN ADDITION to classroom (the host
+# of the startURL, added by buildSebConfig) and this portal (added from
+# SEB_PUBLIC_ORIGIN). In practice: the identity provider, because SEB opens
+# the startURL cold and classroom immediately bounces the student to its
+# sign-in page — a page SEB would block, with no way out of kiosk mode.
+#
+# EMPTY IS CORRECT TODAY, and it is a statement, not an omission: in the
+# transitional phase classroom's OIDC issuer is its own Keycloak, mounted
+# under https://${CLASSROOM#https://}/kc/realms/... (.env.prod.example,
+# OIDC_ISSUER). Same host as classroom, therefore already allowed.
+#
+# THE DAY THE IdP MOVES to Switch edu-ID, this must list login.eduid.ch plus
+# every host the discovery document and the sign-in flow actually redirect to
+# (SWITCH AAI hosts among them). The procedure to find them is in
+# docs/integration-classroom.md § 5. Comma-separated, host[:port], no scheme:
+#   SEB_EXTRA_ALLOWED_HOSTS=login.eduid.ch,eduid.ch
 SEB_EXTRA_ALLOWED_HOSTS=
 EXAM_COOKIE_SECRET=$(rand48)
 EXAM_COOKIE_MAX_AGE_MS=14400000
 
-# TRUST_PROXY is a development setting; loadConfig() refuses to start with it
-# in production. Consequence behind Caddy: request.ip is 127.0.0.1. See
-# docs/deploy.md § 6, "The client address behind Caddy".
+# --- the client address behind Caddy (docs/deploy.md § 6) --------------------
+# TRUSTED_PROXY_IPS is what makes request.ip the STUDENT's address instead of
+# Caddy's. The exam cookie is bound to it (analyse.md D5): with 127.0.0.1 on
+# both sides the "same workstation" check compares 127.0.0.1 with 127.0.0.1
+# for everyone and never fires. Caddy's reverse_proxy appends X-Forwarded-For
+# by default, so the only hop to declare is the loopback it dials from.
+# loadConfig() refuses to start in production when this is empty.
+TRUSTED_PROXY_IPS=127.0.0.1
+# TRUST_PROXY is the development boolean — it would let ANYONE set their own
+# address through X-Forwarded-For. loadConfig() refuses it in production.
 TRUST_PROXY=
 ENVEOF
 	umask 022
@@ -296,17 +317,21 @@ chown root:"$SVC_USER" "$ETC/env"
 chmod 0640 "$ETC/env"
 ok "$ETC/env is $(stat -c '%a %U:%G' "$ETC/env")"
 
-# A file written before the GitHub App — or before the AppArmor profile —
-# entered the recipe does not have those keys. They hold no secret: we add them,
-# overwriting nothing.
-for pair in "GITHUB_APP_ID=" "GITHUB_APP_PRIVATE_KEY_PATH=$ETC/github-app.pem" \
-            "CODESPACE_APPARMOR_PROFILE=$AA_PROFILE"; do
+# A file written before the GitHub App — or before the AppArmor profile, or
+# before the 2026-09-18 audit — does not have these keys. Without
+# TRUSTED_PROXY_IPS the portal now REFUSES TO START in production. None of them
+# holds a secret: we add them, overwriting nothing.
+for pair in \
+	"GITHUB_APP_ID=" \
+	"GITHUB_APP_PRIVATE_KEY_PATH=$ETC/github-app.pem" \
+	"CODESPACE_APPARMOR_PROFILE=$AA_PROFILE" \
+	"TRUSTED_PROXY_IPS=127.0.0.1"; do
 	key="${pair%%=*}"
 	if grep -q "^${key}=" "$ETC/env"; then
 		ok "$key already in $ETC/env"
 	else
 		printf '%s\n' "$pair" >> "$ETC/env"
-		ok "$key added to $ETC/env (value '${pair#*=}', see docs/deploy.md § 3 and § 5)"
+		ok "$key added to $ETC/env (value '${pair#*=}'; GitHub App: docs/deploy.md § 5; proxy: § 6)"
 	fi
 done
 

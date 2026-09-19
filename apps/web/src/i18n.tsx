@@ -205,6 +205,7 @@ const en = {
   "assignment.activity.noTests": "No graded runs with test counters yet.",
   "assignment.activity.passed": "passed",
   "assignment.activity.total": "total",
+
   "status.accepted": "accepted",
   "status.locked": "locked",
   "status.notAccepted": "not accepted",
@@ -445,6 +446,7 @@ const fr: Record<keyof Dict, string> = {
   "assignment.activity.noTests": "Aucun run corrigé avec compteurs de tests pour l’instant.",
   "assignment.activity.passed": "réussis",
   "assignment.activity.total": "total",
+
   "status.accepted": "accepté",
   "status.locked": "verrouillé",
   "status.notAccepted": "non accepté",

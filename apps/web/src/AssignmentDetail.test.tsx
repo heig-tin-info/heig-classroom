@@ -336,3 +336,72 @@ describe("AssignmentDetail states", () => {
     expect(screen.getByText("GitHub timed out")).toBeVisible();
   });
 });
+
+/*
+ * Exam configuration (2026-09-18 security audit, item 1). The teacher must be
+ * able to get the `.seb` of an exam, and must never be handed one that does
+ * not exist yet. `sebFileState` decides that; this block checks what the page
+ * actually puts on screen for each of its answers.
+ */
+const EXAM = {
+  workMode: "online_seb" as const,
+  codespaceSyncedAt: at(-2 * DAY),
+  codespaceConfigKey: "a".repeat(64),
+  codespaceSebUrl: "https://code.example.ch/exam/a1.seb",
+};
+
+const renderExam = (assignment: Record<string, unknown> = {}) =>
+  renderDetail({
+    [`GET ${ASSIGNMENT}/detail`]: ok(makeAssignmentDetail({ ...EXAM, ...assignment }, students)),
+  });
+
+describe("AssignmentDetail exam configuration", () => {
+  it("offers the .seb as a download, over https and never as sebs://", async () => {
+    renderExam();
+    const link = await screen.findByRole("link", { name: /download \.seb/i });
+    expect(link).toHaveAttribute("href", "https://code.example.ch/exam/a1.seb");
+    // `download` is what makes the browser save the file instead of
+    // navigating to it — the whole point of not using the student's link.
+    expect(link).toHaveAttribute("download");
+  });
+
+  it("shows the Config Key and copies it on demand", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderExam();
+    expect(await screen.findByText("a".repeat(64))).toBeVisible();
+    await userEvent.click(screen.getByRole("button", { name: "Copy" }));
+    expect(writeText).toHaveBeenCalledWith("a".repeat(64));
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeVisible();
+  });
+
+  it("says the key is not known yet instead of showing an empty box", async () => {
+    renderExam({ codespaceConfigKey: null });
+    expect(await screen.findByRole("link", { name: /download \.seb/i })).toBeVisible();
+    expect(screen.getByText(/known after the next successful sync/i)).toBeVisible();
+  });
+
+  it("refuses to offer a file the portal has never received", async () => {
+    renderExam({ codespaceSyncedAt: null });
+    expect(
+      await screen.findByText(/synchronise this assignment with the portal/i),
+    ).toBeVisible();
+    expect(screen.queryByRole("link", { name: /download \.seb/i })).toBeNull();
+  });
+
+  it("says so when no portal is configured at all", async () => {
+    renderExam({ codespaceSebUrl: null });
+    expect(await screen.findByText(/no workspace portal is configured/i)).toBeVisible();
+    expect(screen.queryByRole("link", { name: /download \.seb/i })).toBeNull();
+  });
+
+  it("does not exist outside exam mode", async () => {
+    renderDetail();
+    await screen.findByRole("table");
+    expect(screen.queryByText("Exam configuration")).toBeNull();
+    expect(screen.queryByRole("link", { name: /download \.seb/i })).toBeNull();
+  });
+});

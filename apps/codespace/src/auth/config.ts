@@ -191,6 +191,35 @@ const EnvSchema = z.object({
     .string()
     .default("")
     .transform((v) => v === "1" || v === "true"),
+  /**
+   * Addresses (or CIDRs) of the front ends allowed to speak for their client,
+   * comma-separated, passed as an array to Fastify's `trustProxy`. This is the
+   * **production** setting, and the only one: Fastify then walks the
+   * `X-Forwarded-For` chain for a hop whose address is in this list and stops
+   * at the first one that is not, so a client forging the header from the
+   * outside gains nothing — its own hop to Caddy is not in the list.
+   *
+   * Behind the Caddy of `deploy/Caddyfile`, which reverse-proxies to
+   * 127.0.0.1:3100 and appends `X-Forwarded-For` by default, the value is
+   * `127.0.0.1`. Empty (no front end), `request.ip` is the socket address, as
+   * it should be.
+   *
+   * Why it is not optional in production: the `exam_session` cookie is bound
+   * to `request.ip` (analyse.md D5, docs/deploy.md § 6). With every request
+   * arriving from 127.0.0.1, that binding compares 127.0.0.1 with 127.0.0.1
+   * for everyone, and a stolen cookie replayed from another workstation is
+   * accepted. `loadConfig` refuses to start rather than run an exam on a check
+   * that cannot fire.
+   */
+  TRUSTED_PROXY_IPS: z
+    .string()
+    .default("")
+    .transform((v) =>
+      v
+        .split(",")
+        .map((h) => h.trim())
+        .filter((h) => h !== ""),
+    ),
 });
 
 export type AppConfig = z.infer<typeof EnvSchema> & {
@@ -223,6 +252,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
     if (data.TRUST_PROXY) {
       throw new Error("Invalid configuration: TRUST_PROXY is a development setting");
+    }
+    // Audit M1 of 2026-09-18, docs/deploy.md § 6. Behind a front end without
+    // this list, `request.ip` is the front end's address for every student and
+    // the address binding of the `exam_session` cookie can never fire. It is
+    // written as a conjunction with the verifier rather than alone because it
+    // is the *exam* that cannot be run without it; `SEB_VERIFIER=simulated` is
+    // already refused above, so in practice the list is required, and that is
+    // the intent: a portal reachable from the outside sits behind Caddy.
+    if (data.TRUSTED_PROXY_IPS.length === 0 && data.SEB_VERIFIER === "real") {
+      throw new Error(
+        "Invalid configuration: TRUSTED_PROXY_IPS is required in production " +
+          "(set it to 127.0.0.1 behind the Caddy of deploy/Caddyfile); without it " +
+          "the exam cookie's address binding is void — see docs/deploy.md § 6",
+      );
     }
     // Invariant 8: the deep guard is in `createSebVerifier`; this one makes
     // startup fail earlier and with a configuration message.

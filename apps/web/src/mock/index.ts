@@ -634,6 +634,13 @@ function assignmentDetail(room: Room, a: Assignment): AssignmentDetailPayload {
       browserExamKeys: a.browserExamKeys,
       codespaceSyncedAt: a.workMode === "free" ? null : iso(-2 * H),
       codespaceSyncError: null,
+      // Exam mode only: the `.seb` the teacher downloads and the Config Key
+      // the portal computed for it. Both null everywhere else, which is what
+      // the assignment page keys the exam-configuration card off.
+      codespaceConfigKey:
+        a.workMode === "online_seb" ? sha() + sha().slice(0, 24) : null,
+      codespaceSebUrl:
+        a.workMode === "online_seb" ? `https://code.example.ch/exam/${a.id}.seb` : null,
     },
     students,
   };
