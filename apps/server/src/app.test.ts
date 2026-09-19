@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { buildApp } from "./app.js";
@@ -82,5 +86,61 @@ describe("config", () => {
   });
   it("WORKER_MODE defaults to all", () => {
     expect(loadConfig({}).WORKER_MODE).toBe("all");
+  });
+});
+
+/*
+ * The SPA served by the monolith (ADR-009). Nothing exercised this before:
+ * STATIC_DIR is empty by default, so the whole branch — @fastify/static and
+ * the not-found handler that falls back to index.html — was skipped in tests
+ * while production always sets it. A deep link 404ing for every student is
+ * exactly the kind of break a @fastify/static major can introduce with the
+ * suite still green.
+ */
+describe("app (serving the built SPA)", () => {
+  let dir: string;
+  let app: Awaited<ReturnType<typeof buildApp>>;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), "hgc-static-"));
+    await writeFile(join(dir, "index.html"), "<!doctype html><title>SPA</title>");
+    await writeFile(join(dir, "app.js"), "export const x = 1;\n");
+    app = await buildApp({
+      config: loadConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgres://nobody:nope@127.0.0.1:59999/absent",
+        STATIC_DIR: dir,
+      }),
+    });
+  });
+  afterAll(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it("serves a built asset from the static root", async () => {
+    const res = await app.inject({ method: "GET", url: "/app.js" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("export const x = 1;");
+  });
+
+  it("falls back to index.html on a deep link, so a reload keeps the page", async () => {
+    const res = await app.inject({ method: "GET", url: "/classrooms/c1/assignments/a2" });
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toContain("<title>SPA</title>");
+  });
+
+  it("leaves the API surfaces their JSON 404", async () => {
+    for (const url of ["/app/api/nope", "/api/nope", "/webhooks/nope"]) {
+      const res = await app.inject({ method: "GET", url });
+      expect(res.statusCode).toBe(404);
+      expect(res.json()).toEqual({ error: "not_found" });
+    }
+  });
+
+  it("does not hand the SPA to a non-GET request", async () => {
+    const res = await app.inject({ method: "POST", url: "/whatever" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "not_found" });
   });
 });
