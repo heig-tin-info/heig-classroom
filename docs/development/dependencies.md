@@ -68,6 +68,31 @@ curl -sSL https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz \
   | openssl dgst -sha512 -binary | openssl base64 -A
 ```
 
+## How Dependabot is set up here
+
+`.github/dependabot.yml` exists to keep the number of pull requests that need
+the repair above as low as possible.
+
+For npm, `open-pull-requests-limit: 0` switches **version** updates off. That
+looks backwards in a file whose purpose is to configure updates, but adding an
+npm entry at all is what would have enabled them, and a weekly batch of version
+bumps is a weekly batch of broken lockfiles to repair by hand. Security pull
+requests are explicitly not subject to that limit, so they keep arriving — and
+they are the ones worth the trouble. A group then collapses them into a single
+pull request rather than one per package: the three that piled up here needed
+exactly the same repair, and it is now done once.
+
+The group carries `applies-to: security-updates`, which is easy to miss and
+silently fatal: a group without it defaults to version updates, so it would
+have grouped nothing at all.
+
+GitHub Actions and the Docker base image are configured the other way round,
+with version updates on, because neither touches the pnpm lockfile and their
+pull requests merge as they arrive. Majors of the `node` base image are ignored
+on purpose — moving production to a new Node major is a decision taken with
+`engines` and the CI matrix, not one to discover in a dependency pull request.
+`ignore` only ever applies to version updates, so that costs nothing in safety.
+
 ## Before merging a server dependency
 
 A green suite does not, by itself, clear a bump of something that serves

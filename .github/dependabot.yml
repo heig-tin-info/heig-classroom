@@ -1,0 +1,80 @@
+# Dependabot.
+#
+# Until this file existed, the repository had no configuration at all, which
+# means only *security* updates ran (they come from the repository's security
+# settings, not from here) and each one opened its own pull request. Every one
+# of them arrived red, always for the same reason: regenerating the pnpm
+# lockfile drops the `integrity` of the `xlsx` entry, which resolves to the
+# SheetJS CDN rather than the npm registry, and pnpm then refuses to install an
+# unverified tarball. See docs/development/dependencies.md for the cause and the
+# repair.
+#
+# That repair is manual, so the thing worth optimizing is the NUMBER of pull
+# requests that need it, not their existence.
+
+version: 2
+updates:
+  # npm (the whole pnpm workspace from the root: apps/* and packages/*).
+  #
+  # `open-pull-requests-limit: 0` switches VERSION updates off. Adding an entry
+  # here would otherwise have enabled them, which is the opposite of what we
+  # want: a weekly batch of version bumps would mean a weekly batch of broken
+  # lockfiles to repair by hand. Security pull requests are explicitly not
+  # subject to this limit, so they keep coming — and they are the ones we care
+  # about.
+  #
+  # The group then collapses those security updates into ONE pull request
+  # instead of one per package: the three that piled up here (fastify,
+  # @fastify/static, vitest) needed exactly the same lockfile repair, done once.
+  # `applies-to` is required and easy to miss — a group without it defaults to
+  # version updates, so it would have grouped precisely nothing.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 0
+    groups:
+      npm-security:
+        applies-to: security-updates
+        patterns:
+          - "*"
+    # Matches what Dependabot already inferred from the history, so the commit
+    # subjects stay stable instead of depending on what it guesses.
+    commit-message:
+      prefix: build(deps)
+      prefix-development: build(deps-dev)
+
+  # GitHub Actions. Version updates ARE on here: these never touch the pnpm
+  # lockfile, so they merge without the repair above. There is drift to close —
+  # `actions/setup-node` is pinned at v5 in one workflow and v6 in another, and
+  # `pnpm/action-setup@v4` still targets the deprecated Node 20 runtime.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: ci(deps)
+
+  # The production image base (node:22-slim, both stages of the Dockerfile).
+  # Majors are ignored on purpose: moving the runtime to a new Node major is a
+  # decision about what production runs, taken with `engines` in package.json
+  # and the CI matrix, not something to discover in a dependency pull request.
+  # Ignoring them costs nothing in safety — `ignore` applies to version updates,
+  # never to security ones.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      - dependency-name: node
+        update-types:
+          - version-update:semver-major
+    commit-message:
+      prefix: build(deps)
