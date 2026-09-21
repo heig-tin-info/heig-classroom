@@ -11,6 +11,9 @@ import {
   makeDetailRepo,
   makeDetailStudent,
   makeGrade,
+  makeGroup,
+  makeGroupMember,
+  makeGroupsPayload,
 } from "./test/fixtures";
 import { fail, mockFetch, noContent, ok, renderWithProviders } from "./test/render";
 import { isoDateTime } from "./ui";
@@ -403,5 +406,67 @@ describe("AssignmentDetail exam configuration", () => {
     await screen.findByRole("table");
     expect(screen.queryByText("Exam configuration")).toBeNull();
     expect(screen.queryByRole("link", { name: /download \.seb/i })).toBeNull();
+  });
+});
+
+/*
+ * Group assignment (issue #2): the detail page gains one compact card above
+ * the table. It has to say the two figures the teacher needs before pressing
+ * Publish, and lead to the screen where they are fixed.
+ */
+describe("AssignmentDetail groups card", () => {
+  const GROUPS = `${ASSIGNMENT}/groups`;
+  const groupPayload = makeGroupsPayload({
+    groups: [makeGroup({ id: "g-1" }), makeGroup({ id: "g-2", name: "Group 2" })],
+    unassigned: [makeGroupMember({ enrollmentId: "e-9" })],
+  });
+
+  const renderGroupMode = (state: "draft" | "published" = "draft") => {
+    const stub = mockFetch(
+      routes({
+        [`GET ${ASSIGNMENT}/detail`]: ok(
+          makeAssignmentDetail({ state, groupMode: true }, students),
+        ),
+        [`GET ${GROUPS}`]: ok(groupPayload),
+      }),
+    );
+    const navigate = vi.fn();
+    renderWithProviders(
+      <AssignmentDetail classroomId="c1" assignmentId="a1" navigate={navigate} />,
+      { route: "/classrooms/c1/assignments/a1" },
+    );
+    return { ...stub, navigate };
+  };
+
+  it("counts the groups and who is still out of one", async () => {
+    renderGroupMode();
+    expect(await screen.findByText("2 groups · 1 unassigned")).toBeVisible();
+  });
+
+  it("warns while the assignment is a draft, because Publish will refuse", async () => {
+    renderGroupMode();
+    expect(await screen.findByText("1 without a group")).toBeVisible();
+  });
+
+  it("drops the warning once the assignment is live", async () => {
+    renderGroupMode("published");
+    await screen.findByText("2 groups \u00b7 1 unassigned");
+    expect(screen.queryByText("1 without a group")).toBeNull();
+  });
+
+  it("leads to the group-formation screen", async () => {
+    const { navigate } = renderGroupMode();
+    await userEvent.click(await screen.findByRole("button", { name: /Manage groups/ }));
+    expect(navigate).toHaveBeenCalledWith({
+      view: "assignment-groups",
+      classroomId: "c1",
+      assignmentId: "a1",
+    });
+  });
+
+  it("does not exist on an individual assignment", async () => {
+    renderDetail();
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: /Manage groups/ })).toBeNull();
   });
 });
