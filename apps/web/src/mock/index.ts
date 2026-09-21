@@ -1147,9 +1147,14 @@ on("POST", "/app/api/classrooms/:id/assignments/:aid/publish", (m) => {
     const payload = groupsPayload(r, a);
     if (payload.groups.length === 0 || payload.unassigned.length > 0) {
       const left = payload.unassigned;
+      // No group at all with nobody to place (an empty roster) carries no
+      // name: the message is the whole answer, and groups of one would
+      // create nothing, so the dialog only offers the groups screen.
       throw new MockError(
         409,
-        `${left.length} student${left.length === 1 ? " is" : "s are"} not in any group`,
+        left.length
+          ? `${left.length} student${left.length === 1 ? " is" : "s are"} not in any group`
+          : "This assignment has no group yet — form at least one before publishing.",
         {
           error: "unassigned_students",
           students: left.map((s) => ({ enrollmentId: s.enrollmentId, nom: s.nom, prenom: s.prenom })),

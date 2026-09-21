@@ -299,8 +299,13 @@ export function AssignmentForm({
   );
   const groupLocked = existing !== undefined && existing.state !== "draft";
   const maxSizeValue = Number.parseInt(groupMaxSize, 10);
+  // Only what is on screen may block Save. The field lives behind the group
+  // switch and the free work mode; once it is gone, `groupFields()` sends
+  // `groupMaxSize: null` anyway, so a value typed before must not keep the
+  // submit disabled with nothing left to explain why.
+  const maxSizeShown = workMode === "free" && groupMode;
   const maxSizeValid =
-    groupMaxSize.trim() === "" || (maxSizeValue >= 1 && maxSizeValue <= 50);
+    !maxSizeShown || groupMaxSize.trim() === "" || (maxSizeValue >= 1 && maxSizeValue <= 50);
   const [codespaceImage, setCodespaceImage] = useState(existing?.codespaceImage ?? "");
   const [examKeys, setExamKeys] = useState((existing?.browserExamKeys ?? []).join("\n"));
   const onlineMode = workMode !== "free";
@@ -938,7 +943,7 @@ export function AssignmentForm({
               </SettingRow>
             ) : null}
           </div>
-          {workMode === "free" && groupMode ? (
+          {maxSizeShown ? (
             <div className={`${panel} flex flex-wrap items-end gap-x-4 gap-y-2`}>
               <Field
                 label="Max group size"

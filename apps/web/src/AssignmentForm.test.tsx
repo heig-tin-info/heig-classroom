@@ -237,6 +237,20 @@ describe("AssignmentForm group work", () => {
     expect(post?.body).toMatchObject({ workMode: "online", groupMode: false });
   });
 
+  it("stops blocking Save once the size field is off screen", async () => {
+    renderForm();
+    await pickSource();
+    await userEvent.click(screen.getByRole("radio", { name: "Duration" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    await userEvent.type(screen.getByLabelText("Max group size"), "99");
+    expect(submitButton()).toBeDisabled();
+    // Group work off takes the field away: nothing on screen could explain a
+    // disabled Save any more, and the value is not sent either.
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    expect(screen.queryByLabelText("Max group size")).toBeNull();
+    expect(submitButton()).toBeEnabled();
+  });
+
   it("freezes the switch on a published assignment", async () => {
     renderForm({
       existing: makeAssignment({ state: "published", groupMode: true, groupMaxSize: 2 }),

@@ -54,6 +54,11 @@ function StateBadge({ a, now }: { a: Assignment; now: number }) {
  * Publishing a group assignment is refused (409 `unassigned_students`) while
  * a student is left out of every group. The refusal carries the names, so the
  * teacher gets the list and the two ways out rather than a red line.
+ *
+ * With an empty `students` the refusal is about the groups, not the people:
+ * a group assignment with no group at all, or a classroom with no roster.
+ * "Put them in individual groups" would create nothing and hit the same 409
+ * for ever, so the only way out offered there is the groups screen.
  */
 function UnassignedStudentsModal({
   assignmentName,
@@ -71,36 +76,43 @@ function UnassignedStudentsModal({
   onClose: () => void;
 }) {
   const n = error.students.length;
+  const named = n > 0;
   return (
     <Modal
       size="sm"
-      title={`${n} student${n === 1 ? " has" : "s have"} no group`}
+      title={named ? `${n} student${n === 1 ? " has" : "s have"} no group` : "No group yet"}
       subtitle={assignmentName}
       onClose={onClose}
       footer={
         <>
           {onOpenGroups ? (
-            <Button variant="secondary" onClick={onOpenGroups}>
+            <Button variant={named ? "secondary" : "primary"} onClick={onOpenGroups}>
               <Users /> Open groups
             </Button>
           ) : null}
-          <Button loading={fixing} onClick={onFix}>
-            <UserPlus /> Put them in individual groups
-          </Button>
+          {named ? (
+            <Button loading={fixing} onClick={onFix}>
+              <UserPlus /> Put them in individual groups
+            </Button>
+          ) : null}
         </>
       }
     >
       <div className="space-y-3">
         <p className="text-sm text-fg-muted">
-          A group assignment only goes live once every student belongs to a group.
+          {named
+            ? "A group assignment only goes live once every student belongs to a group."
+            : error.message}
         </p>
-        <ul className="max-h-56 space-y-1 overflow-y-auto rounded-field bg-surface-2 px-3 py-2 text-[13px]">
-          {error.students.map((s) => (
-            <li key={s.enrollmentId}>
-              {s.prenom} {s.nom}
-            </li>
-          ))}
-        </ul>
+        {named ? (
+          <ul className="max-h-56 space-y-1 overflow-y-auto rounded-field bg-surface-2 px-3 py-2 text-[13px]">
+            {error.students.map((s) => (
+              <li key={s.enrollmentId}>
+                {s.prenom} {s.nom}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </div>
     </Modal>
   );
@@ -162,6 +174,10 @@ function AssignmentRow({
     },
     onSuccess: () => {
       setBlocked(null);
+      // The refused publish is settled: without this its `isError` outlives
+      // the dialog and leaves a red line under an assignment that just went
+      // live.
+      publish.reset();
       return invalidate();
     },
   });
@@ -326,7 +342,12 @@ function AssignmentRow({
           fixing={singlesThenPublish.isPending}
           onFix={() => singlesThenPublish.mutate()}
           onOpenGroups={onOpenGroups}
-          onClose={() => setBlocked(null)}
+          onClose={() => {
+            setBlocked(null);
+            // Closing the dialog dismisses the refusal it carried: it must
+            // not reappear as a red line the moment the dialog is gone.
+            publish.reset();
+          }}
         />
       ) : null}
     </li>
