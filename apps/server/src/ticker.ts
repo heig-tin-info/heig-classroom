@@ -11,15 +11,54 @@ import { and, eq, inArray, isNotNull, isNull, lte, ne, or, sql } from "drizzle-o
 
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
+import type { Db } from "./db/client.js";
 import { assignmentMilestones, assignments, classrooms, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
 import { publish } from "./events.js";
 import { zurichIso } from "./github/commit.js";
 import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
 import { classroomRecipients, queueEmail } from "./mailer.js";
+import { groupFormationComplete } from "./modules/assignments/groups.js";
 import { TASK_DEFS } from "./tasks.js";
 
 const TICK_MS = 20_000;
+
+/**
+ * Atomic claim of the scheduled drafts whose start date has come: ONE
+ * conditional UPDATE, so two ticker processes never publish the same
+ * assignment twice. A scheduled draft whose deadline already passed stays a
+ * draft.
+ *
+ * `groupFormationComplete()` carries the publish guard of issue #2 into the
+ * claim: auto-publishing a group assignment with a student in no group (or
+ * with no group at all) would hand out repositories nobody belongs to, and
+ * silently — exactly what the manual route refuses with 409
+ * `unassigned_students`. Such an assignment simply stays a draft past its
+ * start date, with no audit entry and no e-mail, until the teacher finishes
+ * the groups; the ticker re-reads the condition every 20 s and publishes it
+ * as soon as it holds (ADR-006: rescheduling and catch-up are free).
+ */
+export async function claimScheduledPublications(db: Db) {
+  return db
+    .update(assignments)
+    .set({ state: "published" })
+    .where(
+      and(
+        eq(assignments.state, "draft"),
+        eq(assignments.publishMode, "scheduled"),
+        isNull(assignments.archivedAt),
+        lte(assignments.startAt, sql`now()`),
+        sql`${assignments.deadlineAt} > now()`,
+        groupFormationComplete(),
+      ),
+    )
+    .returning({
+      id: assignments.id,
+      name: assignments.name,
+      deadlineAt: assignments.deadlineAt,
+      classroomId: assignments.classroomId,
+    });
+}
 
 export function startTicker(app: FastifyInstance, config: AppConfig) {
   let running = false;
@@ -29,26 +68,8 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
     running = true;
     try {
       // 0. Scheduled publications: drafts go live when their start date
-      //    arrives (atomic claim via the conditional UPDATE). A scheduled
-      //    draft whose deadline already passed stays a draft.
-      const wentLive = await app.db
-        .update(assignments)
-        .set({ state: "published" })
-        .where(
-          and(
-            eq(assignments.state, "draft"),
-            eq(assignments.publishMode, "scheduled"),
-            isNull(assignments.archivedAt),
-            lte(assignments.startAt, sql`now()`),
-            sql`${assignments.deadlineAt} > now()`,
-          ),
-        )
-        .returning({
-          id: assignments.id,
-          name: assignments.name,
-          deadlineAt: assignments.deadlineAt,
-          classroomId: assignments.classroomId,
-        });
+      //    arrives (atomic claim, see claimScheduledPublications).
+      const wentLive = await claimScheduledPublications(app.db);
       for (const a of wentLive) {
         await audit(app.db, {
           actorUserId: null,

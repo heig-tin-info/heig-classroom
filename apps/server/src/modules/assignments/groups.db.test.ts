@@ -25,6 +25,7 @@ import {
   users,
 } from "../../db/schema.js";
 import { testDb, type TestDb } from "../../test/db.js";
+import { claimScheduledPublications } from "../../ticker.js";
 import { assignmentGroupRoutes } from "./groups.js";
 import { assignmentLifecycleRoutes } from "./lifecycle.js";
 
@@ -511,6 +512,44 @@ describe("group assignment lifecycle (issue #2, lot 1)", () => {
     expect(after).toHaveLength(2);
     await groups.close();
     await lifecycle.close();
+  });
+
+  it("the scheduled auto-publication applies the very same guard", async () => {
+    const s = await seed(db, { names: ["Ammann", "Bovet"] });
+    const app = await serve(db, s.teacherId);
+    // Due to go live: scheduled, start date passed, deadline far ahead.
+    await db
+      .update(assignments)
+      .set({ publishMode: "scheduled" })
+      .where(eq(assignments.id, s.assignmentId));
+
+    // No group at all, then one student still outside: the claim skips it,
+    // so the ticker writes no audit entry and sends no e-mail either.
+    expect(await claimScheduledPublications(db)).toEqual([]);
+    const g1 = await addGroup(app, s);
+    await addMember(app, s, g1.id, s.students.Ammann!);
+    expect(await claimScheduledPublications(db)).toEqual([]);
+    const [stillDraft] = await db
+      .select()
+      .from(assignments)
+      .where(eq(assignments.id, s.assignmentId));
+    expect(stillDraft!.state).toBe("draft");
+
+    // Everyone grouped: the same claim publishes it on the next tick.
+    await addMember(app, s, g1.id, s.students.Bovet!);
+    const live = await claimScheduledPublications(db);
+    expect(live.map((a) => a.id)).toEqual([s.assignmentId]);
+    await app.close();
+  });
+
+  it("an individual assignment is still auto-published, guard or no guard", async () => {
+    const s = await seed(db, { groupMode: false });
+    await db
+      .update(assignments)
+      .set({ publishMode: "scheduled" })
+      .where(eq(assignments.id, s.assignmentId));
+    const live = await claimScheduledPublications(db);
+    expect(live.map((a) => a.id)).toEqual([s.assignmentId]);
   });
 
   it("group mode needs the free work mode and only moves while the assignment is a draft", async () => {

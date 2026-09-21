@@ -13,7 +13,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
 
 import type { AssignmentGroup, AssignmentGroupsPayload, GroupMember } from "@hgc/contracts";
@@ -104,6 +104,35 @@ export async function unassignedStudents(
   return roster
     .filter((m) => !taken.has(m.enrollmentId))
     .map((m) => ({ enrollmentId: m.enrollmentId, nom: m.nom, prenom: m.prenom }));
+}
+
+/**
+ * The publish guard as ONE SQL predicate on `assignments`, for the callers
+ * that cannot read then write: the ticker claims its scheduled publications
+ * with a conditional UPDATE (ADR-006), so the rule has to travel inside that
+ * claim. Reads: not a group assignment, or it has at least one group and no
+ * non-staff student of its classroom is left outside them.
+ */
+export function groupFormationComplete(): SQL {
+  return sql`(
+    ${assignments.groupMode} = false
+    OR (
+      EXISTS (
+        SELECT 1 FROM ${assignmentGroups}
+        WHERE ${assignmentGroups.assignmentId} = ${assignments.id}
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${enrollments}
+        WHERE ${enrollments.classroomId} = ${assignments.classroomId}
+          AND ${enrollments.staff} = false
+          AND NOT EXISTS (
+            SELECT 1 FROM ${assignmentGroupMembers}
+            WHERE ${assignmentGroupMembers.assignmentId} = ${assignments.id}
+              AND ${assignmentGroupMembers.enrollmentId} = ${enrollments.id}
+          )
+      )
+    )
+  )`;
 }
 
 /** Number of groups of an assignment (publish guard: zero group blocks too). */

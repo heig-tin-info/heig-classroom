@@ -50,13 +50,17 @@ construction, so shared work has no meaning there.
 7. **Publishing refuses to leave anyone out**: a group-mode assignment with a student in no
    group — or with no group at all — answers `409 unassigned_students` with the names, before
    any state change and before any e-mail. The screen offers "put them in individual groups"
-   and retries.
+   and retries. The scheduled auto-publication applies the same rule inside its atomic claim
+   (`ticker.ts`), so a group draft with someone left out stays a draft past its start date
+   instead of publishing silently — and goes live on the tick that follows the fix.
 8. **Three lots**, each shippable on its own:
    - **Lot 1 (this one)**: schema, API, group-formation screen, publish guard. No GitHub call,
      acceptance untouched.
    - **Lot 2**: one repository per group at the first acceptance, every member a collaborator;
      deadline, freeze and review per repository. Removing a member becomes possible again
-     (revoking the collaborator).
+     (revoking the collaborator). GitHub teams are *not* used: students are outside
+     collaborators, not members of the organization, and a team only grants access to its
+     members — so each member is invited individually on the group repository.
    - **Lot 3**: per-member GitHub invitation follow-up, and the teacher's per-member
      adjustment of the group grade.
 
