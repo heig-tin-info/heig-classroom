@@ -591,3 +591,4 @@ conséquences, alternatives rejetées), versionnée dans `docs/adr/`.
 | ADR-011 | Réconciliation réutilisant les gestionnaires de webhooks idempotents | `ADR-011-reconciliation-handlers.md` |
 | ADR-012 | Gel de la note : heure de réception synchrone, gel en deux temps | `ADR-012-gel-note-deux-temps.md` |
 | ADR-013 | Espace de travail en ligne : aucun identifiant étudiant, donc aucun accès en écriture | `ADR-013-environnement-en-ligne.md` |
+| ADR-014 | Devoirs en groupe : groupes par devoir, formés par l'équipe enseignante, trois lots | `ADR-014-group-assignments.md` |
