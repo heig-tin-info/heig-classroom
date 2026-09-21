@@ -752,6 +752,9 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
             onOpenAssignment={(aid) =>
               navigate({ view: "assignment", classroomId: room.id, assignmentId: aid })
             }
+            onOpenGroups={(aid) =>
+              navigate({ view: "assignment-groups", classroomId: room.id, assignmentId: aid })
+            }
           />
         )}
       </div>

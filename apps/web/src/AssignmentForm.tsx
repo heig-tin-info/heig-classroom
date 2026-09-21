@@ -38,6 +38,7 @@ import {
   Select,
   SettingRow,
   Sheet,
+  Switch,
   Textarea,
   Tip,
   Z,
@@ -288,6 +289,23 @@ export function AssignmentForm({
   // feature; the server refuses a non-free mode either way (403).
   const canOnline = me.data?.codespace?.enabled === true;
   const [workMode, setWorkMode] = useState<WorkMode>(existing?.workMode ?? "free");
+  // --- Group work (issue #2) ---
+  // Only with `workMode: "free"` (the online and SEB sessions are per student)
+  // and only while the assignment is a draft: once published, the repositories
+  // are already one per student or one per group.
+  const [groupMode, setGroupMode] = useState(existing?.groupMode ?? false);
+  const [groupMaxSize, setGroupMaxSize] = useState(
+    existing?.groupMaxSize != null ? String(existing.groupMaxSize) : "",
+  );
+  const groupLocked = existing !== undefined && existing.state !== "draft";
+  const maxSizeValue = Number.parseInt(groupMaxSize, 10);
+  // Only what is on screen may block Save. The field lives behind the group
+  // switch and the free work mode; once it is gone, `groupFields()` sends
+  // `groupMaxSize: null` anyway, so a value typed before must not keep the
+  // submit disabled with nothing left to explain why.
+  const maxSizeShown = workMode === "free" && groupMode;
+  const maxSizeValid =
+    !maxSizeShown || groupMaxSize.trim() === "" || (maxSizeValue >= 1 && maxSizeValue <= 50);
   const [codespaceImage, setCodespaceImage] = useState(existing?.codespaceImage ?? "");
   const [examKeys, setExamKeys] = useState((existing?.browserExamKeys ?? []).join("\n"));
   const onlineMode = workMode !== "free";
@@ -368,6 +386,18 @@ export function AssignmentForm({
         }
       : {};
 
+  /**
+   * Group fields. `groupMode` is never true outside the free work mode (the
+   * server answers 400 `group_mode_requires_free`), and the switch is disabled
+   * on a published assignment, so a PATCH always resends what is already
+   * stored there rather than trying to change it (409 `not_draft`).
+   */
+  const groupFields = () => ({
+    groupMode: workMode === "free" ? groupMode : false,
+    groupMaxSize:
+      groupMode && groupMaxSize.trim() !== "" ? Number.parseInt(groupMaxSize, 10) : null,
+  });
+
   const save = useMutation({
     mutationFn: async () => {
       if (existing) {
@@ -380,6 +410,7 @@ export function AssignmentForm({
             gradingMode,
             protectedFiles: [...protectedFiles],
             ...workModeFields(),
+            ...groupFields(),
           }),
         });
       }
@@ -395,6 +426,7 @@ export function AssignmentForm({
           branches: branch ? [branch] : undefined,
           protectedFiles: [...protectedFiles],
           ...workModeFields(),
+          ...groupFields(),
         }),
       });
       // Milestones need the assignment id: created right after, best-effort —
@@ -443,6 +475,7 @@ export function AssignmentForm({
     missingWhen ||
     rangeInvalid ||
     !milestonesValid ||
+    !maxSizeValid ||
     (workMode === "online_seb" && !keysValid);
 
   return (
@@ -851,27 +884,90 @@ export function AssignmentForm({
           </div>
         </div>
 
-        {/* --- Online workspace (ADR-013), granted teachers only --- */}
-        {canOnline ? (
-          <div className={section}>
-            <Eyebrow>Work mode</Eyebrow>
-            <SettingRow title="Students work" desc={WORK_MODE_DESC[workMode]} className="py-0">
-              <Tip
-                label={
-                  onlineLocked
-                    ? "A published online assignment cannot go back to Free: its repositories were provisioned without write access"
-                    : null
+        {/* --- Work mode: online workspace (ADR-013, granted teachers only)
+                and group work (issue #2, every teacher) --- */}
+        <div className={section}>
+          <Eyebrow>Work mode</Eyebrow>
+          <div className="divide-y divide-line">
+            {canOnline ? (
+              <SettingRow title="Students work" desc={WORK_MODE_DESC[workMode]} className="pt-0">
+                <Tip
+                  label={
+                    onlineLocked
+                      ? "A published online assignment cannot go back to Free: its repositories were provisioned without write access"
+                      : null
+                  }
+                >
+                  <Segmented
+                    name="work-mode"
+                    value={workMode}
+                    onChange={(m) => {
+                      setWorkMode(m);
+                      // Online and SEB sessions are per student: group work
+                      // cannot survive the switch, so it goes off with it.
+                      if (m !== "free") setGroupMode(false);
+                    }}
+                    options={workModeOptions}
+                  />
+                </Tip>
+              </SettingRow>
+            ) : null}
+            {/* Group work belongs to the free mode only; in an online or SEB
+                assignment the row would offer something the server refuses. */}
+            {workMode === "free" ? (
+              <SettingRow
+                title="Group work"
+                desc={
+                  groupLocked
+                    ? "Fixed at publication — the repositories already exist"
+                    : groupMode
+                      ? "One repository per group; you form the groups on their own screen"
+                      : "One repository per student"
                 }
+                className={canOnline ? "" : "pt-0"}
               >
-                <Segmented
-                  name="work-mode"
-                  value={workMode}
-                  onChange={setWorkMode}
-                  options={workModeOptions}
-                />
-              </Tip>
-            </SettingRow>
-            {onlineMode ? (
+                <Tip
+                  label={
+                    groupLocked
+                      ? "Group work can only be turned on or off while the assignment is a draft"
+                      : null
+                  }
+                >
+                  <Switch
+                    label="Group work"
+                    checked={groupMode}
+                    disabled={groupLocked}
+                    onChange={setGroupMode}
+                  />
+                </Tip>
+              </SettingRow>
+            ) : null}
+          </div>
+          {maxSizeShown ? (
+            <div className={`${panel} flex flex-wrap items-end gap-x-4 gap-y-2`}>
+              <Field
+                label="Max group size"
+                type="number"
+                min={1}
+                max={50}
+                width="w-36"
+                placeholder="no limit"
+                value={groupMaxSize}
+                onChange={(e) => setGroupMaxSize(e.target.value)}
+              />
+              <p
+                className={cx(
+                  "min-w-0 flex-1 pb-2 text-[13px]",
+                  maxSizeValid ? "text-fg-muted" : "text-warning",
+                )}
+              >
+                {maxSizeValid
+                  ? "A hint, not a rule: a larger group only shows a warning on the groups screen."
+                  : "Between 1 and 50, or leave it empty."}
+              </p>
+            </div>
+          ) : null}
+          {canOnline && onlineMode ? (
               <div className={`${panel} space-y-3`}>
                 <Field
                   label="Container image"
@@ -904,9 +1000,8 @@ export function AssignmentForm({
                   </div>
                 ) : null}
               </div>
-            ) : null}
-          </div>
-        ) : null}
+          ) : null}
+        </div>
 
         {/* --- Milestones (creation only, graded assignments) --- */}
         {!existing && gradingMode === "auto" ? (

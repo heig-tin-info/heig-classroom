@@ -633,6 +633,14 @@ export async function classroomsPlugin(
     async (req, reply) => {
       const entry = await accessibleEnrollment(app, req, reply);
       if (!entry) return reply;
+      // TODO(lot 2, issue #2): removing a student from the roster cascades
+      // their `assignment_group_members` rows away (ON DELETE CASCADE), and
+      // that silently takes them out of groups the group screen refuses to
+      // touch — the ones whose repository already exists, where a removal
+      // owes GitHub a revocation (409 `has_repo` on the group routes). Once
+      // lot 2 can revoke a collaborator, this route must do the same: either
+      // refuse while the enrollment belongs to a group that has a repository,
+      // or revoke their access before deleting the roster entry.
       await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
       await audit(app.db, {
         actorUserId: req.user!.id,

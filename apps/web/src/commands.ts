@@ -185,7 +185,7 @@ export function buildCommands(ctx: CommandContext): Command[] {
   const roomId =
     ctx.route.view === "classroom"
       ? ctx.route.id
-      : ctx.route.view === "assignment"
+      : ctx.route.view === "assignment" || ctx.route.view === "assignment-groups"
         ? ctx.route.classroomId
         : null;
   // Gated on the teacher UI as well as on the route: a student following a

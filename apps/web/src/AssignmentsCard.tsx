@@ -12,12 +12,14 @@ import {
   Plus,
   Send,
   Trash2,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import { useState } from "react";
 
-import type { Assignment } from "@hgc/contracts";
+import type { Assignment, UnassignedStudentsError } from "@hgc/contracts";
 
-import { api, apiErrorMessage } from "./api";
+import { api, ApiError, apiErrorMessage } from "./api";
 import { AssignmentForm, compactDuration } from "./AssignmentForm";
 import { useConfirm } from "./confirm";
 import {
@@ -30,6 +32,7 @@ import {
   IconButton,
   isoDateTime,
   Menu,
+  Modal,
   QueryError,
   SectionHeading,
   Skeleton,
@@ -47,12 +50,88 @@ function StateBadge({ a, now }: { a: Assignment; now: number }) {
   return <Badge tone="amber">draft</Badge>;
 }
 
+/**
+ * Publishing a group assignment is refused (409 `unassigned_students`) while
+ * a student is left out of every group. The refusal carries the names, so the
+ * teacher gets the list and the two ways out rather than a red line.
+ *
+ * With an empty `students` the refusal is about the groups, not the people:
+ * a group assignment with no group at all, or a classroom with no roster.
+ * "Put them in individual groups" would create nothing and hit the same 409
+ * for ever, so the only way out offered there is the groups screen.
+ */
+function UnassignedStudentsModal({
+  assignmentName,
+  error,
+  fixing,
+  onFix,
+  onOpenGroups,
+  onClose,
+}: {
+  assignmentName: string;
+  error: UnassignedStudentsError;
+  fixing: boolean;
+  onFix: () => void;
+  onOpenGroups?: () => void;
+  onClose: () => void;
+}) {
+  const n = error.students.length;
+  const named = n > 0;
+  return (
+    <Modal
+      size="sm"
+      title={named ? `${n} student${n === 1 ? " has" : "s have"} no group` : "No group yet"}
+      subtitle={assignmentName}
+      onClose={onClose}
+      footer={
+        <>
+          {onOpenGroups ? (
+            <Button variant={named ? "secondary" : "primary"} onClick={onOpenGroups}>
+              <Users /> Open groups
+            </Button>
+          ) : null}
+          {named ? (
+            <Button loading={fixing} onClick={onFix}>
+              <UserPlus /> Put them in individual groups
+            </Button>
+          ) : null}
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-fg-muted">
+          {named
+            ? "A group assignment only goes live once every student belongs to a group."
+            : error.message}
+        </p>
+        {named ? (
+          <ul className="max-h-56 space-y-1 overflow-y-auto rounded-field bg-surface-2 px-3 py-2 text-[13px]">
+            {error.students.map((s) => (
+              <li key={s.enrollmentId}>
+                {s.prenom} {s.nom}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
+    </Modal>
+  );
+}
+
+/** The 409 body of a publish refused for lack of groups, or null. */
+function unassignedStudents(err: unknown): UnassignedStudentsError | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body as UnassignedStudentsError | null;
+  return body?.error === "unassigned_students" && Array.isArray(body.students) ? body : null;
+}
+
 function AssignmentRow({
   classroomId,
   assignment: a,
   now,
   onEdit,
   onOpen,
+  onOpenGroups,
   archived = false,
 }: {
   classroomId: string;
@@ -61,12 +140,15 @@ function AssignmentRow({
   now: number;
   onEdit: () => void;
   onOpen: () => void;
+  /** Group assignments only: the way to the group-formation screen. */
+  onOpenGroups?: () => void;
   archived?: boolean;
 }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
   const invalidate = () => qc.invalidateQueries({ queryKey: ["assignments", classroomId] });
   const base = `/app/api/classrooms/${classroomId}/assignments/${a.id}`;
+  const [blocked, setBlocked] = useState<UnassignedStudentsError | null>(null);
   const archive = useMutation({
     mutationFn: () => api(`${base}/archive`, { method: "POST" }),
     onSuccess: invalidate,
@@ -77,7 +159,27 @@ function AssignmentRow({
   });
   const publish = useMutation({
     mutationFn: () => api(`${base}/publish`, { method: "POST" }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      setBlocked(null);
+      return invalidate();
+    },
+    onError: (err) => setBlocked(unassignedStudents(err)),
+  });
+  // "Put them in individual groups", then publish again: the two calls the
+  // refusal asks for, in the order it asks for them.
+  const singlesThenPublish = useMutation({
+    mutationFn: async () => {
+      await api(`${base}/groups/singles`, { method: "POST" });
+      await api(`${base}/publish`, { method: "POST" });
+    },
+    onSuccess: () => {
+      setBlocked(null);
+      // The refused publish is settled: without this its `isError` outlives
+      // the dialog and leaves a red line under an assignment that just went
+      // live.
+      publish.reset();
+      return invalidate();
+    },
   });
   const remove = useMutation({
     mutationFn: () => api(base, { method: "DELETE" }),
@@ -154,15 +256,17 @@ function AssignmentRow({
     );
 
   // Whichever action just failed: one line under the row rather than silence.
-  const failure = publish.isError
-    ? apiErrorMessage(publish.error, "Could not publish this assignment.")
-    : archive.isError
-      ? apiErrorMessage(archive.error, "Could not archive this assignment.")
-      : unarchive.isError
-        ? apiErrorMessage(unarchive.error, "Could not restore this assignment.")
-        : remove.isError
-          ? apiErrorMessage(remove.error, "Could not delete this assignment.")
-          : null;
+  // A publish refused for lack of groups is the exception — it gets the dialog
+  // below, which carries the names and the two ways out.
+  const failures: [boolean, unknown, string][] = [
+    [singlesThenPublish.isError, singlesThenPublish.error, "Could not publish this assignment."],
+    [publish.isError && !blocked, publish.error, "Could not publish this assignment."],
+    [archive.isError, archive.error, "Could not archive this assignment."],
+    [unarchive.isError, unarchive.error, "Could not restore this assignment."],
+    [remove.isError, remove.error, "Could not delete this assignment."],
+  ];
+  const hit = failures.find(([failed]) => failed);
+  const failure = hit ? apiErrorMessage(hit[1], hit[2]) : null;
 
   return (
     // Title and state on the first line, the schedule on the second; the
@@ -184,6 +288,11 @@ function AssignmentRow({
           {a.workMode !== "free" ? (
             <Badge tone="zinc" icon={MonitorPlay}>
               {a.workMode === "online_seb" ? "exam" : "online"}
+            </Badge>
+          ) : null}
+          {a.groupMode ? (
+            <Badge tone="zinc" icon={Users}>
+              groups
             </Badge>
           ) : null}
           {archived ? (
@@ -226,6 +335,21 @@ function AssignmentRow({
         <Menu items={menu} label={`Actions for ${a.name}`} />
       </div>
       {failure ? <p className="w-full text-[13px] text-danger">{failure}</p> : null}
+      {blocked ? (
+        <UnassignedStudentsModal
+          assignmentName={a.name}
+          error={blocked}
+          fixing={singlesThenPublish.isPending}
+          onFix={() => singlesThenPublish.mutate()}
+          onOpenGroups={onOpenGroups}
+          onClose={() => {
+            setBlocked(null);
+            // Closing the dialog dismisses the refusal it carried: it must
+            // not reappear as a red line the moment the dialog is gone.
+            publish.reset();
+          }}
+        />
+      ) : null}
     </li>
   );
 }
@@ -235,6 +359,7 @@ export function AssignmentsSection({
   appInstalled,
   blockedElsewhere = false,
   onOpenAssignment,
+  onOpenGroups,
 }: {
   classroomId: string;
   appInstalled: boolean;
@@ -242,6 +367,8 @@ export function AssignmentsSection({
       missing): skip the App notice, one banner on a bad screen is enough. */
   blockedElsewhere?: boolean;
   onOpenAssignment: (assignmentId: string) => void;
+  /** Group-formation screen of one assignment (publish refusal dialog). */
+  onOpenGroups?: (assignmentId: string) => void;
 }) {
   const [sheet, setSheet] = useState<"create" | Assignment | null>(null);
   const [showArchived, setShowArchived] = useState(false);
@@ -316,6 +443,7 @@ export function AssignmentsSection({
                 archived={showArchived}
                 onEdit={() => setSheet(a)}
                 onOpen={() => onOpenAssignment(a.id)}
+                onOpenGroups={onOpenGroups ? () => onOpenGroups(a.id) : undefined}
               />
             ))}
           </ul>

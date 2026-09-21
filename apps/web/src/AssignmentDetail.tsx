@@ -28,6 +28,7 @@ import {
   Trash2,
   UserCheck,
   Users,
+  UsersRound,
   XCircle,
 } from "lucide-react";
 import { useState } from "react";
@@ -35,6 +36,7 @@ import { useState } from "react";
 import type {
   AssignmentDetailPayload,
   AssignmentDetailStudent,
+  AssignmentGroupsPayload,
   AssignmentMilestone,
   ClassroomDetail,
   GradeView,
@@ -1019,6 +1021,70 @@ function MilestonesSection({
 }
 
 /**
+ * Group assignment (issue #2): one compact line above the students table —
+ * how many groups, how many students still out of one, and the way to the
+ * formation screen. The table itself stays per student in lot 1.
+ *
+ * It goes amber while the assignment is a draft and someone is left out,
+ * because that is exactly what Publish will refuse.
+ */
+function GroupsCard({
+  classroomId,
+  assignmentId,
+  state,
+  onManage,
+}: {
+  classroomId: string;
+  assignmentId: string;
+  state: AssignmentDetailPayload["assignment"]["state"];
+  onManage: () => void;
+}) {
+  const groups = useQuery<AssignmentGroupsPayload>({
+    queryKey: ["assignment-groups", assignmentId],
+    queryFn: () => api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/groups`),
+  });
+  const left = groups.data?.unassigned.length ?? 0;
+  const warn = state === "draft" && left > 0;
+  const manage = (
+    <Button variant="secondary" size="sm" onClick={onManage}>
+      <UsersRound /> Manage groups
+    </Button>
+  );
+  if (groups.isError) {
+    return (
+      <QueryError
+        title="Could not load the groups"
+        error={groups.error}
+        onRetry={() => void groups.refetch()}
+        retrying={groups.isFetching}
+      />
+    );
+  }
+  return (
+    <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+      <SectionHeading
+        icon={UsersRound}
+        title="Groups"
+        description={
+          groups.isLoading ? (
+            // A span, not the Skeleton div: this slot renders inside a <p>.
+            <span className="inline-block h-3.5 w-40 animate-pulse rounded-full bg-surface-3 align-middle" />
+          ) : (
+            <span className="tabular-nums">
+              {groups.data!.groups.length} group{groups.data!.groups.length === 1 ? "" : "s"} ·{" "}
+              {left} unassigned
+            </span>
+          )
+        }
+      />
+      <span className="flex-1" />
+      {warn ? <Badge tone="amber" icon={AlertTriangle}>{left} without a group</Badge> : null}
+      {manage}
+    </Card>
+  );
+}
+
+/**
  * Where the authoritative LLM review stands: counting down to deadline +
  * grace, then "running" until every provisioned repo carries its llm grade,
  * then "reviewed". Nothing before the deadline is enforced.
@@ -1380,6 +1446,15 @@ export function AssignmentDetail({
       <SyncBanner classroomId={classroomId} a={a} />
       <CodespaceBanner classroomId={classroomId} a={a} />
       <SebFileSection state={sebFileState(a)} />
+
+      {a.groupMode ? (
+        <GroupsCard
+          classroomId={classroomId}
+          assignmentId={assignmentId}
+          state={a.state}
+          onManage={() => navigate({ view: "assignment-groups", classroomId, assignmentId })}
+        />
+      ) : null}
 
       {showGrades ? (
         <MilestonesSection

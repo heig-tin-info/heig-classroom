@@ -2,7 +2,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import type { OrgRepo, RepoTree } from "@hgc/contracts";
+import type { Assignment, Me, OrgRepo, RepoTree } from "@hgc/contracts";
 
 import { AssignmentForm } from "./AssignmentForm";
 import { DAY, at, makeAssignment, makeMe } from "./test/fixtures";
@@ -35,16 +35,28 @@ const tree: RepoTree = {
   suggestedProtected: ["criteria.yml"],
 };
 
-const renderForm = (onDone = vi.fn()) => {
+const renderForm = ({
+  onDone = vi.fn(),
+  me = makeMe(),
+  existing,
+}: {
+  onDone?: ReturnType<typeof vi.fn>;
+  /** Session: the online work modes only show up with the grant. */
+  me?: Me;
+  /** Edit instead of create. */
+  existing?: Assignment;
+} = {}) => {
   const stub = mockFetch({
-    "GET /app/api/me": ok(makeMe()),
+    "GET /app/api/me": ok(me),
     [`GET ${BASE}/org-repos`]: ok(repos),
     [`GET ${BASE}/org-repos/${REPO}/tree`]: ok(tree),
     [`POST ${BASE}/assignments`]: ok(makeAssignment()),
+    [`PATCH ${BASE}/assignments/a1`]: ok(makeAssignment()),
   });
-  renderWithProviders(<AssignmentForm classroomId="c1" onDone={onDone} />, {
-    route: "/classrooms/c1",
-  });
+  renderWithProviders(
+    <AssignmentForm classroomId="c1" existing={existing} onDone={onDone} />,
+    { route: "/classrooms/c1" },
+  );
   return { ...stub, onDone };
 };
 
@@ -153,6 +165,8 @@ describe("AssignmentForm submission", () => {
       gradingMode: "auto",
       branches: ["main"],
       protectedFiles: ["criteria.yml"],
+      groupMode: false,
+      groupMaxSize: null,
     });
   });
 
@@ -183,7 +197,68 @@ describe("AssignmentForm submission", () => {
     await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
     const post = calls.find((c) => c.method === "POST" && c.url === `${BASE}/assignments`);
     expect(post?.body).not.toHaveProperty("workMode");
-    // The section itself is not even offered.
-    expect(screen.queryByText("Work mode")).toBeNull();
+    // The choice itself is not even offered: the Work mode section is still
+    // there, because group work lives in it and every teacher has that one.
+    expect(screen.queryByText("Students work")).toBeNull();
+    expect(screen.getByRole("switch", { name: "Group work" })).toBeVisible();
+  });
+});
+
+/*
+ * Group work (issue #2). The two rules the form has to keep: it belongs to
+ * the free work mode only, and it is frozen once the assignment is live.
+ */
+describe("AssignmentForm group work", () => {
+  it("sends the switch and the size hint", async () => {
+    const { calls, onDone } = renderForm();
+    await pickSource();
+    await userEvent.click(screen.getByRole("radio", { name: "Duration" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    await userEvent.type(screen.getByLabelText("Max group size"), "3");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    const post = calls.find((c) => c.method === "POST" && c.url === `${BASE}/assignments`);
+    expect(post?.body).toMatchObject({ groupMode: true, groupMaxSize: 3 });
+  });
+
+  it("hides the switch in the online work mode and sends it off", async () => {
+    const { calls, onDone } = renderForm({
+      me: makeMe({ codespace: { enabled: true, maxActiveSessions: 20 } }),
+    });
+    await pickSource();
+    await userEvent.click(screen.getByRole("radio", { name: "Duration" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    // Going online takes the whole row away — and the flag with it.
+    await userEvent.click(screen.getByRole("radio", { name: "Online" }));
+    expect(screen.queryByRole("switch", { name: "Group work" })).toBeNull();
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(onDone).toHaveBeenCalledTimes(1));
+    const post = calls.find((c) => c.method === "POST" && c.url === `${BASE}/assignments`);
+    expect(post?.body).toMatchObject({ workMode: "online", groupMode: false });
+  });
+
+  it("stops blocking Save once the size field is off screen", async () => {
+    renderForm();
+    await pickSource();
+    await userEvent.click(screen.getByRole("radio", { name: "Duration" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    await userEvent.type(screen.getByLabelText("Max group size"), "99");
+    expect(submitButton()).toBeDisabled();
+    // Group work off takes the field away: nothing on screen could explain a
+    // disabled Save any more, and the value is not sent either.
+    await userEvent.click(screen.getByRole("switch", { name: "Group work" }));
+    expect(screen.queryByLabelText("Max group size")).toBeNull();
+    expect(submitButton()).toBeEnabled();
+  });
+
+  it("freezes the switch on a published assignment", async () => {
+    renderForm({
+      existing: makeAssignment({ state: "published", groupMode: true, groupMaxSize: 2 }),
+    });
+    const toggle = await screen.findByRole("switch", { name: "Group work" });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText("Fixed at publication — the repositories already exist")).toBeVisible();
+    // The advisory size stays editable: it blocks nothing on the server.
+    expect(screen.getByLabelText("Max group size")).toBeEnabled();
   });
 });

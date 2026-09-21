@@ -10,7 +10,8 @@ export type Route =
   | { view: "settings" }
   | { view: "admin" }
   | { view: "classroom"; id: string }
-  | { view: "assignment"; classroomId: string; assignmentId: string };
+  | { view: "assignment"; classroomId: string; assignmentId: string }
+  | { view: "assignment-groups"; classroomId: string; assignmentId: string };
 
 export function routeToPath(r: Route): string {
   switch (r.view) {
@@ -24,6 +25,8 @@ export function routeToPath(r: Route): string {
       return `/classrooms/${r.id}`;
     case "assignment":
       return `/classrooms/${r.classroomId}/assignments/${r.assignmentId}`;
+    case "assignment-groups":
+      return `/classrooms/${r.classroomId}/assignments/${r.assignmentId}/groups`;
   }
 }
 
@@ -33,7 +36,10 @@ export function parsePath(path: string): Route {
   if (parts[0] === "admin") return { view: "admin" };
   if (parts[0] === "classrooms" && parts[1]) {
     if (parts[2] === "assignments" && parts[3]) {
-      return { view: "assignment", classroomId: parts[1], assignmentId: parts[3] };
+      // The group-formation screen is a page of its own under the assignment,
+      // not a tab: it is a different job (forming teams) with its own toolbar.
+      const view = parts[4] === "groups" ? "assignment-groups" : "assignment";
+      return { view, classroomId: parts[1], assignmentId: parts[3] };
     }
     return { view: "classroom", id: parts[1] };
   }

@@ -329,6 +329,14 @@ export const assignments = pgTable(
      * from the downloaded file. Null outside `online_seb`.
      */
     codespaceConfigKey: text("codespace_config_key"),
+    /**
+     * Group assignment (issue #2): one repository per group instead of one per
+     * student. Groups are formed by the staff before publication; only
+     * `work_mode = 'free'` (the online modes are per student by construction).
+     */
+    groupMode: boolean("group_mode").notNull().default(false),
+    /** Advisory maximum group size: exceeding it warns, it never blocks. */
+    groupMaxSize: integer("group_max_size"),
     branches: text("branches").array().notNull(),
     protectedFiles: text("protected_files").array().notNull(),
     sourceAheadSha: text("source_ahead_sha"),
@@ -403,6 +411,62 @@ export const assignmentMilestones = pgTable(
   ],
 );
 
+/**
+ * Groups of a group assignment (issue #2, lot 1). A group belongs to ONE
+ * assignment: two labs of the same class may be worked in different teams,
+ * and "copy the groups of another assignment" spares the retyping. The name
+ * is what the staff sees, the slug is what the repository is named after
+ * (`<assignment-slug>-<group-slug>`) and is frozen once that repository
+ * exists. `position` keeps the creation order stable across renames.
+ */
+export const assignmentGroups = pgTable(
+  "assignment_groups",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => assignments.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    position: integer("position").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("assignment_groups_assignment_name_uq").on(t.assignmentId, t.name),
+    uniqueIndex("assignment_groups_assignment_slug_uq").on(t.assignmentId, t.slug),
+  ],
+);
+
+/**
+ * Membership of a group, by roster entry: a student may be in a group before
+ * they ever sign in, exactly like the rest of the roster. `assignment_id` is
+ * denormalized so UNIQUE(assignment_id, enrollment_id) can state the real
+ * invariant — at most one group per student per assignment.
+ */
+export const assignmentGroupMembers = pgTable(
+  "assignment_group_members",
+  {
+    id: uuid("id").primaryKey(),
+    assignmentId: uuid("assignment_id")
+      .notNull()
+      .references(() => assignments.id, { onDelete: "cascade" }),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => assignmentGroups.id, { onDelete: "cascade" }),
+    enrollmentId: uuid("enrollment_id")
+      .notNull()
+      .references(() => enrollments.id, { onDelete: "cascade" }),
+    addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("assignment_group_members_assignment_enrollment_uq").on(
+      t.assignmentId,
+      t.enrollmentId,
+    ),
+    index("assignment_group_members_group_idx").on(t.groupId),
+  ],
+);
+
 export const studentRepos = pgTable(
   "student_repos",
   {
@@ -450,10 +514,18 @@ export const studentRepos = pgTable(
     teacherComment: text("teacher_comment"),
     teacherGradedBy: uuid("teacher_graded_by").references(() => users.id),
     teacherGradedAt: timestamp("teacher_graded_at", { withTimezone: true }),
+    /**
+     * Group assignment (issue #2): the group this repository belongs to; the
+     * members share it. Filled by lot 2 (one repository per group at the first
+     * acceptance); lot 1 only reads it — a group with a repository is locked.
+     * `set null` so deleting a group never deletes a repository.
+     */
+    groupId: uuid("group_id").references(() => assignmentGroups.id, { onDelete: "set null" }),
   },
   (t) => [
     // Provisioning idempotency key (GH-20, NFR-09).
     uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
+    index("student_repos_group_idx").on(t.groupId),
   ],
 );
 

@@ -34,11 +34,21 @@ Fixed classrooms worth knowing:
 
 | Path | State |
 | --- | --- |
-| `/classrooms/c1` | Everything nominal: GitHub App installed, Team plan, five assignments covering draft, published, locked, online and duration-based. |
+| `/classrooms/c1` | Everything nominal: GitHub App installed, Team plan, assignments covering draft, published, locked, online, duration-based and group work. |
 | `/classrooms/c2` | Installed but on the GitHub Free plan, and `ANTHROPIC_API_KEY` missing: two warning banners, plus an SEB exam assignment. |
 | `/classrooms/c3` | Co-taught classroom (`isOwner: false`): the owner-only actions are gone. |
 | `/classrooms/c4` | GitHub App **not installed**: the install wizard replaces the assignments. |
 | `/classrooms/c5` | Organization **missing** on GitHub (`exists: false`): the read-only failure banner. |
+
+Group assignments (issue #2) have their own fixtures, reachable from
+`/classrooms/<id>/assignments/<id>/groups`:
+
+| Path | State |
+| --- | --- |
+| `/classrooms/c1/assignments/a7/groups` | Draft being formed: four groups, one over the size hint of 3, fifteen students still unassigned. |
+| `/classrooms/c1/assignments/a6/groups` | Published: everyone placed, and the first group owns a repository, so it is locked (no rename, no delete, no ✕). |
+| `/classrooms/c2/assignments/b3/groups` | Group mode with nothing formed yet: the empty state and the whole roster on the left. |
+| `/classrooms/c1/assignments/a2/groups` | Individual assignment: the 409 `group_mode_off` answer, not a failure. |
 
 ## Screenshots
 

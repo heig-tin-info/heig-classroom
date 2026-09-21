@@ -26,6 +26,8 @@ import type {
   Assignment,
   AssignmentDetailPayload,
   AssignmentDetailStudent,
+  AssignmentGroup,
+  AssignmentGroupsPayload,
   AssignmentMilestone,
   ClassroomDetail,
   ClassroomGradesPayload,
@@ -33,6 +35,7 @@ import type {
   ClassroomSummary,
   GradeRunHistory,
   GradeView,
+  GroupMember,
   Me,
   OrgRepo,
   RepoTree,
@@ -182,6 +185,8 @@ function assignment(
     workMode: "free",
     codespaceImage: null,
     browserExamKeys: [],
+    groupMode: false,
+    groupMaxSize: null,
     ...o,
   };
 }
@@ -246,11 +251,24 @@ const rooms: Room[] = [
         state: "draft",
       }),
       // Ungraded workshop: the grade column, the milestones and the review
-      // countdown all disappear (gradingMode "none").
+      // countdown all disappear (gradingMode "none"). Also the published
+      // group assignment: one of its groups owns a repository, so it is
+      // locked, and it is the source "Copy from…" offers on Lab 5.
       assignment("a6", "Workshop — Git basics", "heig-prg1-2026", {
         start: -20 * D,
         deadline: 8 * D,
         gradingMode: "none",
+        groupMode: true,
+        groupMaxSize: 4,
+      }),
+      // Group assignment still a draft: the group-formation screen with a few
+      // groups, one over the size hint, and students left unassigned.
+      assignment("a7", "Lab 5 — Group project", "heig-prg1-2026", {
+        start: 20 * D,
+        deadline: 40 * D,
+        state: "draft",
+        groupMode: true,
+        groupMaxSize: 3,
       }),
       assignment("a5", "Semester project", "heig-prg1-2026", {
         start: 0,
@@ -296,6 +314,14 @@ const rooms: Room[] = [
         state: "draft",
         workMode: "online_seb",
         browserExamKeys: [sha() + sha().slice(0, 24)],
+      }),
+      // Group mode with nothing formed yet: the empty state of the groups
+      // screen, and the whole roster on its left.
+      assignment("b3", "TP2 — Teams to form", "heig-info2-tinb", {
+        start: 14 * D,
+        deadline: 28 * D,
+        state: "draft",
+        groupMode: true,
       }),
     ],
     archivedAssignments: new Set(),
@@ -491,6 +517,113 @@ const milestones = new Map<string, AssignmentMilestone[]>([
   ],
 ]);
 
+// --- Group assignments (issue #2, lot 1) -------------------------------
+//
+// One entry per group-mode assignment. `members` holds enrollment ids, and a
+// non-null `repo` is what locks a group (lot 2 creates it at the first
+// acceptance): no rename, no delete, no member removal while it is there.
+
+interface MockGroup {
+  id: string;
+  name: string;
+  slug: string;
+  position: number;
+  members: string[];
+  repo: { fullName: string | null; provisionStatus: "ok" } | null;
+}
+
+/** Same rule as the server's `slugify` (lifecycle.ts). */
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+
+const groups = new Map<string, MockGroup[]>();
+
+/** Seeded on first read so the fixtures follow the roster of the classroom. */
+function groupsOf(room: Room, a: Assignment): MockGroup[] {
+  const existing = groups.get(a.id);
+  if (existing) return existing;
+  const roster = room.students.filter((s) => !s.staff);
+  const made: MockGroup[] = [];
+  const add = (name: string, members: string[], repo = false) =>
+    made.push({
+      id: `${a.id}-g${made.length + 1}`,
+      name,
+      slug: slugify(name),
+      position: made.length,
+      members,
+      repo: repo ? { fullName: `${room.summary.orgLogin}/${a.slug}-${slugify(name)}`, provisionStatus: "ok" } : null,
+    });
+  if (a.id === "a6") {
+    // Published: everyone placed, and the first group already has its repo.
+    for (let i = 0; i * 3 < roster.length; i += 1) {
+      add(`Group ${i + 1}`, roster.slice(i * 3, i * 3 + 3).map((s) => s.id), i === 0);
+    }
+  } else if (a.id === "a7") {
+    // Draft: four groups, the third one over the size hint of 3, and the
+    // tail of the roster still unassigned.
+    add("Les Castors", roster.slice(0, 3).map((s) => s.id));
+    add("Group 2", roster.slice(3, 5).map((s) => s.id));
+    add("Group 3", roster.slice(5, 9).map((s) => s.id));
+    add("Group 4", []);
+  }
+  groups.set(a.id, made);
+  return made;
+}
+
+const memberView = (s: Student): GroupMember => ({
+  enrollmentId: s.id,
+  nom: s.nom,
+  prenom: s.prenom,
+  email: s.email,
+  claimStatus: s.status,
+  githubLogin: s.githubLogin,
+  avatarUrl: null,
+});
+
+const groupView = (room: Room, g: MockGroup): AssignmentGroup => {
+  const byId = new Map(room.students.map((s) => [s.id, s]));
+  return {
+    id: g.id,
+    name: g.name,
+    slug: g.slug,
+    members: g.members.map((id) => memberView(byId.get(id)!)),
+    repo: g.repo,
+  };
+};
+
+function groupsPayload(room: Room, a: Assignment): AssignmentGroupsPayload {
+  if (!a.groupMode) throw new MockError(409, "This assignment is not in group mode", { error: "group_mode_off" });
+  const list = groupsOf(room, a);
+  const byId = new Map(room.students.map((s) => [s.id, s]));
+  const taken = new Set(list.flatMap((g) => g.members));
+  return {
+    assignment: {
+      id: a.id,
+      name: a.name,
+      state: a.state,
+      groupMode: a.groupMode,
+      groupMaxSize: a.groupMaxSize,
+    },
+    groups: list
+      .slice()
+      .sort((x, y) => x.position - y.position)
+      .map((g) => groupView(room, g)),
+    unassigned: room.students
+      .filter((s) => !s.staff && !taken.has(s.id))
+      .sort((x, y) => `${x.nom} ${x.prenom}`.localeCompare(`${y.nom} ${y.prenom}`))
+      .map(memberView),
+    copySources: room.assignments
+      .filter((x) => x.id !== a.id && x.groupMode && !room.archivedAssignments.has(x.id))
+      .map((x) => ({ id: x.id, name: x.name, groups: groupsOf(room, x).length }))
+      .filter((x) => x.groups > 0),
+  };
+}
+
 function repoStatesOf(room: Room, a: Assignment): Map<string, RepoState | null> {
   const key = a.id;
   let m = repoStates.get(key);
@@ -641,6 +774,8 @@ function assignmentDetail(room: Room, a: Assignment): AssignmentDetailPayload {
         a.workMode === "online_seb" ? sha() + sha().slice(0, 24) : null,
       codespaceSebUrl:
         a.workMode === "online_seb" ? `https://code.example.ch/exam/${a.id}.seb` : null,
+      groupMode: a.groupMode,
+      groupMaxSize: a.groupMaxSize,
     },
     students,
   };
@@ -802,6 +937,13 @@ class MockError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    /**
+     * Extra fields of the JSON body. The group endpoints answer a 409 with a
+     * named `error` the page branches on (`has_repo`, `duplicate_name`,
+     * `group_mode_off`, `unassigned_students`), so the mock has to carry more
+     * than a message.
+     */
+    readonly extra: Record<string, unknown> = {},
   ) {
     super(message);
   }
@@ -999,6 +1141,27 @@ on("DELETE", "/app/api/classrooms/:id/assignments/:aid", (m) => {
 on("POST", "/app/api/classrooms/:id/assignments/:aid/publish", (m) => {
   const r = roomOr404(m.groups!.id!);
   const a = assignmentOr404(r, m.groups!.aid!);
+  // Group mode: nobody may be left out, and there has to be a group at all.
+  // Refused before any state change, exactly like the server.
+  if (a.groupMode) {
+    const payload = groupsPayload(r, a);
+    if (payload.groups.length === 0 || payload.unassigned.length > 0) {
+      const left = payload.unassigned;
+      // No group at all with nobody to place (an empty roster) carries no
+      // name: the message is the whole answer, and groups of one would
+      // create nothing, so the dialog only offers the groups screen.
+      throw new MockError(
+        409,
+        left.length
+          ? `${left.length} student${left.length === 1 ? " is" : "s are"} not in any group`
+          : "This assignment has no group yet — form at least one before publishing.",
+        {
+          error: "unassigned_students",
+          students: left.map((s) => ({ enrollmentId: s.enrollmentId, nom: s.nom, prenom: s.prenom })),
+        },
+      );
+    }
+  }
   a.state = "published";
   a.startAt = at(0);
   if (a.durationMinutes) a.deadlineAt = at(a.durationMinutes * 60_000);
@@ -1037,6 +1200,158 @@ on("DELETE", "/app/api/classrooms/:id/assignments/:aid/milestones/:mid", (m) => 
   milestones.set(m.groups!.aid!, (milestones.get(m.groups!.aid!) ?? []).filter((x) => x.id !== m.groups!.mid));
   return undefined;
 });
+// --- Group routes (issue #2, lot 1) ---
+//
+// Same URLs, bodies and 409 shapes as the server module, so the page is
+// exercised against what it will actually meet in production.
+
+/** Classroom, assignment and its groups, or the 404/409 the server sends. */
+const groupsCtx = (m: RegExpMatchArray) => {
+  const r = roomOr404(m.groups!.id!);
+  const a = assignmentOr404(r, m.groups!.aid!);
+  if (!a.groupMode) throw new MockError(409, "This assignment is not in group mode", { error: "group_mode_off" });
+  return { r, a, list: groupsOf(r, a) };
+};
+const groupOr404 = (list: MockGroup[], gid: string) => {
+  const g = list.find((x) => x.id === gid);
+  if (!g) throw new MockError(404, "Group not found");
+  return g;
+};
+/** A group whose repository exists is frozen until lot 2 can revoke access. */
+const notLocked = (g: MockGroup) => {
+  if (g.repo) {
+    throw new MockError(409, `“${g.name}” already has a repository`, { error: "has_repo" });
+  }
+  return g;
+};
+const uniqueName = (list: MockGroup[], name: string, exceptId?: string) => {
+  const slug = slugify(name);
+  if (list.some((x) => x.id !== exceptId && (x.name === name || x.slug === slug))) {
+    throw new MockError(409, `Another group is already called “${name}”`, {
+      error: "duplicate_name",
+    });
+  }
+  return slug;
+};
+/** `Group N` with the first free N, like the server. */
+const defaultName = (list: MockGroup[]) => {
+  let n = 1;
+  while (list.some((g) => g.name === `Group ${n}`)) n += 1;
+  return `Group ${n}`;
+};
+
+on("GET", "/app/api/classrooms/:id/assignments/:aid/groups", (m) => {
+  const { r, a } = groupsCtx(m);
+  return groupsPayload(r, a);
+});
+on("POST", "/app/api/classrooms/:id/assignments/:aid/groups", (m, body) => {
+  const { r, list } = groupsCtx(m);
+  const name =
+    typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : defaultName(list);
+  const g: MockGroup = {
+    id: nextId("g"),
+    name,
+    slug: uniqueName(list, name),
+    position: list.length,
+    members: [],
+    repo: null,
+  };
+  list.push(g);
+  return groupView(r, g);
+});
+on("PATCH", "/app/api/classrooms/:id/assignments/:aid/groups/:gid", (m, body) => {
+  const { r, list } = groupsCtx(m);
+  const g = notLocked(groupOr404(list, m.groups!.gid!));
+  const name = String(body.name ?? "").trim();
+  g.slug = uniqueName(list, name, g.id);
+  g.name = name;
+  return groupView(r, g);
+});
+on("DELETE", "/app/api/classrooms/:id/assignments/:aid/groups/:gid", (m) => {
+  const { a, list } = groupsCtx(m);
+  const g = notLocked(groupOr404(list, m.groups!.gid!));
+  groups.set(
+    a.id,
+    list.filter((x) => x.id !== g.id).map((x, i) => ({ ...x, position: i })),
+  );
+  return undefined;
+});
+on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/copy", (m, body) => {
+  const { r, a, list } = groupsCtx(m);
+  list.forEach(notLocked);
+  const from = r.assignments.find((x) => x.id === body.fromAssignmentId && x.groupMode);
+  if (!from) throw new MockError(404, "Source assignment not found");
+  const roster = new Set(r.students.map((s) => s.id));
+  groups.set(
+    a.id,
+    groupsOf(r, from).map((g, i) => ({
+      id: nextId("g"),
+      name: g.name,
+      slug: g.slug,
+      position: i,
+      members: g.members.filter((id) => roster.has(id)),
+      repo: null,
+    })),
+  );
+  return groupsPayload(r, a);
+});
+on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/split", (m, body) => {
+  const { r, a, list } = groupsCtx(m);
+  const size = Math.min(10, Math.max(2, Number(body.size) || 2));
+  const left = groupsPayload(r, a).unassigned;
+  for (let i = 0; i < left.length; i += size) {
+    const name = defaultName(list);
+    list.push({
+      id: nextId("g"),
+      name,
+      slug: slugify(name),
+      position: list.length,
+      members: left.slice(i, i + size).map((s) => s.enrollmentId),
+      repo: null,
+    });
+  }
+  return groupsPayload(r, a);
+});
+on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/singles", (m) => {
+  const { r, a, list } = groupsCtx(m);
+  for (const s of groupsPayload(r, a).unassigned) {
+    const name = `${s.prenom} ${s.nom}`;
+    let slug = slugify(name);
+    for (let n = 2; list.some((g) => g.slug === slug); n += 1) slug = `${slugify(name)}-${n}`;
+    list.push({
+      id: nextId("g"),
+      name,
+      slug,
+      position: list.length,
+      members: [s.enrollmentId],
+      repo: null,
+    });
+  }
+  return groupsPayload(r, a);
+});
+on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/:gid/members", (m, body) => {
+  const { r, a, list } = groupsCtx(m);
+  const g = groupOr404(list, m.groups!.gid!);
+  const enrollmentId = String(body.enrollmentId ?? "");
+  if (!r.students.some((s) => s.id === enrollmentId && !s.staff)) {
+    throw new MockError(404, "Student not found in this classroom");
+  }
+  // Moving out of the previous group is a removal, so a locked one refuses.
+  const previous = list.find((x) => x.members.includes(enrollmentId));
+  if (previous && previous.id !== g.id) {
+    notLocked(previous);
+    previous.members = previous.members.filter((id) => id !== enrollmentId);
+  }
+  if (!g.members.includes(enrollmentId)) g.members.push(enrollmentId);
+  return groupsPayload(r, a);
+});
+on("DELETE", "/app/api/classrooms/:id/assignments/:aid/groups/:gid/members/:eid", (m) => {
+  const { r, a, list } = groupsCtx(m);
+  const g = notLocked(groupOr404(list, m.groups!.gid!));
+  g.members = g.members.filter((id) => id !== m.groups!.eid);
+  return groupsPayload(r, a);
+});
+
 const repoOf = (m: RegExpMatchArray) => {
   const r = roomOr404(m.groups!.id!);
   const a = assignmentOr404(r, m.groups!.aid!);
@@ -1158,7 +1473,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
       });
     } catch (e) {
       if (e instanceof MockError) {
-        return new Response(JSON.stringify({ message: e.message }), {
+        return new Response(JSON.stringify({ message: e.message, ...e.extra }), {
           status: e.status,
           headers: { "content-type": "application/json" },
         });

@@ -3,9 +3,12 @@ import type {
   AssignmentDetailPayload,
   AssignmentDetailRepo,
   AssignmentDetailStudent,
+  AssignmentGroup,
+  AssignmentGroupsPayload,
   ClassroomDetail,
   ClassroomSummary,
   GradeView,
+  GroupMember,
   Me,
   RosterEntry,
   StudentAssignment,
@@ -135,6 +138,8 @@ export function makeAssignment(overrides: Partial<Assignment> = {}): Assignment 
     workMode: "free",
     codespaceImage: null,
     browserExamKeys: [],
+    groupMode: false,
+    groupMaxSize: null,
     ...overrides,
   };
 }
@@ -224,9 +229,53 @@ export function makeAssignmentDetail(
       codespaceSyncError: null,
       codespaceConfigKey: null,
       codespaceSebUrl: null,
+      groupMode: false,
+      groupMaxSize: null,
       ...assignment,
     },
     students,
+  };
+}
+
+export function makeGroupMember(overrides: Partial<GroupMember> = {}): GroupMember {
+  return {
+    enrollmentId: "e-1",
+    nom: "Rochat",
+    prenom: "Lucas",
+    email: "lucas.rochat@heig-vd.ch",
+    claimStatus: "claimed",
+    githubLogin: "lucas-roch",
+    avatarUrl: null,
+    ...overrides,
+  };
+}
+
+export function makeGroup(overrides: Partial<AssignmentGroup> = {}): AssignmentGroup {
+  return {
+    id: "g-1",
+    name: "Group 1",
+    slug: "group-1",
+    members: [],
+    repo: null,
+    ...overrides,
+  };
+}
+
+export function makeGroupsPayload(
+  overrides: Partial<AssignmentGroupsPayload> = {},
+): AssignmentGroupsPayload {
+  return {
+    assignment: {
+      id: "a1",
+      name: "Labo 02 quadratic",
+      state: "draft",
+      groupMode: true,
+      groupMaxSize: null,
+    },
+    groups: [makeGroup()],
+    unassigned: [],
+    copySources: [],
+    ...overrides,
   };
 }
 

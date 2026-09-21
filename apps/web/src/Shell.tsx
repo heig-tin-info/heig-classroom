@@ -114,7 +114,11 @@ function Nav({
     onNavigate?.();
   };
   const currentRoom =
-    route.view === "classroom" ? route.id : route.view === "assignment" ? route.classroomId : null;
+    route.view === "classroom"
+      ? route.id
+      : route.view === "assignment" || route.view === "assignment-groups"
+        ? route.classroomId
+        : null;
   // Folded by default and not persisted: thirty classrooms turn the sidebar
   // into a scrolling wall, and the teacher who wants them all says so once.
   const [showAll, setShowAll] = useState(false);

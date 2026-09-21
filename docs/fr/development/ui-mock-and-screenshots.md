@@ -37,11 +37,21 @@ Classes fixes à connaître :
 
 | Chemin | État |
 | --- | --- |
-| `/classrooms/c1` | Tout est nominal : GitHub App installée, plan Team, cinq devoirs couvrant brouillon, publié, verrouillé, en ligne et à durée. |
+| `/classrooms/c1` | Tout est nominal : GitHub App installée, plan Team, des devoirs couvrant brouillon, publié, verrouillé, en ligne, à durée et travail en groupe. |
 | `/classrooms/c2` | Installée mais sur le plan GitHub Free, et `ANTHROPIC_API_KEY` absente : deux bandeaux d'avertissement, plus un devoir d'examen SEB. |
 | `/classrooms/c3` | Classe co-enseignée (`isOwner: false`) : les actions réservées au propriétaire ont disparu. |
 | `/classrooms/c4` | GitHub App **non installée** : l'assistant d'installation remplace les devoirs. |
 | `/classrooms/c5` | Organisation **absente** sur GitHub (`exists: false`) : le bandeau d'échec en lecture seule. |
+
+Les devoirs en groupe (issue #2) ont leurs propres fixtures, accessibles depuis
+`/classrooms/<id>/assignments/<id>/groups` :
+
+| Chemin | État |
+| --- | --- |
+| `/classrooms/c1/assignments/a7/groups` | Brouillon en cours de constitution : quatre groupes, dont un au-dessus de la taille indicative de 3, quinze étudiants encore non assignés. |
+| `/classrooms/c1/assignments/a6/groups` | Publié : tout le monde est placé, et le premier groupe possède un dépôt, il est donc verrouillé (ni renommage, ni suppression, ni ✕). |
+| `/classrooms/c2/assignments/b3/groups` | Mode groupe sans rien de constitué : l'état vide et toute la liste des étudiants à gauche. |
+| `/classrooms/c1/assignments/a2/groups` | Devoir individuel : la réponse 409 `group_mode_off`, pas un échec. |
 
 ## Captures d'écran
 
