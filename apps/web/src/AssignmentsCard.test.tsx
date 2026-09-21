@@ -151,6 +151,33 @@ describe("AssignmentsSection publish guard for group assignments", () => {
       `${LIST}/a1/groups/singles`,
       `${LIST}/a1/publish`,
     ]);
+    // The refused publish is settled with it: its message must not survive
+    // as a red line under an assignment that just went live.
+    expect(screen.queryByText("2 students are not in any group")).toBeNull();
+  });
+
+  it("drops the refusal when the dialog is closed", async () => {
+    await publishRefused();
+    await screen.findByText("2 students have no group");
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.queryByText("2 students are not in any group")).toBeNull();
+  });
+
+  it("offers only the groups screen when the refusal names nobody", async () => {
+    // Group mode with no group at all (or an empty roster): groups of one
+    // would create nothing and meet the very same 409 for ever.
+    await publishRefused({
+      [`POST ${LIST}/a1/publish`]: fail(409, {
+        error: "unassigned_students",
+        message: "This assignment has no group yet — form at least one before publishing.",
+        students: [],
+      }),
+    });
+    expect(await screen.findByText("No group yet")).toBeVisible();
+    expect(screen.getByText(/form at least one before publishing/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Put them in individual groups/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Open groups/ })).toBeVisible();
   });
 
   it("hands the teacher over to the groups screen", async () => {
