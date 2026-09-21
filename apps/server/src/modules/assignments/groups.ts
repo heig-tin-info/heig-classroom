@@ -80,7 +80,16 @@ async function reposByGroup(db: Db, assignmentId: string) {
       provisionStatus: studentRepos.provisionStatus,
     })
     .from(studentRepos)
-    .where(and(eq(studentRepos.assignmentId, assignmentId), isNotNull(studentRepos.groupId)));
+    .where(
+      and(
+        eq(studentRepos.assignmentId, assignmentId),
+        isNotNull(studentRepos.groupId),
+        // A repository deleted on GitHub (issue #10, terminal `deleted_at`)
+        // has nothing left to revoke or to rename: it must not lock the
+        // group for the rest of the semester.
+        isNull(studentRepos.deletedAt),
+      ),
+    );
   const byGroup = new Map<string, { fullName: string | null; provisionStatus: "pending" | "ok" | "error" }>();
   // The members share ONE repository: the first row per group describes it.
   for (const r of rows) if (!byGroup.has(r.groupId!)) byGroup.set(r.groupId!, r);
@@ -223,11 +232,16 @@ function view(
   };
 }
 
-/** `Group N` with the first free N: deleting group 2 frees the name again. */
-function defaultName(taken: Set<string>): string {
+/**
+ * `Group N` with the first free N: deleting group 2 frees the name again.
+ * Both uniques have to be free, not just the name — a group named "Group 2!"
+ * owns the slug `group-2`, and proposing "Group 2" would hand the primary
+ * button a name that can only 409.
+ */
+function defaultName(names: Set<string>, slugs: Set<string>): string {
   for (let n = 1; ; n++) {
     const name = `Group ${n}`;
-    if (!taken.has(name)) return name;
+    if (!names.has(name) && !slugs.has(slugify(name))) return name;
   }
 }
 
@@ -349,14 +363,18 @@ export async function assignmentGroupRoutes(
     if (!body.success) {
       return reply.code(400).send({ error: "validation", issues: body.error.issues });
     }
-    const { names, nextPosition } = await existing(scope.assignment.id);
-    const name = body.data.name?.trim() || defaultName(names);
-    const slug = slugify(name);
-    if (!slug) {
+    const { names, slugs, nextPosition } = await existing(scope.assignment.id);
+    const name = body.data.name?.trim() || defaultName(names, slugs);
+    const stem = slugify(name);
+    if (!stem) {
       return reply
         .code(400)
         .send({ error: "validation", message: "Name contains no usable characters" });
     }
+    // Two different names can slugify the same ("Les Castors" and "les
+    // castors!"): suffix the slug rather than refuse a name that is free.
+    // A duplicate NAME still 409s, on the unique index below.
+    const slug = freeSlug(stem, slugs);
     const [row] = await app.db
       .insert(assignmentGroups)
       .values({
@@ -472,16 +490,27 @@ export async function assignmentGroupRoutes(
     // collaborator — lot 2. Adding INTO one stays fine: lot 2 invites them.
     if (current && (await refuseLocked(reply, scope.assignment.id, current.groupId))) return reply;
     if (current) {
+      // A move is ONE row changing group: an UPDATE, never a delete followed
+      // by an insert. A failure in between would have left the student in no
+      // group at all, and two clicks racing would have hit the unique index
+      // (a 500 for what is a perfectly legitimate second click).
       await app.db
-        .delete(assignmentGroupMembers)
+        .update(assignmentGroupMembers)
+        .set({ groupId: group.id })
         .where(eq(assignmentGroupMembers.id, current.id));
+    } else {
+      // Same reasoning for the first assignment: the loser of the race sees
+      // the row it wanted, not a unique-violation 500.
+      await app.db
+        .insert(assignmentGroupMembers)
+        .values({
+          id: randomUUID(),
+          assignmentId: scope.assignment.id,
+          groupId: group.id,
+          enrollmentId: student.id,
+        })
+        .onConflictDoNothing();
     }
-    await app.db.insert(assignmentGroupMembers).values({
-      id: randomUUID(),
-      assignmentId: scope.assignment.id,
-      groupId: group.id,
-      enrollmentId: student.id,
-    });
     await trace(req, scope.assignment, "group.member.add", {
       group: group.name,
       enrollmentId: student.id,
@@ -555,44 +584,56 @@ export async function assignmentGroupRoutes(
       .from(assignmentGroups)
       .where(eq(assignmentGroups.assignmentId, source.id))
       .orderBy(asc(assignmentGroups.position));
-    const sourceMembers = sourceGroups.length
-      ? await app.db
-          .select()
-          .from(assignmentGroupMembers)
-          .where(
-            inArray(
-              assignmentGroupMembers.groupId,
-              sourceGroups.map((g) => g.id),
-            ),
-          )
-      : [];
+    // The copy replaces everything: from an empty source it would just wipe
+    // the teacher's work and report success. There is nothing to copy.
+    if (sourceGroups.length === 0) {
+      return reply.code(409).send({
+        error: "empty_source",
+        message: `“${source.name}” has no group to copy`,
+      });
+    }
+    const sourceMembers = await app.db
+      .select()
+      .from(assignmentGroupMembers)
+      .where(
+        inArray(
+          assignmentGroupMembers.groupId,
+          sourceGroups.map((g) => g.id),
+        ),
+      );
     // A student who left the class since then is simply not copied.
     const stillHere = new Set(
       (await rosterMembers(app.db, scope.assignment.classroomId)).map((m) => m.enrollmentId),
     );
 
-    await app.db
-      .delete(assignmentGroups)
-      .where(eq(assignmentGroups.assignmentId, scope.assignment.id));
-    for (const g of sourceGroups) {
-      const id = randomUUID();
-      await app.db.insert(assignmentGroups).values({
-        id,
+    // One transaction: the screen never shows the half-second where the old
+    // groups are gone and the new ones are not in yet, and a failure mid-copy
+    // leaves the teacher's groups untouched instead of destroyed.
+    await app.db.transaction(async (tx) => {
+      await tx
+        .delete(assignmentGroups)
+        .where(eq(assignmentGroups.assignmentId, scope.assignment.id));
+      const copies = sourceGroups.map((g) => ({
+        id: randomUUID(),
         assignmentId: scope.assignment.id,
         name: g.name,
         slug: g.slug,
         position: g.position,
-      });
-      const members = sourceMembers
-        .filter((m) => m.groupId === g.id && stillHere.has(m.enrollmentId))
-        .map((m) => ({
-          id: randomUUID(),
-          assignmentId: scope.assignment.id,
-          groupId: id,
-          enrollmentId: m.enrollmentId,
-        }));
-      if (members.length > 0) await app.db.insert(assignmentGroupMembers).values(members);
-    }
+        source: g.id,
+      }));
+      await tx.insert(assignmentGroups).values(copies.map(({ source: _s, ...g }) => g));
+      const members = copies.flatMap((copy) =>
+        sourceMembers
+          .filter((m) => m.groupId === copy.source && stillHere.has(m.enrollmentId))
+          .map((m) => ({
+            id: randomUUID(),
+            assignmentId: scope.assignment.id,
+            groupId: copy.id,
+            enrollmentId: m.enrollmentId,
+          })),
+      );
+      if (members.length > 0) await tx.insert(assignmentGroupMembers).values(members);
+    });
     await trace(req, scope.assignment, "group.copy", {
       from: source.id,
       groups: sourceGroups.length,
@@ -616,7 +657,7 @@ export async function assignmentGroupRoutes(
     let position = nextPosition;
     let created = 0;
     for (let i = 0; i < left.length; i += body.data.size) {
-      const name = defaultName(names);
+      const name = defaultName(names, slugs);
       names.add(name);
       const slug = freeSlug(slugify(name), slugs);
       slugs.add(slug);

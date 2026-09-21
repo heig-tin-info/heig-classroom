@@ -185,6 +185,23 @@ describe("group formation (issue #2, lot 1)", () => {
     await app.close();
   });
 
+  it("the default name steps over a slug another name already owns", async () => {
+    const s = await seed(db);
+    const app = await serve(db, s.teacherId);
+    await addGroup(app, s); // Group 1 / group-1
+    // “Group 2!” is a free NAME that owns the slug group-2: proposing
+    // “Group 2” would hand the primary button a name that can only 409.
+    expect((await addGroup(app, s, "Group 2!")).slug).toBe("group-2");
+    const next = await addGroup(app, s);
+    expect(next.name).toBe("Group 3");
+    expect(next.slug).toBe("group-3");
+
+    // And a free name whose slug is taken is suffixed, never refused.
+    const twin = await addGroup(app, s, "group 3");
+    expect(twin).toMatchObject({ name: "group 3", slug: "group-3-2" });
+    await app.close();
+  });
+
   it("renames a group, slug included, and refuses a colliding name", async () => {
     const s = await seed(db);
     const app = await serve(db, s.teacherId);
@@ -247,6 +264,26 @@ describe("group formation (issue #2, lot 1)", () => {
       .from(assignmentGroupMembers)
       .where(eq(assignmentGroupMembers.enrollmentId, s.students.Euler!));
     expect(rows).toHaveLength(1);
+    await app.close();
+  });
+
+  it("adding the same student twice is idempotent, not a unique-index 500", async () => {
+    const s = await seed(db);
+    const app = await serve(db, s.teacherId);
+    const g1 = await addGroup(app, s);
+
+    // Two clicks (or two racing tabs) on the same row.
+    const [first, second] = await Promise.all([
+      addMember(app, s, g1.id, s.students.Dubois!),
+      addMember(app, s, g1.id, s.students.Dubois!),
+    ]);
+    expect([first.statusCode, second.statusCode]).toEqual([200, 200]);
+    const rows = await db
+      .select()
+      .from(assignmentGroupMembers)
+      .where(eq(assignmentGroupMembers.enrollmentId, s.students.Dubois!));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.groupId).toBe(g1.id);
     await app.close();
   });
 
@@ -401,6 +438,66 @@ describe("group formation (issue #2, lot 1)", () => {
     });
     expect(locked.statusCode).toBe(409);
     expect(locked.json().error).toBe("has_repo");
+    await app.close();
+  });
+
+  it("refuses to copy from a source that has no group, instead of wiping the target", async () => {
+    const s = await seed(db);
+    const app = await serve(db, s.teacherId);
+    const emptyId = randomUUID();
+    await db.insert(assignments).values({
+      id: emptyId,
+      classroomId: s.classroomId,
+      name: "Labo 0",
+      slug: "labo-0",
+      startAt: new Date("2026-08-01T08:00:00Z"),
+      deadlineAt: new Date("2026-08-08T08:00:00Z"),
+      sourceRepoId: 2,
+      sourceFullName: "org/labo-0",
+      branches: ["main"],
+      protectedFiles: [],
+      groupMode: true,
+    });
+    const mine = await addGroup(app, s, "Les Castors");
+    await addMember(app, s, mine.id, s.students.Ammann!);
+
+    const res = await app.inject({
+      method: "POST",
+      url: url(s, "/copy"),
+      payload: { fromAssignmentId: emptyId },
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("empty_source");
+    // The teacher's own work is still there, untouched.
+    const payload = (await app.inject({ method: "GET", url: url(s) })).json<AssignmentGroupsPayload>();
+    expect(payload.groups.map((g) => g.name)).toEqual(["Les Castors"]);
+    expect(payload.groups[0]!.members.map((m) => m.nom)).toEqual(["Ammann"]);
+    await app.close();
+  });
+
+  it("a repository deleted on GitHub stops locking its group", async () => {
+    const s = await seed(db);
+    const app = await serve(db, s.teacherId);
+    const g1 = await addGroup(app, s);
+    await addMember(app, s, g1.id, s.students.Ammann!);
+    await giveRepo(db, s, g1.id, s.students.Ammann!);
+    expect(
+      (await app.inject({ method: "PATCH", url: url(s, `/${g1.id}`), payload: { name: "X" } }))
+        .statusCode,
+    ).toBe(409);
+
+    // Issue #10: the deletion is terminal, nothing is left to revoke.
+    await db
+      .update(studentRepos)
+      .set({ deletedAt: new Date() })
+      .where(eq(studentRepos.assignmentId, s.assignmentId));
+    const rename = await app.inject({
+      method: "PATCH",
+      url: url(s, `/${g1.id}`),
+      payload: { name: "Les Castors" },
+    });
+    expect(rename.statusCode).toBe(200);
+    expect(rename.json()).toMatchObject({ name: "Les Castors", repo: null });
     await app.close();
   });
 

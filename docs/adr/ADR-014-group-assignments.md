@@ -60,7 +60,9 @@ construction, so shared work has no meaning there.
      deadline, freeze and review per repository. Removing a member becomes possible again
      (revoking the collaborator). GitHub teams are *not* used: students are outside
      collaborators, not members of the organization, and a team only grants access to its
-     members — so each member is invited individually on the group repository.
+     members — so each member is invited individually on the group repository. Removing a
+     student from the roster must then refuse, or revoke their access first: today the
+     cascade takes them out of a locked group without telling GitHub anything.
    - **Lot 3**: per-member GitHub invitation follow-up, and the teacher's per-member
      adjustment of the group grade.
 
