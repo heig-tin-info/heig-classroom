@@ -5,12 +5,14 @@
  * - detail.ts     : detail table, grade-run history, repository activity
  * - actions.ts    : source pickers, sync, lock/unlock, grade-now
  * - milestones.ts : intermediate review checkpoints (grade-milestone)
+ * - groups.ts     : group formation of a group assignment (issue #2)
  */
 import type { FastifyInstance } from "fastify";
 
 import type { AppConfig } from "../../config.js";
 import { assignmentActionRoutes } from "./actions.js";
 import { assignmentDetailRoutes } from "./detail.js";
+import { assignmentGroupRoutes } from "./groups.js";
 import { assignmentLifecycleRoutes } from "./lifecycle.js";
 import { assignmentMilestoneRoutes } from "./milestones.js";
 
@@ -22,4 +24,5 @@ export async function assignmentsPlugin(
   await assignmentDetailRoutes(app, opts);
   await assignmentActionRoutes(app, opts);
   await assignmentMilestoneRoutes(app, opts);
+  await assignmentGroupRoutes(app, opts);
 }

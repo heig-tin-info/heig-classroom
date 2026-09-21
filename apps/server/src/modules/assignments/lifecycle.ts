@@ -28,8 +28,9 @@ import { createSquashedRepo } from "../../github/squash.js";
 import { selectGradeRun } from "../../grading.js";
 import { classroomRecipients, queueEmail } from "../../mailer.js";
 import { accessibleAssignment, accessibleClassroomWithOrg, teacherGuard } from "../guards.js";
+import { countGroups, unassignedStudents } from "./groups.js";
 import { resolveOffset } from "./milestones.js";
-import { clientFor } from "./shared.js";
+import { clientFor, slugify } from "./shared.js";
 
 /** Manual mode: 15 min to 400 days after publication. */
 const Duration = z.number().int().min(15).max(400 * 1440);
@@ -40,6 +41,8 @@ const WorkModeEnum = z.enum(["free", "online", "online_seb"]);
 const CodespaceImage = z.string().max(200);
 /** One Browser Exam Key per platform/version, 64 hex characters each. */
 const BrowserExamKeys = z.array(z.string().regex(/^[0-9a-fA-F]{64}$/)).max(20);
+/** Advisory group size (issue #2): a hint for the warning, never a limit. */
+const GroupMaxSize = z.number().int().min(1).max(50);
 
 const emptyToNull = (v: string | undefined) => {
   const trimmed = (v ?? "").trim();
@@ -63,6 +66,8 @@ const AssignmentCreate = z
     workMode: WorkModeEnum.default("free"),
     codespaceImage: CodespaceImage.optional(),
     browserExamKeys: BrowserExamKeys.default([]),
+    groupMode: z.boolean().default(false),
+    groupMaxSize: GroupMaxSize.nullable().optional(),
   })
   .superRefine((b, ctx) => {
     if (b.publishMode === "scheduled") {
@@ -104,16 +109,6 @@ async function retargetOffsetMilestones(
       .set({ dueAt: resolveOffset(deadlineAt, m.offsetDays!) })
       .where(eq(assignmentMilestones.id, m.id));
   }
-}
-
-function slugify(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
 }
 
 export async function assignmentLifecycleRoutes(
@@ -179,6 +174,8 @@ export async function assignmentLifecycleRoutes(
       workMode: WorkModeEnum.optional(),
       codespaceImage: CodespaceImage.optional(),
       browserExamKeys: BrowserExamKeys.optional(),
+      groupMode: z.boolean().optional(),
+      groupMaxSize: GroupMaxSize.nullable().optional(),
     })
     .refine((b) => Object.keys(b).length > 0, { message: "Nothing to update" });
 
@@ -214,6 +211,30 @@ export async function assignmentLifecycleRoutes(
         return reply.code(409).send({
           error: "publish_mode_frozen",
           message: "The publication mode cannot be changed after publication",
+        });
+      }
+      // Group work (issue #2) is a `free`-mode feature: the online modes hand
+      // one workspace to one student, so a shared repository has no meaning
+      // there. The check covers both directions — turning groups on, and
+      // moving a group assignment to an online mode.
+      const nextGroupMode = body.data.groupMode ?? scope.assignment.groupMode;
+      const nextWorkMode = body.data.workMode ?? scope.assignment.workMode;
+      if (nextGroupMode && nextWorkMode !== "free") {
+        return reply.code(400).send({
+          error: "group_mode_requires_free",
+          message: "Group work is only available with the free work mode",
+        });
+      }
+      // The groups decide how the repositories are created: once they exist,
+      // switching is a migration, not an edit. The advisory size stays free.
+      if (
+        body.data.groupMode !== undefined &&
+        body.data.groupMode !== scope.assignment.groupMode &&
+        scope.assignment.state !== "draft"
+      ) {
+        return reply.code(409).send({
+          error: "not_draft",
+          message: "Group work can only be turned on or off while the assignment is a draft",
         });
       }
       const refusal = await refuseOnlineMode(req, body.data.workMode ?? "free");
@@ -399,6 +420,25 @@ export async function assignmentLifecycleRoutes(
           .code(409)
           .send({ error: "not_draft", message: "Only draft assignments can be published" });
       }
+      // Group assignment (issue #2): publishing is what turns the groups into
+      // repositories, so nobody may be left out — a student in no group would
+      // simply have nowhere to work. Checked before any state change or email
+      // so a refusal leaves the draft exactly as it was; the screen offers to
+      // put the rest in individual groups and retry.
+      if (scope.assignment.groupMode) {
+        const left = await unassignedStudents(app.db, scope.assignment);
+        const groups = await countGroups(app.db, scope.assignment.id);
+        if (left.length > 0 || groups === 0) {
+          return reply.code(409).send({
+            error: "unassigned_students",
+            message:
+              left.length > 0
+                ? `${left.length} student${left.length > 1 ? "s have" : " has"} no group`
+                : "This group assignment has no group yet",
+            students: left,
+          });
+        }
+      }
       // Manual mode: the countdown starts NOW — start = publication instant,
       // deadline = stored absolute date or now + duration. Scheduled drafts
       // published early keep their absolute dates.
@@ -528,6 +568,12 @@ export async function assignmentLifecycleRoutes(
       const body = AssignmentCreate.safeParse(req.body);
       if (!body.success) {
         return reply.code(400).send({ error: "validation", issues: body.error.issues });
+      }
+      if (body.data.groupMode && body.data.workMode !== "free") {
+        return reply.code(400).send({
+          error: "group_mode_requires_free",
+          message: "Group work is only available with the free work mode",
+        });
       }
       const refusal = await refuseOnlineMode(req, body.data.workMode);
       if (refusal) return reply.code(403).send({ error: "codespace_forbidden", message: refusal });
@@ -659,6 +705,8 @@ export async function assignmentLifecycleRoutes(
               body.data.workMode === "online_seb"
                 ? body.data.browserExamKeys.map((k) => k.toLowerCase())
                 : [],
+            groupMode: body.data.groupMode,
+            groupMaxSize: body.data.groupMaxSize ?? null,
           })
           .returning();
         await audit(app.db, {

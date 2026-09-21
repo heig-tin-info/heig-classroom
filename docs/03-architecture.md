@@ -591,3 +591,4 @@ consequences, rejected alternatives), versioned in `docs/adr/`.
 | ADR-011 | Reconciliation reusing the idempotent webhook handlers | `ADR-011-reconciliation-handlers.md` |
 | ADR-012 | Grade freeze: synchronous reception time, two-stage freeze | `ADR-012-gel-note-deux-temps.md` |
 | ADR-013 | Online workspace: no student credential, therefore no write access | `ADR-013-environnement-en-ligne.md` |
+| ADR-014 | Group assignments: groups per assignment, formed by the staff, three lots | `ADR-014-group-assignments.md` |
