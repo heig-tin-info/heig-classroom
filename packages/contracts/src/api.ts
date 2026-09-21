@@ -162,6 +162,13 @@ export interface Assignment {
   codespaceImage: string | null;
   /** Teacher-side only — Browser Exam Keys are secrets, never sent to students. */
   browserExamKeys: string[];
+  /**
+   * Group assignment (issue #2): one repository per group, every member a
+   * collaborator. Only with `workMode: "free"`; editable while draft.
+   */
+  groupMode: boolean;
+  /** Advisory maximum group size (warning only); null = no hint. */
+  groupMaxSize: number | null;
 }
 
 export interface OrgRepo {
@@ -290,6 +297,9 @@ export interface AssignmentDetailPayload {
      * is configured or the assignment is not in `online_seb` mode.
      */
     codespaceSebUrl: string | null;
+    /** Group assignment (issue #2); the detail table stays per student in lot 1. */
+    groupMode: boolean;
+    groupMaxSize: number | null;
   };
   students: AssignmentDetailStudent[];
 }
@@ -394,4 +404,59 @@ export interface StudentClassroom {
   orgLogin: string;
   teacher: string;
   assignments: StudentAssignment[];
+}
+
+// --- Group assignments (issue #2, lot 1: group formation) ---
+
+/** One student of the classroom as seen from the group-formation screen. */
+export interface GroupMember {
+  enrollmentId: string;
+  nom: string;
+  prenom: string;
+  email: string;
+  claimStatus: "pending" | "claimed";
+  githubLogin: string | null;
+  avatarUrl: string | null;
+}
+
+export interface AssignmentGroup {
+  id: string;
+  /** Display name, unique per assignment (`Group 3`, `Les Castors`). */
+  name: string;
+  /** Repository name suffix (`<assignment-slug>-<group-slug>`), frozen once a repo exists. */
+  slug: string;
+  members: GroupMember[];
+  /**
+   * The group's repository, created at the first acceptance (lot 2). While
+   * it exists the group is locked: no rename, no delete, no member removal
+   * (a removal would have to revoke access, which is a lot-2 action).
+   */
+  repo: { fullName: string | null; provisionStatus: ProvisionStatus } | null;
+}
+
+export interface AssignmentGroupsPayload {
+  assignment: {
+    id: string;
+    name: string;
+    state: AssignmentState;
+    groupMode: boolean;
+    /** Advisory maximum: exceeding it only shows a warning. Null = no hint. */
+    groupMaxSize: number | null;
+  };
+  /** Ordered by position (creation order), stable across renames. */
+  groups: AssignmentGroup[];
+  /** Non-staff roster entries not in any group, ordered by name. */
+  unassigned: GroupMember[];
+  /**
+   * Other group-mode assignments of the same classroom (source for
+   * "Copy from…"), oldest first. Excludes this assignment.
+   */
+  copySources: { id: string; name: string; groups: number }[];
+}
+
+/** Publish refused (409 `unassigned_students`): group mode with students left out. */
+export interface UnassignedStudentsError {
+  error: "unassigned_students";
+  message: string;
+  students: { enrollmentId: string; nom: string; prenom: string }[];
 }
