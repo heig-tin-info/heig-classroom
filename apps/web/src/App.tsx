@@ -18,6 +18,7 @@ const AdminPage = lazy(() => import("./AdminPanel").then((m) => ({ default: m.Ad
 const AssignmentPage = lazy(() =>
   import("./AssignmentDetail").then((m) => ({ default: m.AssignmentPage })),
 );
+const GroupsPage = lazy(() => import("./GroupsPage").then((m) => ({ default: m.GroupsPage })));
 
 /*
  * Signed-out page. The four decisions, so the door looks like the house:
@@ -92,6 +93,12 @@ export default function App() {
       <AdminPage />
     ) : route.view === "classroom" ? (
       <ClassroomView id={route.id} navigate={navigate} />
+    ) : route.view === "assignment-groups" ? (
+      <GroupsPage
+        classroomId={route.classroomId}
+        assignmentId={route.assignmentId}
+        navigate={navigate}
+      />
     ) : route.view === "assignment" ? (
       <AssignmentPage
         classroomId={route.classroomId}

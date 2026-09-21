@@ -96,6 +96,45 @@ const scenes = [
   { name: "assignment-detail-loading", role: "teacher", path: "/classrooms/c1/assignments/a2?slow=1", settle: 300 },
   { name: "assignment-detail-many", role: "teacher", path: "/classrooms/c1/assignments/a2?many=1" },
 
+  // Group assignments (issue #2): a7 is the draft being formed, a6 the
+  // published one whose first group already owns a repository.
+  { name: "groups", role: "teacher", path: "/classrooms/c1/assignments/a7/groups" },
+  { name: "groups-locked", role: "teacher", path: "/classrooms/c1/assignments/a6/groups" },
+  { name: "groups-individual", role: "teacher", path: "/classrooms/c1/assignments/a2/groups" },
+  { name: "groups-empty", role: "teacher", path: "/classrooms/c2/assignments/b3/groups" },
+  { name: "groups-gone", role: "teacher", path: "/classrooms/c1/assignments/a7/groups?empty=1" },
+  { name: "groups-error", role: "teacher", path: "/classrooms/c1/assignments/a7/groups?fail=1", settle: 2500 },
+  // `?slow=1` slows /app/api/me too, so the shell only appears after 2.5 s:
+  // the skeletons of this page are on screen between then and 5 s.
+  { name: "groups-loading", role: "teacher", path: "/classrooms/c1/assignments/a7/groups?slow=1", settle: 3200 },
+  { name: "groups-copy", role: "teacher", path: "/classrooms/c1/assignments/a7/groups", act: (p) => p.getByRole("button", { name: /copy from/i }).click() },
+  { name: "groups-split", role: "teacher", path: "/classrooms/c1/assignments/a7/groups", act: (p) => p.getByRole("button", { name: /split remaining/i }).click() },
+  { name: "groups-rename", role: "teacher", path: "/classrooms/c1/assignments/a7/groups", act: (p) => p.getByRole("button", { name: "Les Castors", exact: true }).first().click() },
+  { name: "assignment-detail-groups", role: "teacher", path: "/classrooms/c1/assignments/a7" },
+  {
+    name: "assignment-edit-groups",
+    role: "teacher",
+    path: "/classrooms/c1",
+    fold: true,
+    act: async (p) => {
+      await openRowMenu(p, "Lab 5 — Group project", /edit/i);
+      // The switch lives far down the sheet, which scrolls on its own.
+      await p.getByRole("switch", { name: "Group work" }).scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "assignment-publish-blocked",
+    role: "teacher",
+    path: "/classrooms/c1",
+    fold: true,
+    act: async (p) => {
+      const row = p.locator("li", { hasText: "Lab 5 — Group project" }).first();
+      await row.getByRole("button", { name: /publish/i }).click();
+      await p.getByRole("dialog").getByRole("button", { name: "Publish" }).click();
+      await p.getByText("have no group").waitFor();
+    },
+  },
+
   // Student
   { name: "student-home", role: "student", path: "/" },
   { name: "student-home-list", role: "student", path: "/", ls: { "hgc-student-view": "list" } },
