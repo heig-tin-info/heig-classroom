@@ -2,7 +2,8 @@
  * Creation of the squashed source repository (GH-10..13) when the
  * assignment is created. Two strategies:
  * - `whole`  : the full history of the selected branches is pushed as is;
- * - `squash` : each selected branch is reduced to a single initial commit.
+ * - `squash` : each selected branch is reduced to a single initial commit,
+ *   after the student handout conventions (studentize.ts) are applied.
  * Git operations use the installation token (GH-03).
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -13,6 +14,7 @@ import type { Octokit } from "octokit";
 
 import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
+import { applyStudentHandout } from "./studentize.js";
 
 // Squashing creates commits: run git with the bot identity.
 const { git, gitBare } = gitRunner({ identity: true });
@@ -89,6 +91,8 @@ export async function createSquashedRepo(opts: {
         git(work, "clone", "--quiet", "--depth", "1", "--branch", branch, auth(sourceRepo), dir);
         // A single initial commit: replay the head tree without history.
         rmSync(join(dir, ".git"), { recursive: true, force: true });
+        // `student/` overlay and `.studentignore`: the solution stays private.
+        applyStudentHandout(dir);
         git(dir, "init", "-q", "-b", branch);
         git(dir, "add", "-A");
         git(dir, "commit", "-q", "-m", "Initial assignment commit");

@@ -5,8 +5,18 @@
  * weight for two primitives; these stay on the design system.
  */
 
-/** Swiss 1-6 grade from points/max, then a color band and a label. */
+/**
+ * A GRADE out of 6 is already a Swiss mark: the score pipeline publishes
+ * `mark/scale` with `scale: "6"`, both for the indicative tier and for the
+ * LLM review. Converting it again turned a 2.8 into "≈ 3.3/6".
+ */
+export function isSwissMark(max: number): boolean {
+  return max === 6;
+}
+
+/** Swiss 1-6 grade from points/max (as is when it already is one). */
 export function gradeToSix(points: number, max: number): number {
+  if (isSwissMark(max)) return points;
   if (max <= 0) return 1;
   return 1 + (points / max) * 5;
 }
@@ -28,7 +38,7 @@ export function gradeBand(points: number, max: number): GradeBand {
   return { color: "var(--success)", label: "strong" };
 }
 
-/** Pass/fail donut for CI checks. */
+/** Pass/fail donut for CI checks; the counter sits inside the ring. */
 export function TestDonut({
   passed,
   total,
@@ -38,26 +48,30 @@ export function TestDonut({
   total: number;
   size?: number;
 }) {
-  const r = size / 2 - 4;
+  const stroke = Math.max(3, Math.round(size / 12));
+  const r = size / 2 - stroke / 2 - 1;
   const c = 2 * Math.PI * r;
   const frac = total > 0 ? passed / total : 0;
   const failColor = "var(--surface-3)";
   return (
     <span className="relative inline-flex items-center justify-center" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={failColor} strokeWidth="4" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={failColor} strokeWidth={stroke} />
         <circle
           cx={size / 2}
           cy={size / 2}
           r={r}
           fill="none"
           stroke={frac === 1 ? "var(--success)" : frac === 0 ? "var(--danger)" : "var(--warning)"}
-          strokeWidth="4"
+          strokeWidth={stroke}
           strokeLinecap="round"
           strokeDasharray={`${c * frac} ${c}`}
         />
       </svg>
-      <span className="absolute text-[10px] font-bold tabular-nums">
+      <span
+        className="absolute font-bold tabular-nums tracking-tight"
+        style={{ fontSize: Math.max(10, Math.round(size / 4.6)) }}
+      >
         {passed}/{total}
       </span>
     </span>
@@ -76,7 +90,9 @@ export function GradeScale({ points, max }: { points: number; max: number }) {
       >
         {points}/{max}
       </span>
-      <span className="text-xs tabular-nums text-fg-faint">≈ {six.toFixed(1)}/6</span>
+      {isSwissMark(max) ? null : (
+        <span className="whitespace-nowrap text-xs tabular-nums text-fg-faint">≈ {six.toFixed(1)}/6</span>
+      )}
     </span>
   );
 }

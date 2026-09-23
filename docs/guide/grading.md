@@ -25,6 +25,15 @@ The message must match `points/max` with decimals written with a dot, `max`
 greater than zero and `points` not exceeding `max`. Anything else is recorded
 as malformed and flagged in the teacher view.
 
+A `max` of 6 is read as a Swiss mark, shown as is: the
+[score](https://github.com/heig-tin-info/score) pipeline publishes
+`mark/scale` with `scale: "6"`. Any other `max` is converted to the 1–6 scale
+for the student (`15/20 ≈ 4.8/6`). When the run also publishes a `TESTS`
+annotation (`passed/total`, score ≥ 0.7.2), the per-push mark only covers the
+build and the tests, every criterion left to the LLM review counting as zero:
+the student dashboard then shows the tests alone and waits for the review
+before showing a grade.
+
 Emit the annotation exactly once per run. Two `GRADE` annotations in the same
 run invalidate the grade, even when they carry the same value. This is the
 guard against students printing a forged annotation from inside their own test

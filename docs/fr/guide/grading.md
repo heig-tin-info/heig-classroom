@@ -25,6 +25,15 @@ Le message doit correspondre à `points/max`, les décimales étant écrites ave
 point, `max` strictement supérieur à zéro et `points` n'excédant pas `max`. Tout
 le reste est enregistré comme malformé et signalé dans la vue enseignant.
 
+Un `max` de 6 est lu comme une note suisse et affiché tel quel : le pipeline
+[score](https://github.com/heig-tin-info/score) publie `note/échelle` avec
+`scale: "6"`. Tout autre `max` est converti sur l'échelle 1–6 pour l'étudiant
+(`15/20 ≈ 4.8/6`). Lorsque l'exécution publie aussi une annotation `TESTS`
+(`réussis/total`, score ≥ 0.7.2), la note calculée à chaque push ne couvre que
+la compilation et les tests, chaque critère laissé à la revue LLM comptant pour
+zéro : le tableau de bord étudiant n'affiche alors que les tests et attend la
+revue avant d'afficher une note.
+
 N'émettez l'annotation qu'une seule fois par exécution. Deux annotations `GRADE`
 dans la même exécution invalident la note, même lorsqu'elles portent la même
 valeur. C'est la protection contre les étudiants qui afficheraient une

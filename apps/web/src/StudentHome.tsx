@@ -16,11 +16,11 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import type { Me, StudentAssignment, StudentClassroom, StudentRepo } from "@hgc/contracts";
+import type { GradeView, Me, StudentAssignment, StudentClassroom, StudentRepo } from "@hgc/contracts";
 import { resolveFinalGrade } from "@hgc/domain";
 
 import { api, ApiError, apiErrorMessage } from "./api";
-import { GradeScale, TestDonut } from "./charts";
+import { GradeScale, gradeToSix, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
 import { formatDuration, useT } from "./i18n";
@@ -68,7 +68,51 @@ function finalGrade(repo: StudentRepo): { points: number; max: number } | null {
   return final ? { points: final.points, max: final.max ?? 6 } : null;
 }
 
-/** Metrics row for an accepted repository: commits, CI donut, grade scale. */
+/**
+ * The indicative GRADE worth showing, or null. The score pipeline's
+ * per-push mark only covers build and tests: every criterion the LLM review
+ * scores counts as 0 until the review runs, so 22/22 tests read "2.8/6".
+ * When the CI publishes its TESTS counter (score >= 0.7.2), the donut is the
+ * honest feedback and the grade waits for the review. A plain workflow with
+ * no counter grades everything itself: its GRADE stays.
+ */
+export function indicativeGrade(repo: StudentRepo): GradeView | null {
+  const grade = repo.grade;
+  if (!grade || grade.parseStatus !== "ok") return null;
+  return grade.testsTotal ? null : grade;
+}
+
+/** Test counters for the donut: real TESTS counters beat check-run counts. */
+function testCounts(repo: StudentRepo): { passed: number; total: number } | null {
+  if (repo.grade?.testsTotal) return { passed: repo.grade.testsPassed ?? 0, total: repo.grade.testsTotal };
+  if (repo.checksTotal) return { passed: repo.checksPassed ?? 0, total: repo.checksTotal };
+  return null;
+}
+
+/** The tests donut, set right before the row action where the eye lands. */
+function RepoTests({ repo, size = 52 }: { repo: StudentRepo; size?: number }) {
+  const t = useT();
+  const counts = testCounts(repo);
+  if (counts) {
+    return (
+      <Tip label={t("student.testsPassing", counts)}>
+        <span className="inline-flex" aria-label={t("student.testsPassing", counts)}>
+          <TestDonut passed={counts.passed} total={counts.total} size={size} />
+        </span>
+      </Tip>
+    );
+  }
+  if (repo.ciStatus === "pending") {
+    return (
+      <Badge tone="amber" icon={Loader2}>
+        {t("student.ciRunning")}
+      </Badge>
+    );
+  }
+  return null;
+}
+
+/** Metrics row for an accepted repository: commits and grade. */
 function RepoMetrics({
   repo,
   reviewAt,
@@ -84,6 +128,7 @@ function RepoMetrics({
 }) {
   const t = useT();
   const now = useNow(15_000);
+  const indicative = indicativeGrade(repo);
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       {repo.commitCount !== null ? (
@@ -93,22 +138,6 @@ function RepoMetrics({
             n: repo.commitCount,
           })}
         </span>
-      ) : null}
-      {repo.grade?.testsTotal ? (
-        // Real test counters (TESTS annotation) beat check-run counts.
-        <span className="inline-flex items-center gap-1.5">
-          <TestDonut passed={repo.grade.testsPassed ?? 0} total={repo.grade.testsTotal} size={36} />
-          <span className="text-xs text-fg-faint">{t("student.tests")}</span>
-        </span>
-      ) : repo.checksTotal ? (
-        <span className="inline-flex items-center gap-1.5">
-          <TestDonut passed={repo.checksPassed ?? 0} total={repo.checksTotal} size={36} />
-          <span className="text-xs text-fg-faint">{t("student.tests")}</span>
-        </span>
-      ) : repo.ciStatus === "pending" ? (
-        <Badge tone="amber" icon={Loader2}>
-          {t("student.ciRunning")}
-        </Badge>
       ) : null}
       {!showGrades ? null : validated && finalGrade(repo) ? (
         <Tip label={t("student.finalTip")}>
@@ -127,11 +156,19 @@ function RepoMetrics({
             <span className="text-xs text-fg-faint">{t("student.reviewed")}</span>
           </span>
         </Tip>
-      ) : repo.grade && repo.grade.parseStatus === "ok" ? (
-        <span className="inline-flex items-center gap-1.5">
-          {repo.gradeFrozen ? <Lock className="size-3.5 text-fg-faint" /> : null}
-          <GradeScale points={repo.grade.points!} max={repo.grade.max!} />
-          <span className="text-xs text-fg-faint">{t("student.indicative")}</span>
+      ) : (
+        <>
+          {indicative ? (
+            <span className="inline-flex items-center gap-1.5">
+              {repo.gradeFrozen ? <Lock className="size-3.5 text-fg-faint" /> : null}
+              <GradeScale points={indicative.points!} max={indicative.max!} />
+              <span className="text-xs text-fg-faint">{t("student.indicative")}</span>
+            </span>
+          ) : testCounts(repo) ? null : repo.ciStatus === "pass" ? (
+            <Badge tone="green">{t("student.ciPass")}</Badge>
+          ) : repo.ciStatus === "fail" ? (
+            <Badge tone="red">{t("student.ciFail")}</Badge>
+          ) : null}
           {repo.gradeFrozen ? (
             // Countdown to deadline + grace, then "running" until the
             // authoritative review lands (llmGrade above takes over).
@@ -144,12 +181,8 @@ function RepoMetrics({
               </span>
             </Tip>
           ) : null}
-        </span>
-      ) : repo.ciStatus === "pass" ? (
-        <Badge tone="green">{t("student.ciPass")}</Badge>
-      ) : repo.ciStatus === "fail" ? (
-        <Badge tone="red">{t("student.ciFail")}</Badge>
-      ) : null}
+        </>
+      )}
     </div>
   );
 }
@@ -370,7 +403,10 @@ function StudentAssignmentRow({
           />
         </div>
       ) : null}
-      <RowAction a={a} githubLinked={githubLinked} codespaceHost={codespaceHost} />
+      <div className="flex items-center gap-4">
+        {isAccepted(a) ? <RepoTests repo={a.repo!} /> : null}
+        <RowAction a={a} githubLinked={githubLinked} codespaceHost={codespaceHost} />
+      </div>
     </li>
   );
 }
@@ -444,9 +480,10 @@ function GradeCell({ a }: { a: StudentAssignment }) {
       </span>
     );
   }
-  if (a.repo?.grade && a.repo.grade.parseStatus === "ok") {
-    return <GradeScale points={a.repo.grade.points!} max={a.repo.grade.max!} />;
-  }
+  const indicative = a.repo ? indicativeGrade(a.repo) : null;
+  if (indicative) return <GradeScale points={indicative.points!} max={indicative.max!} />;
+  // Score pipeline before the review: the tests are the feedback.
+  if (a.repo && testCounts(a.repo)) return <RepoTests repo={a.repo} size={44} />;
   return <span className="text-fg-faint">—</span>;
 }
 
@@ -466,8 +503,8 @@ function StudentList({
     deadline: (a) => new Date(a.deadlineAt).getTime(),
     status: (a) => (a.repo?.provisionStatus === "ok" ? 1 : 0),
     grade: (a) =>
-      a.repo?.grade && a.repo.grade.parseStatus === "ok"
-        ? a.repo.grade.points! / (a.repo.grade.max! || 1)
+      a.repo && indicativeGrade(a.repo)
+        ? gradeToSix(a.repo.grade!.points!, a.repo.grade!.max!)
         : -1,
   };
   const { sorted, sort, toggle } = useSortableTable(
@@ -534,7 +571,25 @@ function StudentList({
   );
 }
 
-/** The nearest deadline still ahead: what the student should look at first. */
+/** Within this window an accepted assignment is still worth a reminder. */
+const UP_NEXT_SOON_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * The "Up next" card only earns its place when it asks for something: an
+ * assignment still to accept, or a deadline within 48 hours. Otherwise it
+ * repeats the row right below it (an assignment just accepted showed twice).
+ */
+export function pickUpNext<T extends { a: StudentAssignment }>(open: T[], now: number): T | null {
+  return (
+    [...open]
+      .sort((x, y) => x.a.deadlineAt.localeCompare(y.a.deadlineAt))
+      .find(
+        ({ a }) => !isAccepted(a) || new Date(a.deadlineAt).getTime() - now < UP_NEXT_SOON_MS,
+      ) ?? null
+  );
+}
+
+/** What the student should look at first, when there is something to do. */
 function UpNext({
   item,
   githubLinked,
@@ -591,7 +646,7 @@ export function StudentHome({ me }: { me: Me }) {
   );
   const filteredFlat = fuzzyFilter(query, flat, ({ room, a }) => `${a.name} ${room.name}`);
   const open = flat.filter(({ a }) => !isLocked(a) && new Date(a.deadlineAt).getTime() > now);
-  const upNext = [...open].sort((x, y) => x.a.deadlineAt.localeCompare(y.a.deadlineAt))[0] ?? null;
+  const upNext = pickUpNext(open, now);
 
   const viewOption = (value: StudentView, Icon: typeof LayoutGrid, label: string) => ({
     value,

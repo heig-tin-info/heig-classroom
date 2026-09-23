@@ -56,6 +56,16 @@ processus de rédaction restent privés. L'enseignant peut continuer d'y
 committer, et le portail peut ensuite ouvrir des pull requests sur chaque dépôt
 étudiant pour distribuer les correctifs.
 
+Le dépôt source peut contenir la version fonctionnelle de l'enseignant, afin que
+sa propre CI prouve que le labo est faisable. Deux conventions la transforment
+alors en énoncé étudiant au moment du squash, à la création comme à chaque mise
+à jour ultérieure : un dossier `student/` est copié par-dessus la racine (le
+squelette vide qui remplace la solution) puis supprimé, et un fichier
+`.studentignore` liste les chemins réservés à l'enseignant, un par ligne
+(`scripts/`, `.github/workflows/studentize.yml`), supprimés avec le fichier
+lui-même. Elles ne s'appliquent qu'à la stratégie squash : la stratégie
+complète distribue l'historique tel quel.
+
 ## Flux de travail de l'étudiant
 
 Les étudiants se connectent avec Switch edu-ID. À la première connexion, le

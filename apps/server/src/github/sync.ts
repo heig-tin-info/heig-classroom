@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { authUrl, gitRunner } from "./git.js";
+import { applyStudentHandout } from "./studentize.js";
 
 // Sync creates the per-branch primary commits: bot identity required.
 const { git, gitBare } = gitRunner({ identity: true });
@@ -66,6 +67,9 @@ export function updateSquashedRepo(opts: {
       git(work, "clone", "--quiet", "--branch", branch, authUrl(token, org, squashedRepo), sqDir);
       git(work, "clone", "--quiet", "--depth", "1", "--branch", branch, authUrl(token, org, sourceRepo), srcDir);
       sourceHeads[branch] = git(srcDir, "rev-parse", "HEAD").trim();
+      // Same handout conventions as at creation, or an update would bring
+      // the solution back.
+      applyStudentHandout(srcDir);
 
       // Replace the working tree with the source content, keep .git.
       for (const entry of readdirSync(sqDir)) {
