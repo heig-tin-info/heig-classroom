@@ -2,7 +2,7 @@
 
 ## What this page shows
 
-**Up next** shows the nearest deadline. Below, one section per classroom you belong to, with its assignments: deadline and live countdown, status, tests and grade. The search filters everything; the switch toggles between sections and a flat sortable list.
+**Up next** points at what needs you: an assignment still to accept, or a deadline less than 48 hours away. Below, one section per classroom you belong to, with its assignments: deadline and live countdown, status, tests and grade. The search filters everything; the switch toggles between sections and a flat sortable list.
 
 ## How to accept an assignment
 
@@ -10,7 +10,7 @@ Link your GitHub account first (Settings), then click **Accept**: your private r
 
 ## How grades work
 
-While the assignment is open, every push runs the tests and shows an **indicative** grade. After the deadline your last commit is frozen and receives the full review; the final grade and a `GRADING.yml` with per-criterion points land in your repository.
+While the assignment is open, every push runs the tests: the ring shows how many pass. When the tests are only part of the grade, the grade waits for the review; otherwise an **indicative** grade shows next to them. After the deadline your last commit is frozen and receives the full review; the final grade and a `GRADING.yml` with per-criterion points land in your repository.
 
 ## Teachers only
 

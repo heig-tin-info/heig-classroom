@@ -48,6 +48,15 @@ students: full content, no history, so the solution and the drafting process sta
 private. The teacher can keep committing to it, and the portal can later open pull
 requests on every student repository to distribute fixes.
 
+The source repository can hold the working teacher version, so that its own CI
+proves the lab is solvable. Two conventions then turn it into the student
+handout when it is squashed, at creation and on every later update: a
+`student/` directory is copied over the root (the empty scaffold replacing the
+solution) and removed, and a `.studentignore` file lists teacher-only paths,
+one per line (`scripts/`, `.github/workflows/studentize.yml`), removed along
+with the file itself. They apply to the squash strategy only: the whole
+strategy distributes the history as is.
+
 ## Student workflow
 
 Students sign in with Switch edu-ID. On first login the portal matches their

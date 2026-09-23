@@ -7,6 +7,8 @@
  *   invalidate the grade; anti-tampering mitigation H5);
  * - the message must follow `points/max`, dot decimals, `max > 0`,
  *   `points <= max`.
+ * A `max` of 6 is a Swiss mark (the score pipeline publishes `mark/6`): the
+ * student view shows it as is instead of converting it (apps/web charts.tsx).
  */
 
 export const GRADE_ANNOTATION_TITLE = "GRADE";

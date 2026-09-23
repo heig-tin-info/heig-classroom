@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { rowAffordances } from "./StudentHome";
+import { gradeToSix } from "./charts";
+import { indicativeGrade, rowAffordances } from "./StudentHome";
+import { makeGrade, makeStudentRepo } from "./test/fixtures";
 import { DICTS } from "./i18n";
 
 /**
@@ -72,5 +74,33 @@ describe("rowAffordances", () => {
       expect(DICTS.fr[key]).toBeTruthy();
       expect(DICTS.fr[key]).not.toBe(DICTS.en[key]);
     }
+  });
+});
+
+/**
+ * The indicative grade, from the 2026-09-23 linked-list lab: 22/22 tests
+ * showed "2.8/6 ≈ 3.3/6". The score pipeline already publishes a Swiss mark
+ * (no second conversion), and that per-push mark only covers build + tests,
+ * so it gives way to the tests donut when the CI publishes its counters.
+ */
+describe("indicative grade", () => {
+  it("takes a GRADE out of 6 as the Swiss mark it already is", () => {
+    expect(gradeToSix(2.8, 6)).toBe(2.8);
+    expect(gradeToSix(15, 20)).toBe(4.75);
+  });
+
+  it("hides the partial mark of the score pipeline behind its test counters", () => {
+    const repo = makeStudentRepo({ grade: makeGrade({ points: 2.8, testsPassed: 22, testsTotal: 22 }) });
+    expect(indicativeGrade(repo)).toBeNull();
+  });
+
+  it("keeps the grade of a workflow that publishes no test counters", () => {
+    const grade = makeGrade({ points: 15, max: 20, testsPassed: null, testsTotal: null });
+    expect(indicativeGrade(makeStudentRepo({ grade }))).toBe(grade);
+  });
+
+  it("shows nothing for a malformed grade", () => {
+    const grade = makeGrade({ parseStatus: "malformed", testsTotal: null });
+    expect(indicativeGrade(makeStudentRepo({ grade }))).toBeNull();
   });
 });

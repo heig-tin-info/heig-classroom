@@ -30,13 +30,13 @@ const upNextCard = (): HTMLElement =>
   screen.getByText("Up next").closest(".rounded-card") as HTMLElement;
 
 describe("StudentHome", () => {
-  it("puts the nearest open deadline in the Up next card", async () => {
+  it("puts the nearest assignment to accept in the Up next card", async () => {
     mockFetch({
       [`GET ${ROOMS}`]: ok([
         makeStudentClassroom({
           assignments: [
-            makeStudentAssignment({ id: "a1", name: "Far away", deadlineAt: at(9 * DAY) }),
-            makeStudentAssignment({ id: "a2", name: "Due first", deadlineAt: at(2 * DAY) }),
+            makeStudentAssignment({ id: "a1", name: "Far away", deadlineAt: at(9 * DAY), repo: null }),
+            makeStudentAssignment({ id: "a2", name: "Due first", deadlineAt: at(2 * DAY), repo: null }),
             // Already closed: never "up next", however near it is.
             makeStudentAssignment({ id: "a3", name: "Last week", deadlineAt: at(-DAY) }),
           ],
@@ -49,6 +49,33 @@ describe("StudentHome", () => {
     expect(within(upNextCard()).queryByText("Far away")).toBeNull();
     // The page header counts the assignments still open.
     expect(screen.getByText("2 open assignments")).toBeVisible();
+  });
+
+  it("shows no Up next card for an accepted assignment still far from its deadline", async () => {
+    mockFetch({
+      [`GET ${ROOMS}`]: ok([
+        makeStudentClassroom({
+          assignments: [makeStudentAssignment({ name: "Just accepted", deadlineAt: at(9 * DAY) })],
+        }),
+      ]),
+    });
+    renderStudent();
+    // Only the row: the card would repeat it and ask for nothing.
+    expect(await screen.findAllByText("Just accepted")).toHaveLength(1);
+    expect(screen.queryByText("Up next")).toBeNull();
+  });
+
+  it("reminds an accepted assignment in the Up next card within 48 hours", async () => {
+    mockFetch({
+      [`GET ${ROOMS}`]: ok([
+        makeStudentClassroom({
+          assignments: [makeStudentAssignment({ name: "Due tomorrow", deadlineAt: at(DAY) })],
+        }),
+      ]),
+    });
+    renderStudent();
+    await screen.findByText("Up next");
+    expect(within(upNextCard()).getByText("Due tomorrow")).toBeVisible();
   });
 
   it("gives the free-mode row a link to the repository and no Start", async () => {
@@ -174,7 +201,7 @@ describe("StudentHome", () => {
       [`GET ${ROOMS}`]: ok([
         makeStudentClassroom({
           assignments: [
-            makeStudentAssignment({ id: "a1", name: "Pointers" }),
+            makeStudentAssignment({ id: "a1", name: "Pointers", repo: null }),
             makeStudentAssignment({ id: "a2", name: "Quadratic" }),
           ],
         }),
