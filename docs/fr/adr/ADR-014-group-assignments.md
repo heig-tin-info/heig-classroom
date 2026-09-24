@@ -95,15 +95,26 @@ note du dépôt du groupe. Les indications de rafraîchissement et le courriel d
 chaque membre.
 
 - **Acceptation.** Le premier membre qui accepte crée le dépôt
-  `<assignment-slug>-<group-slug>` (tronqué aux 100 caractères de GitHub ; désambiguïsé avec
-  l'identifiant du groupe quand un autre dépôt suivi de l'organisation porte déjà ce nom, puisque
-  le provisionnement adopte un dépôt existant de ce nom) et chaque membre dont le compte GitHub
-  est lié est invité (`push`) aussitôt. Les acceptations suivantes ne font que rattacher le
-  membre (invitation idempotente). Un index unique partiel sur `(assignment_id, group_id)` —
-  migration additive `0029_group-repos` — est la clé d'idempotence : deux membres qui acceptent
-  à la même seconde insèrent une seule ligne et provisionnent le même dépôt. Un étudiant sans
-  groupe reçoit `409 no_group`. Un membre sans identifiant GitHub est invité quand il lie son
-  compte, ou quand il accepte.
+  `<assignment-slug>-<group-slug>` (tronqué aux 100 caractères de GitHub) et chaque membre dont
+  le compte GitHub est lié est invité (`push`) aussitôt. Les acceptations suivantes ne font que
+  rattacher le membre (invitation idempotente). Un étudiant sans groupe reçoit `409 no_group`.
+  Un membre sans identifiant GitHub est invité quand il lie son compte, ou quand il accepte.
+- **Un seul provisionnement à la fois.** La migration `0029_group-repos` ajoute un index unique
+  partiel sur `(assignment_id, group_id)`, si bien que deux membres qui acceptent à la même
+  seconde insèrent une seule ligne, et une colonne `provision_claimed_at` : une réclamation
+  atomique laisse une seule acceptation provisionner la ligne (une ligne en échec, ou en attente
+  sans réclamation ou avec une réclamation de plus de cinq minutes), l'autre répond
+  `409 provision_in_progress`. Un échec tardif n'écrase jamais une ligne provisionnée. La même
+  migration restreint `student_repos_assignment_user_uq` à `WHERE group_id IS NULL` (échange
+  d'index, aucune donnée modifiée) : le `user_id` d'un dépôt de groupe n'est que son créateur,
+  qui peut déjà détenir une autre ligne sur le devoir — une ligne du lot 1 en échec, un groupe
+  d'une personne formé après coup.
+- **Pas d'adoption d'une classe à l'autre.** Le provisionnement adopte un dépôt existant du même
+  nom (un 422 vaut « étape déjà faite »). La réclamation réserve donc le nom sur la ligne tant
+  qu'elle est en attente, et un nom qu'une autre ligne suivie porte ou réserve est désambiguïsé
+  avec l'identifiant du groupe. Et une ligne de groupe n'adopte jamais un dépôt dont une autre
+  ligne enregistre déjà l'identifiant GitHub : le provisionnement échoue avant que quiconque y
+  soit invité.
 - **Les changements de membres suivent sur GitHub.** Ajouter (ou déplacer vers) invite ; retirer
   (ou déplacer hors de) révoque la place de collaborateur et annule une invitation en attente
   **d'abord** — un refus de GitHub répond `502 revoke_failed` et laisse l'appartenance intacte.
@@ -113,8 +124,11 @@ chaque membre.
 - **Les données existantes ne sont pas migrées.** Des devoirs en groupe peuvent contenir des
   dépôts individuels créés par des acceptations du lot 1. Ils continuent de fonctionner pour leur
   étudiant : un dépôt individuel vivant l'emporte sur celui du groupe dans chaque vue, son
-  titulaire n'est pas invité dans le dépôt du groupe, et une acceptation le renvoie tel quel. Une
-  fois supprimé sur GitHub, le dépôt du groupe prend le relais.
+  titulaire n'est ni invité dans le dépôt du groupe ni destinataire de ses courriels, et une
+  acceptation le renvoie tel quel. « Vivant » est un seul prédicat, `isLiveIndividualRepo` dans
+  `@hgc/domain` (provisionné, nommé, non supprimé) : une ligne du lot 1 en échec ou en attente ne
+  tient personne à l'écart du dépôt de son groupe. Une fois supprimé sur GitHub, le dépôt du
+  groupe prend le relais.
 - Chaque écriture sur GitHub est auditée (`group.repo.invite`, `group.repo.revoke`), à côté des
   entrées existantes `assignment.accept`, `group.member.*` et `roster.remove`, qui nomment
   désormais ce qui a été invité ou révoqué.

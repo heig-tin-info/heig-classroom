@@ -85,14 +85,23 @@ and exports stay **one line per student**, each member reading the group reposit
 Refresh hints and the final-grade e-mail go to every member.
 
 - **Acceptance.** The first member to accept creates the repository
-  `<assignment-slug>-<group-slug>` (capped at GitHub's 100 characters; disambiguated with the
-  group id when another tracked repository of the organization already bears the name, since
-  provisioning adopts an existing repository of that name) and every member with a linked GitHub
-  account is invited (`push`) right away. Later acceptances only attach the member (idempotent
-  invitation). A partial unique index on `(assignment_id, group_id)` — additive migration
-  `0029_group-repos` — is the idempotency key: two members accepting at the same second insert
-  one row and provision the same repository. A student in no group gets `409 no_group`. A member
-  without a GitHub login is invited when they link their account, or when they accept.
+  `<assignment-slug>-<group-slug>` (capped at GitHub's 100 characters) and every member with a
+  linked GitHub account is invited (`push`) right away. Later acceptances only attach the member
+  (idempotent invitation). A student in no group gets `409 no_group`. A member without a GitHub
+  login is invited when they link their account, or when they accept.
+- **One provisioning at a time.** Migration `0029_group-repos` adds a partial unique index on
+  `(assignment_id, group_id)`, so two members accepting at the same second insert one row, and a
+  `provision_claimed_at` column: an atomic claim lets one acceptance provision the row (a failed
+  row, or a pending one with no claim or a claim older than five minutes), the other answers
+  `409 provision_in_progress`. A late failure never overwrites a provisioned row. The same
+  migration narrows `student_repos_assignment_user_uq` to `WHERE group_id IS NULL` (an index swap,
+  no data change): a group repository's `user_id` is only its creator, who may already hold
+  another row on the assignment — a failed lot-1 row, a solo group formed afterwards.
+- **No adoption across classrooms.** Provisioning adopts an existing repository of the same name
+  (a 422 is "step already done"). The claim therefore reserves the name on the row while it is
+  still pending, and a name another tracked row bears or reserves is disambiguated with the group
+  id. And a group row never adopts a repository whose GitHub id another row already records: the
+  provisioning fails before anyone is invited on it.
 - **Membership changes follow on GitHub.** Adding (or moving in) invites; removing (or moving
   out) revokes the collaborator seat and cancels a pending invitation **first** — a refusal from
   GitHub answers `502 revoke_failed` and leaves the membership untouched. Rename, deletion and
@@ -100,8 +109,11 @@ Refresh hints and the final-grade e-mail go to every member.
   revokes their group access before the cascade, with the same refusal.
 - **Existing data is not migrated.** Group assignments may hold individual repositories created
   by lot-1 acceptances. They keep working for their student: a live individual repository wins
-  over the group one in every read view, its holder is not invited into the group repository, and
-  an acceptance returns it unchanged. Once it is deleted on GitHub, the group repository takes over.
+  over the group one in every read view, its holder is not invited into the group repository nor
+  mailed about it, and an acceptance returns it unchanged. "Live" is one predicate,
+  `isLiveIndividualRepo` in `@hgc/domain` (provisioned, named, not deleted): a failed or pending
+  lot-1 row holds nobody out of their group's repository. Once deleted on GitHub, the group
+  repository takes over.
 - Every GitHub write is audited (`group.repo.invite`, `group.repo.revoke`), next to the existing
   `assignment.accept`, `group.member.*` and `roster.remove` entries which now name what was
   invited or revoked.
