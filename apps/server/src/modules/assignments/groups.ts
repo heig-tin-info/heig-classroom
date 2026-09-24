@@ -34,16 +34,9 @@ import {
 } from "../../db/schema.js";
 import { publish } from "../../events.js";
 import { installationClient } from "../../github/app.js";
-import {
-  enrollmentLogin,
-  groupRepoRow,
-  invitableMembers,
-  inviteMember,
-  memberGroupRepos,
-  revokeMember,
-} from "../../group-repos.js";
+import { attachMember } from "../../group-repos.js";
 import { accessibleAssignment, teacherGuard } from "../guards.js";
-import { clientFor, slugify } from "./shared.js";
+import { revokeGroupAccess, slugify } from "./shared.js";
 
 type AssignmentRow = typeof assignments.$inferSelect;
 type GroupRow = typeof assignmentGroups.$inferSelect;
@@ -336,34 +329,21 @@ export async function assignmentGroupRoutes(
    * GitHub could not be reached or refused — the caller must then leave the
    * membership alone. Returns the repositories revoked (possibly none).
    */
-  async function revokeLeaving(
+  function revokeLeaving(
     req: FastifyRequest,
     reply: FastifyReply,
     scope: Scope,
     enrollmentId: string,
     groupId: string,
   ): Promise<string[] | null> {
-    const repos = await memberGroupRepos(app.db, enrollmentId, groupId);
-    if (repos.length === 0) return [];
-    const client = await clientFor(config, reply, scope.org);
-    if (!client) return null;
-    try {
-      return await revokeMember(
-        app.db,
-        client.octokit,
-        repos,
-        { enrollmentId, githubLogin: await enrollmentLogin(app.db, enrollmentId) },
-        { actorUserId: req.user!.id, reason: "group.member" },
-      );
-    } catch (err) {
-      req.log.error({ err, enrollmentId, groupId }, "group repository revocation failed");
-      await reply.code(502).send({
-        error: "revoke_failed",
-        message:
-          "GitHub did not revoke this student's access to the group repository: nothing was changed, try again",
-      });
-      return null;
-    }
+    return revokeGroupAccess(app, config, req, reply, {
+      org: scope.org,
+      enrollmentId,
+      groupId,
+      reason: "group.member",
+      refusal:
+        "GitHub did not revoke this student's access to the group repository: nothing was changed, try again",
+    });
   }
 
   /**
@@ -378,20 +358,16 @@ export async function assignmentGroupRoutes(
     enrollmentId: string,
     groupId: string,
   ): Promise<boolean | null> {
-    const repo = await groupRepoRow(app.db, scope.assignment.id, groupId);
-    if (!repo || repo.provisionStatus !== "ok" || !repo.fullName || repo.deletedAt) return null;
-    const member = (await invitableMembers(app.db, scope.assignment.id, groupId)).find(
-      (m) => m.enrollmentId === enrollmentId,
-    );
-    if (!member || scope.org.installationId === null) return null;
+    const installationId = scope.org.installationId;
+    if (installationId === null) return null;
     try {
-      const client = await installationClient(config, scope.org.installationId);
-      await inviteMember(app.db, client.octokit, repo, member, {
-        actorUserId: req.user!.id,
-        reason: "group.member",
-      });
-      publish("repos", [`user:${member.userId}`]);
-      return true;
+      const attached = await attachMember(
+        app.db,
+        async () => (await installationClient(config, installationId)).octokit,
+        { assignmentId: scope.assignment.id, groupId, enrollmentId },
+        { actorUserId: req.user!.id, reason: "group.member" },
+      );
+      return attached ? true : null;
     } catch (err) {
       req.log.error({ err, enrollmentId, groupId }, "group repository invitation failed");
       return false;

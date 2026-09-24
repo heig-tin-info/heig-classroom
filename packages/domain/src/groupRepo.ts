@@ -30,19 +30,40 @@ export function groupRepoName(
   return `${head}${tail}`;
 }
 
+/** The fields of a `student_repos` row the rules below read. */
+export interface RepoLifeLike {
+  groupId: string | null;
+  provisionStatus: string;
+  fullName: string | null;
+  deletedAt: Date | string | null;
+}
+
+/**
+ * A live individual repository: provisioned, named, not deleted, no group.
+ * In a group assignment it can only be a lot-1 leftover, created before
+ * acceptance knew about groups — and its student keeps working in it. The
+ * ONE definition of that "holder": the read views, the acceptance, the
+ * invitations and the e-mails all ask this predicate, so a failed or pending
+ * lot-1 row never holds a student out of their group's repository in one
+ * place while another place already invited them into it.
+ */
+export function isLiveIndividualRepo(r: RepoLifeLike): boolean {
+  return (
+    r.groupId === null && r.provisionStatus === "ok" && r.fullName !== null && r.deletedAt === null
+  );
+}
+
 /**
  * The repository a student's line reads on an assignment. `own` is the
  * student's individual repository (no group), `group` the repository of their
- * group. A live individual repository wins: in a group assignment it can only
- * be a lot-1 leftover, created before acceptance knew about groups, and the
- * student keeps working in it as before. Once it is gone (deleted on GitHub),
- * the group repository takes over; with neither, the dead individual one is
- * still shown so its deletion stays visible.
+ * group. A live individual repository wins (see `isLiveIndividualRepo`); a
+ * failed, pending or deleted one gives way to the group repository, and with
+ * no group repository it is still shown, so its state stays visible.
  */
-export function pickStudentRepo<R extends { deletedAt: Date | string | null }>(
+export function pickStudentRepo<R extends RepoLifeLike>(
   own: R | undefined,
   group: R | undefined,
 ): R | undefined {
-  if (own && own.deletedAt === null) return own;
+  if (own && isLiveIndividualRepo(own)) return own;
   return group ?? own;
 }

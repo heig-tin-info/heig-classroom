@@ -18,8 +18,7 @@ import {
   orgExistsOnGithub,
   resolveOrgInstallation,
 } from "../github/app.js";
-import { enrollmentLogin, memberGroupRepos, revokeMember } from "../group-repos.js";
-import { clientFor } from "./assignments/shared.js";
+import { revokeGroupAccess } from "./assignments/shared.js";
 import { classroomGrades } from "./grades.js";
 import {
   accessibleClassroom,
@@ -639,34 +638,20 @@ export async function classroomsPlugin(
       // away (ON DELETE CASCADE). A group whose repository exists owes GitHub
       // a revocation for that, so it happens first — and a refusal keeps the
       // student on the roster rather than leaving them a silent access.
-      const groupRepos = await memberGroupRepos(app.db, entry.id);
-      let revoked: string[] = [];
-      if (groupRepos.length > 0) {
-        const [org] = await app.db
-          .select({ login: organizations.login, installationId: organizations.installationId })
-          .from(classrooms)
-          .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
-          .where(eq(classrooms.id, entry.classroomId))
-          .limit(1);
-        const client = await clientFor(config, reply, org!);
-        if (!client) return reply;
-        try {
-          revoked = await revokeMember(
-            app.db,
-            client.octokit,
-            groupRepos,
-            { enrollmentId: entry.id, githubLogin: await enrollmentLogin(app.db, entry.id) },
-            { actorUserId: req.user!.id, reason: "roster.remove" },
-          );
-        } catch (err) {
-          req.log.error({ err, enrollmentId: entry.id }, "group repository revocation failed");
-          return reply.code(502).send({
-            error: "revoke_failed",
-            message:
-              "GitHub did not revoke this student's access to their group repositories: the student was not removed, try again",
-          });
-        }
-      }
+      const [org] = await app.db
+        .select({ login: organizations.login, installationId: organizations.installationId })
+        .from(classrooms)
+        .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
+        .where(eq(classrooms.id, entry.classroomId))
+        .limit(1);
+      const revoked = await revokeGroupAccess(app, config, req, reply, {
+        org: org!,
+        enrollmentId: entry.id,
+        reason: "roster.remove",
+        refusal:
+          "GitHub did not revoke this student's access to their group repositories: the student was not removed, try again",
+      });
+      if (revoked === null) return reply;
       await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
       await audit(app.db, {
         actorUserId: req.user!.id,

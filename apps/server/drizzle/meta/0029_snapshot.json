@@ -1,5 +1,5 @@
 {
-  "id": "f527cddc-c628-4f37-8336-5e4080cc2739",
+  "id": "7d03cae6-6ec8-4af3-ad8d-f3ecf804f26e",
   "prevId": "16f2a785-adce-43f7-8d58-9d527fa64e79",
   "version": "7",
   "dialect": "postgresql",
@@ -2086,6 +2086,12 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": false
+        },
+        "provision_claimed_at": {
+          "name": "provision_claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -2106,6 +2112,7 @@
             }
           ],
           "isUnique": true,
+          "where": "\"student_repos\".\"group_id\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}

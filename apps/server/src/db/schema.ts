@@ -524,10 +524,21 @@ export const studentRepos = pgTable(
      * group never deletes a repository.
      */
     groupId: uuid("group_id").references(() => assignmentGroups.id, { onDelete: "set null" }),
+    /**
+     * Provisioning claim (lot 2): set when an acceptance takes the right to
+     * provision this row, so a concurrent acceptance of the same row (two
+     * members of a group) waits instead of provisioning twice. A claim older
+     * than a few minutes is stale (the process died) and can be taken over.
+     */
+    provisionClaimedAt: timestamp("provision_claimed_at", { withTimezone: true }),
   },
   (t) => [
-    // Provisioning idempotency key (GH-20, NFR-09).
-    uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
+    // Provisioning idempotency key (GH-20, NFR-09), individual repositories
+    // only: a group repository is keyed by its group, and its `user_id` (who
+    // created it) may already hold another row on the same assignment.
+    uniqueIndex("student_repos_assignment_user_uq")
+      .on(t.assignmentId, t.userId)
+      .where(sql`${t.groupId} IS NULL`),
     index("student_repos_group_idx").on(t.groupId),
     // Group provisioning idempotency key (lot 2): two members accepting at
     // the same second insert the same row, and only one wins.

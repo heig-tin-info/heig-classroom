@@ -29,7 +29,12 @@ import {
   studentRepos,
   users,
 } from "./db/schema.js";
-import { inviteOnGithubLink } from "./group-repos.js";
+import {
+  inviteMembers,
+  inviteOnGithubLink,
+  markProvisionFailed,
+  repoUserIds,
+} from "./group-repos.js";
 import { assignmentDetailRoutes } from "./modules/assignments/detail.js";
 import { assignmentGroupRoutes } from "./modules/assignments/groups.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
@@ -40,7 +45,7 @@ import { testDb, type TestDb } from "./test/db.js";
 // --- GitHub, recorded -------------------------------------------------------
 
 type Call = { route: string; params: Record<string, unknown> };
-const { calls, request, provision, failing } = vi.hoisted(() => {
+const { calls, request, provision, failing, existing } = vi.hoisted(() => {
   const calls: { route: string; params: Record<string, unknown> }[] = [];
   /** Routes that answer 500 in the current test. */
   const failing = new Set<string>();
@@ -56,12 +61,35 @@ const { calls, request, provision, failing } = vi.hoisted(() => {
     // Live metrics of the read views: unreachable, the views fall back.
     throw Object.assign(new Error(`unexpected ${route}`), { status: 404 });
   };
-  /** Replay-safe like the real one: the same name always yields the same repository. */
-  const provision = async (opts: { org: string; targetRepo: string; studentLogin: string }) => {
-    calls.push({ route: "provision", params: { ...opts } });
+  /** Repositories that already exist on GitHub (name → id): the 422 path. */
+  const existing = new Map<string, number>();
+  /**
+   * Replay-safe like the real one: the same name always yields the same
+   * repository. An existing name is adopted only past `canAdopt`, and the
+   * acceptor's invitation (`provision-invite`) comes after that guard.
+   */
+  const provision = async (opts: {
+    org: string;
+    targetRepo: string;
+    studentLogin: string;
+    canAdopt?: (id: number) => Promise<boolean>;
+  }) => {
+    const { canAdopt: _guard, ...params } = opts;
+    calls.push({ route: "provision", params });
     await new Promise((r) => setTimeout(r, 5));
     let id = 0;
     for (const c of opts.targetRepo) id = (id * 31 + c.charCodeAt(0)) % 1_000_000_007;
+    const adopted = existing.get(opts.targetRepo);
+    if (adopted !== undefined) {
+      id = adopted;
+      if (opts.canAdopt && !(await opts.canAdopt(id))) {
+        throw new Error(`${opts.targetRepo} belongs to another tracked repository`);
+      }
+    }
+    calls.push({
+      route: "provision-invite",
+      params: { repo: opts.targetRepo, username: opts.studentLogin },
+    });
     return {
       repoId: id,
       fullName: `${opts.org}/${opts.targetRepo}`,
@@ -70,7 +98,7 @@ const { calls, request, provision, failing } = vi.hoisted(() => {
       invitationStatus: "pending" as const,
     };
   };
-  return { calls, request, provision, failing };
+  return { calls, request, provision, failing, existing };
 });
 vi.mock("./github/app.js", () => ({
   installationClient: async () => ({ octokit: { request }, token: "t" }),
@@ -227,6 +255,7 @@ describe("group repositories (issue #2, lot 2)", () => {
   beforeEach(async () => {
     calls.length = 0;
     failing.clear();
+    existing.clear();
     db = await testDb();
     s = await seed(db);
     app = await serve(db);
@@ -280,15 +309,15 @@ describe("group repositories (issue #2, lot 2)", () => {
 
   it("two members accepting at the same second create ONE repository", async () => {
     const [a, b] = await Promise.all([accept(app, s, "Ammann"), accept(app, s, "Bovet")]);
-    expect(a.statusCode).toBe(200);
-    expect(b.statusCode).toBe(200);
-    expect(a.json<{ id: string }>().id).toBe(b.json<{ id: string }>().id);
+    // One provisions; the other either attaches once it is done (200) or is
+    // told to come back in a moment (409) — never a second provisioning.
+    const codes = [a.statusCode, b.statusCode].sort();
+    expect(codes[0]).toBe(200);
+    expect([200, 409]).toContain(codes[1]);
     const repos = await groupRepos(db, s);
     expect(repos).toHaveLength(1);
-    // Replay-safe provisioning: whoever ran it, it targeted the same name.
-    expect(new Set(of("provision").map((c) => c.params.targetRepo))).toEqual(
-      new Set(["labo-1-group-1"]),
-    );
+    expect(repos[0]!.provisionStatus).toBe("ok");
+    expect(of("provision")).toHaveLength(1);
     await app.close();
   });
 
@@ -300,7 +329,7 @@ describe("group repositories (issue #2, lot 2)", () => {
     await app.close();
   });
 
-  it("disambiguates a name another repository of the organization already bears", async () => {
+  it("disambiguates a name another classroom's in-flight provisioning reserves", async () => {
     // Another classroom of the same organization, same assignment slug.
     const otherAssignment = randomUUID();
     await db.insert(assignments).values({
@@ -319,8 +348,10 @@ describe("group repositories (issue #2, lot 2)", () => {
       id: randomUUID(),
       assignmentId: otherAssignment,
       userId: s.teacherId,
+      // Still being provisioned: the name is only reserved on the row.
       fullName: "heig-org/labo-1-group-1",
-      provisionStatus: "ok",
+      provisionStatus: "pending",
+      provisionClaimedAt: new Date(),
     });
     await accept(app, s, "Ammann");
     const target = String(of("provision")[0]!.params.targetRepo);
@@ -535,6 +566,188 @@ describe("group repositories (issue #2, lot 2)", () => {
     );
     expect(invited).toEqual(["heig-org/labo-1-group-2"]);
     expect(invitedLogins()).toEqual(["dubois"]);
+    await app.close();
+  });
+});
+
+/** A lot-1 individual row of `nom` on the assignment, in the given state. */
+async function legacyRow(
+  db: TestDb,
+  s: Seed,
+  nom: string,
+  state: Partial<typeof studentRepos.$inferInsert> = {},
+) {
+  const id = randomUUID();
+  await db.insert(studentRepos).values({
+    id,
+    assignmentId: s.assignmentId,
+    userId: s.student[nom]!.userId,
+    fullName: `heig-org/labo-1-${nom.toLowerCase()}`,
+    provisionStatus: "ok",
+    ...state,
+  });
+  return id;
+}
+
+describe("group repositories — review fixes", () => {
+  let db: TestDb;
+  let s: Seed;
+  let app: FastifyInstance;
+  beforeEach(async () => {
+    calls.length = 0;
+    failing.clear();
+    existing.clear();
+    db = await testDb();
+    s = await seed(db);
+    app = await serve(db);
+  });
+
+  it("a failed lot-1 row does not hold its student out of the group repository", async () => {
+    await legacyRow(db, s, "Ammann", { provisionStatus: "error", fullName: null });
+    await accept(app, s, "Bovet");
+    // Invited like any member…
+    expect(invitedLogins()).toEqual(["ammann"]);
+    // …and every view reads the group's repository for him, not the failure.
+    const detail = (
+      await app.inject({
+        method: "GET",
+        url: `/app/api/classrooms/${s.classroomId}/assignments/${s.assignmentId}/detail`,
+        headers: { "x-as": s.teacherId },
+      })
+    ).json<AssignmentDetailPayload>();
+    const line = (nom: string) => detail.students.find((st) => st.nom === nom)!;
+    expect(line("Ammann").repo?.id).toBe(line("Bovet").repo?.id);
+    expect(line("Ammann").repo?.provisionStatus).toBe("ok");
+    // His own acceptance attaches him instead of retrying the dead row.
+    calls.length = 0;
+    expect((await accept(app, s, "Ammann")).json<{ groupId: string }>().groupId).toBe(
+      s.group["Group 1"],
+    );
+    expect(of("provision")).toHaveLength(0);
+    await app.close();
+  });
+
+  it("a solo group whose student has a failed lot-1 row can accept", async () => {
+    // "Everyone else alone": Euler in a group of one, with a failed lot-1 row.
+    const solo = randomUUID();
+    await db.insert(assignmentGroups).values({
+      id: solo,
+      assignmentId: s.assignmentId,
+      name: "Alex Euler",
+      slug: "alex-euler",
+      position: 2,
+    });
+    await db.insert(assignmentGroupMembers).values({
+      id: randomUUID(),
+      assignmentId: s.assignmentId,
+      groupId: solo,
+      enrollmentId: s.student.Euler!.enrollmentId,
+    });
+    await legacyRow(db, s, "Euler", { provisionStatus: "error", fullName: null });
+    const res = await accept(app, s, "Euler");
+    expect(res.statusCode).toBe(200);
+    const row = (await groupRepos(db, s)).find((r) => r.groupId === solo)!;
+    // Authored by Euler although he already holds a row on this assignment.
+    expect(row).toMatchObject({ userId: s.student.Euler!.userId, provisionStatus: "ok" });
+    await app.close();
+  });
+
+  it("a provisioning in flight answers 409 instead of provisioning twice", async () => {
+    // Ammann's acceptance claimed the row a moment ago and is still running.
+    await db.insert(studentRepos).values({
+      id: randomUUID(),
+      assignmentId: s.assignmentId,
+      userId: s.student.Ammann!.userId,
+      groupId: s.group["Group 1"],
+      fullName: "heig-org/labo-1-group-1",
+      provisionStatus: "pending",
+      provisionClaimedAt: new Date(),
+    });
+    const res = await accept(app, s, "Bovet");
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe("provision_in_progress");
+    expect(of("provision")).toHaveLength(0);
+
+    // A claim nobody finished (the process died) is taken over after a while.
+    await db
+      .update(studentRepos)
+      .set({ provisionClaimedAt: new Date(Date.now() - 10 * 60_000) })
+      .where(eq(studentRepos.groupId, s.group["Group 1"]!));
+    expect((await accept(app, s, "Bovet")).statusCode).toBe(200);
+    expect(of("provision")).toHaveLength(1);
+    await app.close();
+  });
+
+  it("a late provisioning failure never turns a working repository into an error", async () => {
+    await accept(app, s, "Ammann");
+    const [row] = await groupRepos(db, s);
+    // The loser of a race (or a replay) fails after the winner succeeded.
+    await markProvisionFailed(db, row!.id, "422 ruleset hgc-protect already exists");
+    const [after] = await groupRepos(db, s);
+    expect(after).toMatchObject({ provisionStatus: "ok", provisionError: null });
+    await app.close();
+  });
+
+  it("never adopts a repository another row already records, and invites no one on it", async () => {
+    // `labo-1-group-1` exists on GitHub and is tracked by another classroom's
+    // row (renamed since, so the name check alone would not see it).
+    const otherAssignment = randomUUID();
+    await db.insert(assignments).values({
+      id: otherAssignment,
+      classroomId: s.classroomId,
+      name: "Other",
+      slug: "other",
+      startAt: new Date("2026-09-01T08:00:00Z"),
+      deadlineAt: new Date("2126-09-08T08:00:00Z"),
+      sourceRepoId: 3,
+      sourceFullName: "heig-org/other",
+      branches: ["main"],
+      protectedFiles: [],
+    });
+    await db.insert(studentRepos).values({
+      id: randomUUID(),
+      assignmentId: otherAssignment,
+      userId: s.teacherId,
+      githubRepoId: 4242,
+      fullName: "heig-org/renamed-since",
+      provisionStatus: "ok",
+    });
+    existing.set("labo-1-group-1", 4242);
+
+    const res = await accept(app, s, "Ammann");
+    expect(res.statusCode).toBe(502);
+    expect(of("provision-invite")).toHaveLength(0);
+    expect(invitedLogins()).toEqual([]);
+    const [row] = (await groupRepos(db, s)).filter((r) => r.groupId !== null);
+    expect(row).toMatchObject({ provisionStatus: "error", githubRepoId: null });
+    await app.close();
+  });
+
+  it("group-repository e-mails and hints skip a lot-1 individual holder", async () => {
+    await legacyRow(db, s, "Ammann");
+    await accept(app, s, "Bovet");
+    const group = (await groupRepos(db, s)).find((r) => r.groupId === s.group["Group 1"])!;
+    expect(await repoUserIds(db, [group])).toEqual([s.student.Bovet!.userId]);
+    await app.close();
+  });
+
+  it("does not invite a member removed while the repository was being created", async () => {
+    await accept(app, s, "Ammann");
+    const repo = (await groupRepos(db, s)).find((r) => r.groupId === s.group["Group 1"])!;
+    // The invitation list was read before Bovet left the group.
+    await db
+      .delete(assignmentGroupMembers)
+      .where(eq(assignmentGroupMembers.enrollmentId, s.student.Bovet!.enrollmentId));
+    calls.length = 0;
+    const { invited } = await inviteMembers(
+      db,
+      { request } as never,
+      repo,
+      [{ enrollmentId: s.student.Bovet!.enrollmentId, githubLogin: "bovet" }],
+      { actorUserId: null, reason: "test" },
+    );
+    expect(invited).toEqual([]);
+    expect(invitedLogins()).toEqual([]);
     await app.close();
   });
 });

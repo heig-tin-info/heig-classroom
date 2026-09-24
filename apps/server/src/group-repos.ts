@@ -15,10 +15,10 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, inArray, isNotNull, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import type { Octokit } from "octokit";
 
-import { groupRepoName, pickStudentRepo } from "@hgc/domain";
+import { groupRepoName, isLiveIndividualRepo, pickStudentRepo } from "@hgc/domain";
 
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
@@ -33,7 +33,7 @@ import {
   studentRepos,
   users,
 } from "./db/schema.js";
-import type { Topic } from "./events.js";
+import { publish, type Topic } from "./events.js";
 import { installationClient } from "./github/app.js";
 import { inviteCollaborator, revokeCollaborator } from "./github/collaborators.js";
 import { repoIsLive } from "./repos.js";
@@ -113,18 +113,33 @@ export async function groupRepoRow(
  * repositories before lot 2): they keep that repository, so the group one
  * neither shows it to them nor invites them into it.
  */
-async function individualHolders(db: Db, assignmentId: string): Promise<Set<string>> {
-  const rows = await db
-    .select({ userId: studentRepos.userId })
-    .from(studentRepos)
-    .where(
-      and(
-        eq(studentRepos.assignmentId, assignmentId),
-        isNull(studentRepos.groupId),
-        repoIsLive(),
-      ),
-    );
-  return new Set(rows.map((r) => r.userId));
+async function individualHolders(
+  db: Db,
+  assignmentIds: string[],
+): Promise<(assignmentId: string, userId: string) => boolean> {
+  const rows = assignmentIds.length
+    ? await db
+        .select({
+          assignmentId: studentRepos.assignmentId,
+          userId: studentRepos.userId,
+          groupId: studentRepos.groupId,
+          provisionStatus: studentRepos.provisionStatus,
+          fullName: studentRepos.fullName,
+          deletedAt: studentRepos.deletedAt,
+        })
+        .from(studentRepos)
+        .where(
+          and(
+            inArray(studentRepos.assignmentId, [...new Set(assignmentIds)]),
+            isNull(studentRepos.groupId),
+          ),
+        )
+    : [];
+  // The rule is the domain's, not a second SQL spelling of it.
+  const holders = new Set(
+    rows.filter(isLiveIndividualRepo).map((r) => `${r.assignmentId}:${r.userId}`),
+  );
+  return (assignmentId, userId) => holders.has(`${assignmentId}:${userId}`);
 }
 
 /** A member GitHub can be asked about: an account with a linked login. */
@@ -140,39 +155,36 @@ export async function invitableMembers(
   assignmentId: string,
   groupId: string,
 ): Promise<ReachableMember[]> {
-  const holders = await individualHolders(db, assignmentId);
+  const holds = await individualHolders(db, [assignmentId]);
   return (await groupMemberAccounts(db, [groupId])).filter(
     (m): m is ReachableMember =>
-      m.userId !== null && m.githubLogin !== null && !holders.has(m.userId),
+      m.userId !== null && m.githubLogin !== null && !holds(assignmentId, m.userId),
   );
 }
+
+type RepoOwnership = Pick<RepoRow, "assignmentId" | "userId" | "groupId">;
 
 /**
  * The users a set of repositories belongs to: the owner of an individual
  * repository, every member with an account for a group one (whoever created
- * it — a student moved out of the group no longer reads it).
+ * it — a student moved out of the group no longer reads it), minus the lot-1
+ * individual-repository holders, who do not work in it.
  */
-export async function repoUserIds(
-  db: Db,
-  repos: Pick<RepoRow, "userId" | "groupId">[],
-): Promise<string[]> {
+export async function repoUserIds(db: Db, repos: RepoOwnership[]): Promise<string[]> {
   const ids = new Set<string>();
-  const groupIds: string[] = [];
-  for (const r of repos) {
-    if (r.groupId) groupIds.push(r.groupId);
-    else ids.add(r.userId);
-  }
-  for (const m of await groupMemberAccounts(db, [...new Set(groupIds)])) {
-    if (m.userId) ids.add(m.userId);
+  const groupRepos = repos.filter((r) => r.groupId !== null);
+  for (const r of repos) if (r.groupId === null) ids.add(r.userId);
+  if (groupRepos.length === 0) return [...ids];
+  const assignmentOf = new Map(groupRepos.map((r) => [r.groupId!, r.assignmentId]));
+  const holds = await individualHolders(db, [...assignmentOf.values()]);
+  for (const m of await groupMemberAccounts(db, [...assignmentOf.keys()])) {
+    if (m.userId && !holds(assignmentOf.get(m.groupId)!, m.userId)) ids.add(m.userId);
   }
   return [...ids];
 }
 
 /** `user:<id>` refresh-hint topics of `repoUserIds`. */
-export async function repoUserTopics(
-  db: Db,
-  repos: Pick<RepoRow, "userId" | "groupId">[],
-): Promise<Topic[]> {
+export async function repoUserTopics(db: Db, repos: RepoOwnership[]): Promise<Topic[]> {
   return (await repoUserIds(db, repos)).map((id) => `user:${id}` as const);
 }
 
@@ -277,13 +289,17 @@ export async function inviteMember(
 export async function inviteMembers(
   db: Db,
   octokit: Octokit,
-  repo: Pick<RepoRow, "id" | "fullName">,
+  repo: Pick<RepoRow, "id" | "fullName" | "groupId">,
   members: { enrollmentId: string; githubLogin: string }[],
   actor: Actor,
 ): Promise<{ invited: string[]; failed: string[] }> {
   const invited: string[] = [];
   const failed: string[] = [];
   for (const m of members) {
+    // The list was read before a provisioning that takes seconds: a member
+    // removed meanwhile (nothing to revoke yet, the repository was still
+    // pending) must not be invited from that stale list.
+    if (repo.groupId && !(await isMember(db, repo.groupId, m.enrollmentId))) continue;
     try {
       await inviteMember(db, octokit, repo, m, actor);
       invited.push(m.githubLogin);
@@ -292,6 +308,46 @@ export async function inviteMembers(
     }
   }
   return { invited, failed };
+}
+
+async function isMember(db: Db, groupId: string, enrollmentId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: assignmentGroupMembers.id })
+    .from(assignmentGroupMembers)
+    .where(
+      and(
+        eq(assignmentGroupMembers.groupId, groupId),
+        eq(assignmentGroupMembers.enrollmentId, enrollmentId),
+      ),
+    )
+    .limit(1);
+  return row !== undefined;
+}
+
+/**
+ * Attaches one member to their group's existing repository: the teacher
+ * adding them to the group, or their own acceptance once a fellow member has
+ * created it. Null when there is nothing to do — no live repository yet, or
+ * a member who cannot be invited (no linked GitHub account, or a lot-1
+ * individual repository they keep). Throws when GitHub refuses; the caller
+ * decides what that means for its request.
+ */
+export async function attachMember(
+  db: Db,
+  /** Only called when there is someone to invite: no GitHub token otherwise. */
+  octokit: () => Promise<Octokit>,
+  target: { assignmentId: string; groupId: string; enrollmentId: string },
+  actor: Actor,
+): Promise<{ repo: RepoRow; invitation: "pending" | "accepted" } | null> {
+  const repo = await groupRepoRow(db, target.assignmentId, target.groupId);
+  if (!repo || repo.provisionStatus !== "ok" || !repo.fullName || repo.deletedAt) return null;
+  const member = (await invitableMembers(db, target.assignmentId, target.groupId)).find(
+    (m) => m.enrollmentId === target.enrollmentId,
+  );
+  if (!member) return null;
+  const invitation = await inviteMember(db, await octokit(), repo, member, actor);
+  publish("repos", [`user:${member.userId}`]);
+  return { repo, invitation };
 }
 
 /**
@@ -406,9 +462,13 @@ export async function inviteOnGithubLink(
       ),
     );
   const invited: string[] = [];
+  // A lot-1 individual repository keeps its student (see individualHolders).
+  const holds = await individualHolders(
+    app.db,
+    rows.map((r) => r.repo.assignmentId),
+  );
   for (const { repo, enrollmentId, installationId } of rows) {
-    // A lot-1 individual repository keeps its student (see individualHolders).
-    if ((await individualHolders(app.db, repo.assignmentId)).has(userId)) continue;
+    if (holds(repo.assignmentId, userId)) continue;
     try {
       const client = await installationClient(config, installationId!);
       await inviteMember(
@@ -431,21 +491,23 @@ export async function inviteOnGithubLink(
 export type GroupClaim =
   | { kind: "individual"; row: RepoRow }
   | { kind: "group"; group: GroupRow; row: RepoRow; repoName: string }
-  | { kind: "refused"; error: "no_group" | "no_owner"; message: string };
+  | { kind: "refused"; error: "no_group"; message: string };
 
 /**
  * First half of a group-mode acceptance, database only: which row the
  * acceptance provisions or attaches to, and under which repository name.
  *
- * - A live individual repository of the student (lot-1 leftover) answers
- *   `individual`: they keep it, exactly as before lot 2.
+ * - A live individual repository of the student (lot-1 leftover,
+ *   `isLiveIndividualRepo`) answers `individual`: they keep it, exactly as
+ *   before lot 2. A failed or pending lot-1 row does not: the student goes
+ *   to their group's repository like everyone else.
  * - A student in no group is refused (`no_group`).
- * - Otherwise the group's row, inserted by the first member to get here.
- *   The partial unique index on (assignment_id, group_id) is the idempotency
- *   key, like (assignment_id, user_id) is for an individual repository: two
- *   members accepting at the same second insert the same row, one insert
- *   wins, both read the winner back, and both run the (replay-safe)
- *   provisioning of the same repository.
+ * - Otherwise the group's row, inserted by the first member to get here
+ *   (`user_id` = that member). The partial unique index on
+ *   (assignment_id, group_id) is the idempotency key: two members accepting
+ *   at the same second insert the same row, one insert wins, both read the
+ *   winner back — and `claimProvisioning` then lets only one of them
+ *   provision it.
  */
 export async function claimGroupRepo(
   db: Db,
@@ -468,9 +530,7 @@ export async function claimGroupRepo(
       ),
     )
     .limit(1);
-  if (own && own.provisionStatus === "ok" && own.deletedAt === null) {
-    return { kind: "individual", row: own };
-  }
+  if (own && isLiveIndividualRepo(own)) return { kind: "individual", row: own };
 
   const group = await groupOfEnrollment(db, assignment.id, opts.enrollmentId);
   if (!group) {
@@ -483,32 +543,9 @@ export async function claimGroupRepo(
 
   let row = await groupRepoRow(db, assignment.id, group.id);
   if (!row) {
-    // `user_id` records who created the repository, and (assignment_id,
-    // user_id) stays unique: a student who already holds a row here (they
-    // created another group's repository before being moved, or a failed
-    // lot-1 acceptance) hands the authorship to a fellow member.
-    const holders = new Set(
-      (
-        await db
-          .select({ userId: studentRepos.userId })
-          .from(studentRepos)
-          .where(eq(studentRepos.assignmentId, assignment.id))
-      ).map((r) => r.userId),
-    );
-    const members = await groupMemberAccounts(db, [group.id]);
-    const author = [userId, ...members.map((m) => m.userId)].find(
-      (id): id is string => id !== null && !holders.has(id),
-    );
-    if (!author) {
-      return {
-        kind: "refused",
-        error: "no_owner",
-        message: "This group's repository cannot be created — contact your teacher",
-      };
-    }
     await db
       .insert(studentRepos)
-      .values({ id: randomUUID(), assignmentId: assignment.id, userId: author, groupId: group.id })
+      .values({ id: randomUUID(), assignmentId: assignment.id, userId, groupId: group.id })
       .onConflictDoNothing();
     row = await groupRepoRow(db, assignment.id, group.id);
     if (!row) throw new Error(`group repository row of ${group.id} not found after insert`);
@@ -517,12 +554,14 @@ export async function claimGroupRepo(
 }
 
 /**
- * The GitHub name of a group repository: the one it already has, else
- * `groupRepoName`, disambiguated when another repository the platform tracks
- * already bears it. Provisioning adopts an existing repository of that name
- * (a 422 is "step already done"), so a collision with another classroom of
- * the same organization would otherwise hand this group someone else's work.
- * Deterministic, so two members accepting together compute the same name.
+ * The GitHub name of a group repository: the one it has once provisioned,
+ * else `groupRepoName`, disambiguated when another row the platform tracks
+ * already bears or RESERVES it (`claimProvisioning` writes the name on the
+ * row while it is still pending). Provisioning adopts an existing repository
+ * of that name (a 422 is "step already done"), so a collision with another
+ * classroom of the same organization would otherwise hand this group someone
+ * else's work. Deterministic, so two members accepting together compute the
+ * same name.
  */
 async function repoNameFor(
   db: Db,
@@ -530,7 +569,7 @@ async function repoNameFor(
   group: GroupRow,
   row: RepoRow,
 ): Promise<string> {
-  if (row.fullName) return row.fullName.split("/")[1]!;
+  if (row.provisionStatus === "ok" && row.fullName) return row.fullName.split("/")[1]!;
   const base = groupRepoName(opts.assignment.slug, group.slug);
   const [taken] = await db
     .select({ id: studentRepos.id })
@@ -543,4 +582,68 @@ async function repoNameFor(
     )
     .limit(1);
   return taken ? groupRepoName(opts.assignment.slug, group.slug, group.id.slice(0, 8)) : base;
+}
+
+/** A claim older than this is taken over: the process that held it died. */
+export const PROVISION_CLAIM_STALE_MS = 5 * 60_000;
+
+/**
+ * Takes the right to provision a row, atomically: true for exactly one of
+ * several concurrent acceptances of the same row. Claimable: a row that
+ * failed, or that is pending with no claim or a stale one. A provisioned row
+ * is never claimed again. The claim also reserves the repository's full name
+ * on the row, so `repoNameFor` in another classroom sees the name as taken
+ * while this provisioning is still in flight.
+ */
+export async function claimProvisioning(db: Db, rowId: string, fullName: string): Promise<boolean> {
+  const staleBefore = new Date(Date.now() - PROVISION_CLAIM_STALE_MS);
+  const claimed = await db
+    .update(studentRepos)
+    .set({ provisionStatus: "pending", provisionClaimedAt: new Date(), fullName })
+    .where(
+      and(
+        eq(studentRepos.id, rowId),
+        or(
+          eq(studentRepos.provisionStatus, "error"),
+          and(
+            eq(studentRepos.provisionStatus, "pending"),
+            or(
+              isNull(studentRepos.provisionClaimedAt),
+              lt(studentRepos.provisionClaimedAt, staleBefore),
+            ),
+          ),
+        ),
+      ),
+    )
+    .returning({ id: studentRepos.id });
+  return claimed.length > 0;
+}
+
+/**
+ * Records a failed provisioning — unless the row got provisioned meanwhile:
+ * a late failure (a stale claim taken over, a replay) must never turn a
+ * repository that works back into an error, or deadline, freeze, review and
+ * revocation would all skip it.
+ */
+export async function markProvisionFailed(db: Db, rowId: string, error: string): Promise<void> {
+  await db
+    .update(studentRepos)
+    .set({ provisionStatus: "error", provisionError: error.slice(0, 500) })
+    .where(and(eq(studentRepos.id, rowId), ne(studentRepos.provisionStatus, "ok")));
+}
+
+/**
+ * For provisioning's adoption path: may this row adopt the existing GitHub
+ * repository `githubRepoId`? Not when another row already records it — that
+ * is another classroom's (or another group's) repository, and adopting it
+ * would invite this student onto someone else's work before the unique
+ * `github_repo_id` ever refused the row.
+ */
+export async function adoptableBy(db: Db, rowId: string, githubRepoId: number): Promise<boolean> {
+  const [other] = await db
+    .select({ id: studentRepos.id })
+    .from(studentRepos)
+    .where(and(eq(studentRepos.githubRepoId, githubRepoId), ne(studentRepos.id, rowId)))
+    .limit(1);
+  return other === undefined;
 }
