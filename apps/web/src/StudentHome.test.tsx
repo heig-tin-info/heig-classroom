@@ -250,4 +250,24 @@ describe("StudentHome group assignment (issue #2, lot 2)", () => {
     renderStudent();
     expect(await screen.findByText("Les Castors · with Emma Favre, Noah Bovet")).toBeVisible();
   });
+
+  it("says a groupmate is creating the repository when the acceptance is told to wait", async () => {
+    mockFetch({
+      [`GET ${ROOMS}`]: ok([
+        makeStudentClassroom({
+          assignments: [makeStudentAssignment({ id: "a1", name: "Lab 5", repo: null })],
+        }),
+      ]),
+      "POST /app/api/student/assignments/a1/accept": fail(409, {
+        error: "provision_in_progress",
+        message: "The repository is being created — try again in a moment",
+      }),
+    });
+    renderStudent();
+    await screen.findByText("Up next");
+    await userEvent.click(within(upNextCard()).getByRole("button", { name: "Accept assignment" }));
+    expect(
+      await screen.findByText("Your repository is being created right now — try again in a moment."),
+    ).toBeVisible();
+  });
 });

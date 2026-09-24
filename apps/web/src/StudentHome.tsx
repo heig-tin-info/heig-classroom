@@ -292,7 +292,10 @@ function RowAction({
   });
   const acceptError =
     accept.isError && accept.error instanceof ApiError
-      ? apiErrorMessage(accept.error, "Acceptance failed")
+      ? // A groupmate is creating the same repository right now (issue #2).
+        (accept.error.body as { error?: string } | null)?.error === "provision_in_progress"
+        ? t("student.provisionInProgress")
+        : apiErrorMessage(accept.error, "Acceptance failed")
       : null;
   const locked = isLocked(a);
   const accepted = isAccepted(a);
