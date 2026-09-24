@@ -7,7 +7,7 @@ import { sebFileUrl } from "../../codespace.js";
 import type { AppConfig } from "../../config.js";
 import { enrollments, gradeRuns, studentRepos, users } from "../../db/schema.js";
 import { installationClient } from "../../github/app.js";
-import { cachedRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
+import { readRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
 import { gradeView, gradeViewsByIds } from "../../grading.js";
 import { studentRepoResolver } from "../../group-repos.js";
 import { accessibleAssignment, accessibleStudentRepo, teacherGuard } from "../guards.js";
@@ -57,6 +57,9 @@ export async function assignmentDetailRoutes(
       );
 
       const live = new Map<string, RepoLiveState>();
+      // Served past the TTL while a background refresh runs: the client
+      // refetches once shortly after (`liveStale`).
+      let staleCount = 0;
 
       // A repository known deleted (issue #10) is not fetched: the call can
       // only 404, and `deleted_at` already tells the view what to render.
@@ -72,8 +75,24 @@ export async function assignmentDetailRoutes(
         await Promise.all(
           provisioned.map(async (r) => {
             try {
-              const state = await cachedRepoLiveState(client.octokit, installationId, r.fullName!);
+              const { state, stale } = await readRepoLiveState(
+                client.octokit,
+                installationId,
+                r.fullName!,
+              );
               if (!state) return;
+              if (stale) {
+                // Webhooks keep the head commit and CI status in the row
+                // fresher than a stale read: only the counters come from it.
+                staleCount += 1;
+                live.set(r.id, {
+                  ...state,
+                  lastCommitSha: r.lastCommitSha,
+                  lastCommitAt: r.lastCommitAt?.toISOString() ?? null,
+                  ciStatus: r.ciStatus,
+                });
+                return;
+              }
               live.set(r.id, state);
               if (
                 state.lastCommitSha &&
@@ -98,6 +117,7 @@ export async function assignmentDetailRoutes(
             assignment: a.id,
             repos: provisioned.length,
             live: live.size,
+            stale: staleCount,
             ms: Date.now() - liveStart,
           },
           "detail: live repo states fetched",
@@ -109,6 +129,7 @@ export async function assignmentDetailRoutes(
         // the assignment and stamps the classroom in its header.
         // `codespaceSebUrl`: derived from `CODESPACE_URL`, never stored, so a
         // portal that moves does not leave dead links on old assignments.
+        liveStale: staleCount > 0,
         assignment: {
           ...a,
           classroom: scope.classroomName,

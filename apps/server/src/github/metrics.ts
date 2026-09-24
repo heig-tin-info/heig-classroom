@@ -87,13 +87,27 @@ export async function fetchRepoLiveState(
  * SSE hint refetches. On 2026-09-24 a lab of Prog-C (64 acceptances, 99
  * webhooks in 15 minutes) turned those refetches into ~5,000 GitHub calls
  * and exhausted the org's hourly quota. Hence:
- * - a per-repository cache (TTL below), shared by concurrent requests;
- *   webhooks that change the state drop the entry (`forgetRepoLiveState`);
+ * - a per-repository cache, shared by concurrent requests; webhooks that
+ *   change the state drop the entry (`forgetRepoLiveState`);
+ * - stale-while-revalidate: past the TTL, the last known state is served at
+ *   once and refreshed in the background (a cold 20-repository view costs
+ *   ~2 s of GitHub calls); past MAX_STALE it is fetched again;
  * - no waiting on a rate limit: the installation is skipped until the reset
  *   and the caller falls back to the stored state (`null`).
  */
 export const LIVE_STATE_TTL_MS = 60_000;
-const liveCache = new Map<string, { at: number; state: Promise<RepoLiveState | null> }>();
+export const LIVE_STATE_MAX_STALE_MS = 15 * 60_000;
+
+interface LiveEntry {
+  /** Start of the fetch that fills (or filled) this entry. */
+  at: number;
+  state: Promise<RepoLiveState | null>;
+  /** Set once `state` has resolved. */
+  settled?: { value: RepoLiveState | null };
+  /** Previous value, served while this entry's fetch is in flight. */
+  previous?: { value: RepoLiveState | null };
+}
+const liveCache = new Map<string, LiveEntry>();
 const rateLimitedUntil = new Map<number, number>();
 
 export function forgetRepoLiveState(fullName: string | null | undefined): void {
@@ -118,31 +132,91 @@ function rateLimitReset(err: unknown, now: number): number | null {
   return null;
 }
 
+export interface LiveRead {
+  state: RepoLiveState | null;
+  /** Older than the TTL: a background refresh is under way. */
+  stale: boolean;
+}
+
+export async function readRepoLiveState(
+  octokit: Octokit,
+  installationId: number,
+  fullName: string,
+  now = Date.now(),
+): Promise<LiveRead> {
+  const key = fullName.toLowerCase();
+  const hit = liveCache.get(key);
+  const limited = (rateLimitedUntil.get(installationId) ?? 0) > now;
+
+  if (hit) {
+    const age = now - hit.at;
+    if (hit.settled) {
+      if (age < LIVE_STATE_TTL_MS) return { state: hit.settled.value, stale: false };
+      if (age < LIVE_STATE_MAX_STALE_MS) {
+        if (!limited) refresh(octokit, installationId, key, fullName, now, hit.settled);
+        return { state: hit.settled.value, stale: true };
+      }
+    } else if (hit.previous) {
+      return { state: hit.previous.value, stale: true };
+    } else if (age < LIVE_STATE_TTL_MS) {
+      return { state: await hit.state, stale: false };
+    }
+  }
+  if (limited) return { state: null, stale: false };
+  const entry = refresh(octokit, installationId, key, fullName, now);
+  return { state: await entry.state, stale: false };
+}
+
+/** Starts a fetch into a new entry; `previous` is served until it settles. */
+function refresh(
+  octokit: Octokit,
+  installationId: number,
+  key: string,
+  fullName: string,
+  now: number,
+  previous?: { value: RepoLiveState | null },
+): LiveEntry {
+  if (liveCache.size > 5000) {
+    for (const [k, v] of liveCache) {
+      if (now - v.at >= LIVE_STATE_MAX_STALE_MS) liveCache.delete(k);
+    }
+  }
+  const entry: LiveEntry = { at: now, state: Promise.resolve(null) };
+  if (previous) entry.previous = previous;
+  // The promise settles the same way for every concurrent caller: a rate
+  // limit resolves to null (fallback), other errors reject.
+  entry.state = fetchRepoLiveState(octokit, fullName, { noRateLimitWait: true }).then(
+    (value) => {
+      entry.settled = { value };
+      return value;
+    },
+    (err: unknown) => {
+      const reset = rateLimitReset(err, Date.now());
+      if (reset !== null) {
+        rateLimitedUntil.set(installationId, reset);
+        // Rate-limited background refresh: keep serving the last value.
+        if (previous) {
+          entry.settled = previous;
+          return previous.value;
+        }
+      }
+      if (liveCache.get(key) === entry) liveCache.delete(key);
+      if (reset === null) throw err;
+      return null;
+    },
+  );
+  // A background refresh has no awaiting caller: never an unhandled rejection.
+  if (previous) entry.state.catch(() => undefined);
+  liveCache.set(key, entry);
+  return entry;
+}
+
+/** The state alone, for callers that do not report staleness. */
 export async function cachedRepoLiveState(
   octokit: Octokit,
   installationId: number,
   fullName: string,
   now = Date.now(),
 ): Promise<RepoLiveState | null> {
-  const key = fullName.toLowerCase();
-  const hit = liveCache.get(key);
-  if (hit && now - hit.at < LIVE_STATE_TTL_MS) return hit.state;
-  if ((rateLimitedUntil.get(installationId) ?? 0) > now) return null;
-
-  if (liveCache.size > 5000) {
-    for (const [k, v] of liveCache) if (now - v.at >= LIVE_STATE_TTL_MS) liveCache.delete(k);
-  }
-  // The stored promise settles the same way for every concurrent caller:
-  // a rate limit resolves to null (fallback), other errors reject.
-  const state = fetchRepoLiveState(octokit, fullName, { noRateLimitWait: true }).catch(
-    (err: unknown) => {
-      if (liveCache.get(key)?.state === state) liveCache.delete(key);
-      const reset = rateLimitReset(err, Date.now());
-      if (reset === null) throw err;
-      rateLimitedUntil.set(installationId, reset);
-      return null;
-    },
-  );
-  liveCache.set(key, { at: now, state });
-  return state;
+  return (await readRepoLiveState(octokit, installationId, fullName, now)).state;
 }

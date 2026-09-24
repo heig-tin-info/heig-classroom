@@ -267,6 +267,9 @@ export interface AssignmentDetailStudent {
 }
 
 export interface AssignmentDetailPayload {
+  /** Some live counters were served stale while GitHub is re-read in the
+   *  background: the client refetches once shortly after. */
+  liveStale?: boolean;
   assignment: {
     id: string;
     name: string;
