@@ -16,7 +16,7 @@ import {
   users,
 } from "../db/schema.js";
 import { installationClient } from "../github/app.js";
-import { fetchRepoLiveState } from "../github/metrics.js";
+import { cachedRepoLiveState, type RepoLiveState } from "../github/metrics.js";
 import { provisionStudentRepo } from "../github/provision.js";
 import {
   adoptableBy,
@@ -141,7 +141,7 @@ export async function studentPlugin(
 
       // Live commit count and check-run breakdown (for the dashboard charts).
       // Cheap here: a student only has a handful of provisioned repositories.
-      const live = new Map<string, Awaited<ReturnType<typeof fetchRepoLiveState>>>();
+      const live = new Map<string, RepoLiveState | null>();
       const provisioned = repos.filter((sr) => sr.provisionStatus === "ok" && sr.fullName);
       if (provisioned.length > 0) {
         const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
@@ -166,7 +166,10 @@ export async function studentPlugin(
                 client = await installationClient(config, installationId);
                 clients.set(installationId, client);
               }
-              live.set(sr.id, await fetchRepoLiveState(client.octokit, sr.fullName!));
+              live.set(
+                sr.id,
+                await cachedRepoLiveState(client.octokit, installationId, sr.fullName!),
+              );
             } catch (err) {
               req.log.warn({ err, repo: sr.fullName }, "student live state fetch failed");
             }
