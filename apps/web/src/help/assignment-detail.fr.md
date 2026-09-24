@@ -4,6 +4,8 @@
 
 Les chiffres en haut résument acceptation, CI, note moyenne et échéance. En dessous, une ligne par étudiant inscrit : acceptation, dernier commit, checks CI en direct et note. La table est triable, la recherche filtre les étudiants, et cliquer une ligne déplie son activité de commits.
 
+Dans un **devoir de groupe**, la table se lit par équipe : une ligne par groupe, ses membres listés sous son nom. Le groupe partage un seul dépôt, créé quand son premier membre accepte ; chaque membre y est invité et reçoit la note du groupe dans les exports.
+
 ## Comment fonctionnent les notes (deux temps)
 
 - **Devoir ouvert** — chaque push lance la correction objective (build + tests) ; la `GRADE` extraite est **indicative**.

@@ -100,6 +100,9 @@ const scenes = [
   // published one whose first group already owns a repository.
   { name: "groups", role: "teacher", path: "/classrooms/c1/assignments/a7/groups" },
   { name: "groups-locked", role: "teacher", path: "/classrooms/c1/assignments/a6/groups" },
+  // Lot 2: removing a member of a group that owns a repository revokes their
+  // GitHub access, so it asks first.
+  { name: "groups-locked-remove", role: "teacher", path: "/classrooms/c1/assignments/a6/groups", fold: true, act: (p) => p.getByRole("button", { name: /^Remove .* from the group$/ }).first().click() },
   { name: "groups-individual", role: "teacher", path: "/classrooms/c1/assignments/a2/groups" },
   { name: "groups-empty", role: "teacher", path: "/classrooms/c2/assignments/b3/groups" },
   { name: "groups-gone", role: "teacher", path: "/classrooms/c1/assignments/a7/groups?empty=1" },

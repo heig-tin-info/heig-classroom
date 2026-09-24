@@ -231,3 +231,23 @@ describe("StudentHome", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 });
+
+describe("StudentHome group assignment (issue #2, lot 2)", () => {
+  it("names the group and the teammates the repository is shared with", async () => {
+    mockFetch({
+      [`GET ${ROOMS}`]: ok([
+        makeStudentClassroom({
+          assignments: [
+            makeStudentAssignment({
+              name: "Lab 5",
+              deadlineAt: at(9 * DAY),
+              group: { name: "Les Castors", teammates: ["Emma Favre", "Noah Bovet"] },
+            }),
+          ],
+        }),
+      ]),
+    });
+    renderStudent();
+    expect(await screen.findByText("Les Castors · with Emma Favre, Noah Bovet")).toBeVisible();
+  });
+});

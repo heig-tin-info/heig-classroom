@@ -2,7 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { AssignmentDetail } from "./AssignmentDetail";
+import { AssignmentDetail, groupLines } from "./AssignmentDetail";
 import {
   at,
   DAY,
@@ -468,5 +468,65 @@ describe("AssignmentDetail groups card", () => {
     renderDetail();
     await screen.findByRole("table");
     expect(screen.queryByRole("button", { name: /Manage groups/ })).toBeNull();
+  });
+});
+
+/*
+ * Group assignment, lot 2: the table reads by team — one line per group with
+ * its repository and grade, the members listed under the group's name. A
+ * lot-1 individual repository keeps a line of its own.
+ */
+describe("AssignmentDetail group table", () => {
+  const g1 = { id: "g-1", name: "Les Castors" };
+  const g2 = { id: "g-2", name: "Group 2" };
+  const shared = makeDetailRepo({
+    id: "r-g1",
+    groupId: "g-1",
+    fullName: "heig/lab5-les-castors",
+    grade: makeGrade({ points: 5.5 }),
+  });
+  const team = [
+    makeDetailStudent({ enrollmentId: "e-1", nom: "Rochat", prenom: "Lucas", group: g1, repo: shared }),
+    makeDetailStudent({ enrollmentId: "e-2", nom: "Favre", prenom: "Emma", group: g1, repo: shared }),
+    makeDetailStudent({ enrollmentId: "e-3", nom: "Bovet", prenom: "Noah", group: g2, repo: null }),
+    makeDetailStudent({ enrollmentId: "e-4", nom: "Martin", prenom: "Léa", group: g2, repo: null }),
+    // Lot 1 left Zoé an individual repository on this group assignment.
+    makeDetailStudent({
+      enrollmentId: "e-5",
+      nom: "Perret",
+      prenom: "Zoé",
+      group: g2,
+      repo: makeDetailRepo({ id: "r-zoe", groupId: null, fullName: "heig/lab5-zoe" }),
+    }),
+  ];
+
+  it("collapses each group into one line, in the order of its first member", () => {
+    const lines = groupLines(team, team);
+    expect(lines.map((l) => l.key)).toEqual(["group:g-1", "group:g-2", "e-5"]);
+    expect(lines[0]!.group!.members.map((m) => m.prenom)).toEqual(["Lucas", "Emma"]);
+    // Zoé is in Group 2 but not in its (future) repository: her own line.
+    expect(lines[1]!.group!.members.map((m) => m.prenom)).toEqual(["Noah", "Léa"]);
+    expect(lines[2]!.group).toBeUndefined();
+  });
+
+  it("renders one row per group, members under its name", async () => {
+    mockFetch(
+      routes({
+        [`GET ${ASSIGNMENT}/detail`]: ok(
+          makeAssignmentDetail({ state: "published", groupMode: true }, team),
+        ),
+        [`GET ${ASSIGNMENT}/groups`]: ok(makeGroupsPayload({ groups: [] })),
+      }),
+    );
+    renderWithProviders(
+      <AssignmentDetail classroomId="c1" assignmentId="a1" navigate={vi.fn()} />,
+      { route: "/classrooms/c1/assignments/a1" },
+    );
+    const table = await screen.findByRole("table");
+    expect(within(table).getByRole("columnheader", { name: /Group/ })).toBeVisible();
+    expect(within(table).getByText("Les Castors")).toBeVisible();
+    expect(within(table).getByText("Lucas Rochat, Emma Favre")).toBeVisible();
+    // Header + two groups + Zoé's own line.
+    expect(within(table).getAllByRole("row")).toHaveLength(4);
   });
 });

@@ -128,6 +128,8 @@ const en = {
   "student.noAssignments": "No published assignments yet.",
   "student.openRepo": "Open your repository",
   "student.acceptInvite": "Accept the GitHub invitation first (check your notifications).",
+  "student.groupWith": "{group} · with {names}",
+  "student.groupTip": "Group work: one repository, shared by the whole group",
   "student.accept": "Accept assignment",
   "student.retry": "Retry acceptance",
   "student.creating": "Creating your repository…",
@@ -176,6 +178,7 @@ const en = {
 
   "assignment.searchStudents": "Search students…",
   "assignment.col.student": "Student",
+  "assignment.col.group": "Group",
   "assignment.col.status": "Status",
   "assignment.col.lastCommit": "Last commit",
   "assignment.col.commits": "Commits",
@@ -391,6 +394,8 @@ const fr: Record<keyof Dict, string> = {
   "student.noAssignments": "Aucun devoir publié pour l'instant.",
   "student.openRepo": "Ouvrir votre dépôt",
   "student.acceptInvite": "Acceptez d'abord l'invitation GitHub (vérifiez vos notifications).",
+  "student.groupWith": "{group} · avec {names}",
+  "student.groupTip": "Travail de groupe : un seul dépôt, partagé par tout le groupe",
   "student.accept": "Accepter le devoir",
   "student.retry": "Réessayer l'acceptation",
   "student.creating": "Création de votre dépôt…",
@@ -439,6 +444,7 @@ const fr: Record<keyof Dict, string> = {
 
   "assignment.searchStudents": "Rechercher des étudiants…",
   "assignment.col.student": "Étudiant",
+  "assignment.col.group": "Groupe",
   "assignment.col.status": "Statut",
   "assignment.col.lastCommit": "Dernier commit",
   "assignment.col.commits": "Commits",

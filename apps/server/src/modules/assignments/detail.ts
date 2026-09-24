@@ -118,6 +118,7 @@ export async function assignmentDetailRoutes(
             repo: repo
               ? {
                   id: repo.id,
+                  groupId: repo.groupId,
                   fullName: repo.fullName,
                   provisionStatus: repo.provisionStatus,
                   provisionError: repo.provisionError,

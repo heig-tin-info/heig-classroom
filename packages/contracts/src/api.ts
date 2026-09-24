@@ -222,6 +222,12 @@ export interface GradeRunHistory {
 
 export interface AssignmentDetailRepo {
   id: string;
+  /**
+   * Group repository (issue #2): the group it belongs to. Null for an
+   * individual repository — including a lot-1 one left on a group assignment,
+   * which is how the table tells it apart from the group's.
+   */
+  groupId: string | null;
   fullName: string | null;
   provisionStatus: ProvisionStatus;
   provisionError: string | null;

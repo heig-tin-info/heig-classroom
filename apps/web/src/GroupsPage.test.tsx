@@ -168,7 +168,7 @@ describe("GroupsPage membership", () => {
     );
   });
 
-  it("leaves a locked group no ✕, no rename and no way to delete it", async () => {
+  it("leaves a locked group no rename and no way to delete it", async () => {
     renderPage({
       [`GET ${GROUPS}`]: ok(
         makeGroupsPayload({
@@ -184,7 +184,6 @@ describe("GroupsPage membership", () => {
       ),
     });
     expect(await screen.findByText("repository exists")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Remove Lucas Rochat/ })).toBeNull();
     // The name is text now, not a button that opens an input.
     expect(screen.queryByRole("button", { name: "Les Castors" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Actions for Les Castors" }));
@@ -196,6 +195,43 @@ describe("GroupsPage membership", () => {
     expect(within(menu).getByRole("menuitem", { name: "Delete" })).toHaveAttribute(
       "aria-disabled",
       "true",
+    );
+  });
+
+  it("asks before removing a member from a group with a repository (lot 2 revokes)", async () => {
+    const locked = makeGroupsPayload({
+      groups: [
+        makeGroup({
+          id: "g-1",
+          name: "Les Castors",
+          members: [lucas],
+          repo: { fullName: "heig/lab5-les-castors", provisionStatus: "ok" },
+        }),
+      ],
+    });
+    const { calls } = renderPage({
+      [`GET ${GROUPS}`]: ok(locked),
+      [`DELETE ${GROUPS}/g-1/members/e-1`]: ok(
+        makeGroupsPayload({
+          groups: [makeGroup({ id: "g-1", name: "Les Castors", members: [] })],
+          unassigned: [lucas],
+        }),
+      ),
+    });
+    await screen.findByText("repository exists");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove Lucas Rochat from the group" }),
+    );
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/lose their access to heig\/lab5-les-castors/)).toBeVisible();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({
+        url: `${GROUPS}/g-1/members/e-1`,
+        method: "DELETE",
+        body: null,
+      }),
     );
   });
 

@@ -235,6 +235,53 @@ function GradeOverrideModal({
   );
 }
 
+/** One line of the students table: a student, or a whole group (issue #2). */
+export interface TableLine {
+  key: string;
+  /** The student, or the group's first member (their `repo` is the group's). */
+  s: AssignmentDetailStudent;
+  group?: { name: string; members: AssignmentDetailStudent[] };
+}
+
+/**
+ * Group assignment: the table reads by team. Every member of a group sharing
+ * its repository (or waiting for it together) collapses into ONE line at the
+ * place its first member takes in `rows` — so sorting and search keep working
+ * — and the line lists the whole group. A student whose repository is not the
+ * group's (an individual one left by lot 1) keeps a line of their own.
+ */
+export function groupLines(
+  rows: AssignmentDetailStudent[],
+  all: AssignmentDetailStudent[],
+): TableLine[] {
+  const shares = (m: AssignmentDetailStudent, groupId: string) =>
+    m.group?.id === groupId && (m.repo === null || m.repo.groupId === groupId);
+  const lines: TableLine[] = [];
+  const seen = new Set<string>();
+  for (const s of rows) {
+    const g = s.group;
+    if (!g || !shares(s, g.id)) {
+      lines.push({ key: s.enrollmentId, s });
+      continue;
+    }
+    if (seen.has(g.id)) continue;
+    seen.add(g.id);
+    const members = all.filter((m) => shares(m, g.id));
+    lines.push({
+      key: `group:${g.id}`,
+      // The group is "claimed" as soon as one member is: the status badge
+      // then says "not accepted" rather than "not claimed".
+      s: {
+        ...s,
+        githubLogin: null,
+        claimStatus: members.some((m) => m.claimStatus === "claimed") ? "claimed" : "pending",
+      },
+      group: { name: g.name, members },
+    });
+  }
+  return lines;
+}
+
 function StudentRow({
   classroomId,
   assignmentId,
@@ -242,6 +289,7 @@ function StudentRow({
   showGrades,
   canAdjust,
   s,
+  group,
 }: {
   classroomId: string;
   assignmentId: string;
@@ -252,6 +300,8 @@ function StudentRow({
   /** Validation flow: adjustments open once the grade is frozen. */
   canAdjust: boolean;
   s: AssignmentDetailStudent;
+  /** Group line: the group's name leads, its members are listed below it. */
+  group?: TableLine["group"];
 }) {
   const t = useT();
   const toast = useToast();
@@ -288,7 +338,7 @@ function StudentRow({
   const r = s.repo;
   const locked = r?.lockedAt != null;
   const canExpand = r?.provisionStatus === "ok";
-  const name = `${s.prenom} ${s.nom}`.trim();
+  const name = group ? group.name : `${s.prenom} ${s.nom}`.trim();
   return (
     <>
       <tr
@@ -332,6 +382,13 @@ function StudentRow({
               <span className="ml-1 text-xs font-normal text-fg-faint">—</span>
             )}
           </span>
+          {group ? (
+            // The members under the group's name, aligned with it (past the
+            // chevron's 14 px and its 6 px gap).
+            <span className="mt-0.5 block pl-5 text-xs font-normal whitespace-normal text-fg-muted">
+              {group.members.map((m) => `${m.prenom} ${m.nom}`.trim()).join(", ") || "—"}
+            </span>
+          ) : null}
         </td>
         <td className={T.td}>
           {r?.provisionStatus === "ok" ? (
@@ -1209,7 +1266,8 @@ export function AssignmentDetail({
   const rank = (s: AssignmentDetailStudent, key: SortKey): string | number => {
     switch (key) {
       case "name":
-        return `${s.nom} ${s.prenom}`;
+        // A group line sorts by the group's name (issue #2), members inside it.
+        return s.group ? `${s.group.name} ${s.nom} ${s.prenom}` : `${s.nom} ${s.prenom}`;
       case "lastCommitAt":
         return s.repo?.lastCommitAt ?? "";
       case "commitCount":
@@ -1224,9 +1282,14 @@ export function AssignmentDetail({
   const shown = fuzzyFilter(
     query,
     students,
-    (s) => `${s.nom} ${s.prenom} ${s.githubLogin ?? ""} ${s.email}`,
+    (s) => `${s.nom} ${s.prenom} ${s.githubLogin ?? ""} ${s.email} ${s.group?.name ?? ""}`,
   );
-  const { sorted, sort, toggle } = useSortableTable(shown, rank, { key: "name", dir: 1 });
+  // Numeric-aware, so "Group 10" comes after "Group 2".
+  const { sorted, sort, toggle } = useSortableTable(shown, rank, { key: "name", dir: 1 }, (x, y) =>
+    typeof x === "number" && typeof y === "number"
+      ? x - y
+      : String(x).localeCompare(String(y), undefined, { numeric: true }),
+  );
 
   const crumbs = (
     <Breadcrumb
@@ -1319,7 +1382,9 @@ export function AssignmentDetail({
     const repos = students
       .map((s) => s.repo)
       .filter((r) => r != null && r.provisionStatus === "ok" && r.fullName != null && !r.missing)
-      .map((r) => r!.fullName!);
+      .map((r) => r!.fullName!)
+      // A group repository sits on every member's line: clone it once.
+      .filter((name, i, all) => all.indexOf(name) === i);
     const script = buildCloneScript({
       assignmentName: a.name,
       slug: a.slug,
@@ -1337,6 +1402,10 @@ export function AssignmentDetail({
 
   // Search already sorts by relevance.
   const rows = query.trim() !== "" ? shown : sorted;
+  // Group assignment (issue #2): one line per team, members listed under it.
+  const lines = a.groupMode
+    ? groupLines(rows, students)
+    : rows.map((s): TableLine => ({ key: s.enrollmentId, s }));
 
   const Th = ({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) => (
     <SortHeader k={k} sort={sort} onToggle={toggle} right={right}>
@@ -1494,7 +1563,9 @@ export function AssignmentDetail({
             <table className={cx(T.table, "min-w-220")}>
               <thead>
                 <tr className={T.head}>
-                  <Th k="name">{t("assignment.col.student")}</Th>
+                  <Th k="name">
+                    {a.groupMode ? t("assignment.col.group") : t("assignment.col.student")}
+                  </Th>
                   <Th k="status">{t("assignment.col.status")}</Th>
                   <Th k="lastCommitAt">{t("assignment.col.lastCommit")}</Th>
                   <Th k="commitCount" right>
@@ -1506,15 +1577,16 @@ export function AssignmentDetail({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((s) => (
+                {lines.map((line) => (
                   <StudentRow
-                    key={s.enrollmentId}
+                    key={line.key}
                     classroomId={classroomId}
                     assignmentId={assignmentId}
                     frozen={a.state === "locked"}
                     showGrades={showGrades}
                     canAdjust={canAdjust}
-                    s={s}
+                    s={line.s}
+                    group={line.group}
                   />
                 ))}
               </tbody>

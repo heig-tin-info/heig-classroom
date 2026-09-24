@@ -4,6 +4,8 @@
 
 The figures at the top sum up acceptance, CI, the average grade and the deadline. Below, one row per enrolled student: acceptance, last commit, live CI checks and the grade. The table is sortable, the search field filters students, and clicking a row unfolds its commit activity.
 
+In a **group assignment** the table reads by team: one row per group, with its members listed under its name. The group shares one repository, created when its first member accepts; every member is invited on it, and each member gets the group's grade in the exports.
+
 ## How grades work (two tiers)
 
 - **While open** — every push runs the objective tier (build + tests); the extracted `GRADE` is **indicative**.
