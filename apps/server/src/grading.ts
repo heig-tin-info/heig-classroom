@@ -298,7 +298,7 @@ export async function ingestCompletedRun(
         .update(studentRepos)
         .set({ llmGradeRunId: id })
         .where(eq(studentRepos.id, ctx.repo.id));
-      publish("grades", [`classroom:${ctx.classroomId}`], {
+      publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
         kind: "grade_captured",
         message: `LLM review ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
       });
@@ -316,7 +316,7 @@ export async function ingestCompletedRun(
 
   await refreshGradeSelection(app, ctx);
   if (parse.status === "ok") {
-    publish("grades", [`classroom:${ctx.classroomId}`], {
+    publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
       kind: "grade_captured",
       message: `Grade ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
     });

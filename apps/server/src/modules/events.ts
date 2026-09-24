@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 
 import { classrooms, enrollments } from "../db/schema.js";
-import { subscribe } from "../events.js";
+import { reaches, subscribe } from "../events.js";
 import { staffAccess } from "./guards.js";
 
 /**
@@ -18,7 +18,8 @@ export async function eventsPlugin(app: FastifyInstance) {
     async (req, reply) => {
       const me = req.user!;
       const topics = new Set<string>([`user:${me.id}`]);
-      if (me.role === "teacher" || me.role === "admin") {
+      const staff = me.role === "teacher" || me.role === "admin";
+      if (staff) {
         topics.add(`teacher:${me.id}`);
         // Same access predicate as the guards: a co-teacher receives the
         // classroom hints of every classroom they work in (GH-9).
@@ -47,7 +48,7 @@ export async function eventsPlugin(app: FastifyInstance) {
       res.write(":connected\n\n");
 
       const unsubscribe = subscribe((e) => {
-        if (e.topics.some((t) => topics.has(t))) {
+        if (reaches(e, topics, staff)) {
           res.write(`data: ${JSON.stringify({ type: e.type, notice: e.notice ?? null })}\n\n`);
         }
       });
