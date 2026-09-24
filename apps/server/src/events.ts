@@ -34,6 +34,23 @@ export interface AppEvent {
   notice?: AppNotice;
 }
 
+/**
+ * Per-repository families. A student hears about them only through their
+ * own `user:` topic, never through `classroom:`: on 2026-09-24 every push,
+ * CI run and grade of a 60-student lab reached every student, each of whom
+ * refetched their dashboard (N² requests, the database pool timed out), and
+ * the `grade_captured` notice showed classmates' grades.
+ */
+const PER_STUDENT_TYPES = new Set<EventType>(["repos", "grades", "roster", "orgs"]);
+
+/** Does this SSE connection receive the event? `staff`: teacher or admin. */
+export function reaches(e: AppEvent, topics: ReadonlySet<string>, staff: boolean): boolean {
+  return e.topics.some(
+    (t) =>
+      topics.has(t) && (staff || !t.startsWith("classroom:") || !PER_STUDENT_TYPES.has(e.type)),
+  );
+}
+
 const bus = new EventEmitter();
 bus.setMaxListeners(0); // one SSE connection per tab
 
