@@ -105,4 +105,32 @@ describe("provisionStudentRepo", () => {
       expect.anything(),
     );
   });
+
+  it("refuses to adopt an existing repository the guard rejects, before any invitation", async () => {
+    const { octokit, request } = fakeOctokit({
+      ...baseRoutes(),
+      "GET /repos/{owner}/{repo}/rulesets": () => ({ data: [] }),
+      "POST /repos/{owner}/{repo}/rulesets": () => ({ data: { id: 7 } }),
+    });
+    const canAdopt = vi.fn(async () => false);
+
+    await expect(
+      provisionStudentRepo({
+        octokit,
+        token: "t",
+        org: "Prog-D-2026",
+        squashedRepo: "labo-00-squashed",
+        targetRepo: "labo-00-x",
+        branches: ["main"],
+        defaultBranch: "main",
+        studentLogin: "student",
+        canAdopt,
+      }),
+    ).rejects.toThrow(/another tracked repository/);
+    expect(canAdopt).toHaveBeenCalledWith(REPO.id);
+    expect(request).not.toHaveBeenCalledWith(
+      "PUT /repos/{owner}/{repo}/collaborators/{username}",
+      expect.anything(),
+    );
+  });
 });

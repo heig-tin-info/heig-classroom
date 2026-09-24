@@ -559,9 +559,10 @@ function groupsOf(room: Room, a: Assignment): MockGroup[] {
       repo: repo ? { fullName: `${room.summary.orgLogin}/${a.slug}-${slugify(name)}`, provisionStatus: "ok" } : null,
     });
   if (a.id === "a6") {
-    // Published: everyone placed, and the first group already has its repo.
+    // Published: everyone placed, and the first two groups already have their
+    // repository (lot 2: created at the first acceptance of a member).
     for (let i = 0; i * 3 < roster.length; i += 1) {
-      add(`Group ${i + 1}`, roster.slice(i * 3, i * 3 + 3).map((s) => s.id), i === 0);
+      add(`Group ${i + 1}`, roster.slice(i * 3, i * 3 + 3).map((s) => s.id), i < 2);
     }
   } else if (a.id === "a7") {
     // Draft: four groups, the third one over the size hint of 3, and the
@@ -711,8 +712,20 @@ function detailOf(room: Room): ClassroomDetail {
 
 function assignmentDetail(room: Room, a: Assignment): AssignmentDetailPayload {
   const states = repoStatesOf(room, a);
+  // Group mode (issue #2, lot 2): the members of a group share ONE
+  // repository — the state of its first member who has one, renamed.
+  const groupOf = new Map<string, MockGroup>();
+  if (a.groupMode) for (const g of groupsOf(room, a)) for (const id of g.members) groupOf.set(id, g);
+  const repoOf = (s: Student): RepoState | null => {
+    if (!a.groupMode) return states.get(s.id) ?? null;
+    const g = groupOf.get(s.id);
+    if (!g?.repo) return null;
+    const first = g.members.map((id) => states.get(id)).find((x) => x != null);
+    return first ? { ...first, id: `r-${g.id}`, fullName: g.repo.fullName ?? first.fullName } : null;
+  };
   const students = room.students.map<AssignmentDetailStudent>((s) => {
-    const r = states.get(s.id) ?? null;
+    const r = repoOf(s);
+    const g = groupOf.get(s.id);
     return {
       enrollmentId: s.id,
       nom: s.nom,
@@ -720,9 +733,11 @@ function assignmentDetail(room: Room, a: Assignment): AssignmentDetailPayload {
       email: s.email,
       claimStatus: s.status,
       githubLogin: s.githubLogin,
+      group: g ? { id: g.id, name: g.name } : null,
       repo: r
         ? {
             id: r.id,
+            groupId: g?.repo ? g.id : null,
             fullName: r.fullName,
             provisionStatus: "ok",
             provisionError: null,
@@ -804,9 +819,20 @@ function studentRooms(): StudentClassroom[] {
           gradingMode: a.gradingMode,
           gradesValidatedAt: a.state === "locked" && a.id === "a1" ? iso(-10 * D) : null,
           workMode: a.id === "b2" ? "online_seb" : a.workMode,
+          // Group mode: Marie works in "Group 1" with two classmates, in the
+          // group's repository (issue #2, lot 2).
+          group: a.groupMode
+            ? {
+                name: "Group 1",
+                teammates: room.students
+                  .filter((s) => !s.staff)
+                  .slice(1, 3)
+                  .map((s) => `${s.prenom} ${s.nom}`),
+              }
+            : null,
           repo: accepted
             ? {
-                fullName: `${room.summary.orgLogin}/${a.slug}-marie-dupo`,
+                fullName: `${room.summary.orgLogin}/${a.slug}-${a.groupMode ? "group-1" : "marie-dupo"}`,
                 provisionStatus: "ok",
                 invitationStatus: "accepted",
                 ciStatus: i === 1 ? "pending" : "pass",
@@ -1217,7 +1243,7 @@ const groupOr404 = (list: MockGroup[], gid: string) => {
   if (!g) throw new MockError(404, "Group not found");
   return g;
 };
-/** A group whose repository exists is frozen until lot 2 can revoke access. */
+/** A group whose repository exists can no longer be renamed, deleted nor replaced. */
 const notLocked = (g: MockGroup) => {
   if (g.repo) {
     throw new MockError(409, `“${g.name}” already has a repository`, { error: "has_repo" });
@@ -1336,10 +1362,10 @@ on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/:gid/members", (m, b
   if (!r.students.some((s) => s.id === enrollmentId && !s.staff)) {
     throw new MockError(404, "Student not found in this classroom");
   }
-  // Moving out of the previous group is a removal, so a locked one refuses.
+  // Lot 2: moving out of a group with a repository revokes on GitHub, then
+  // goes through — the mock has no GitHub, so it simply moves.
   const previous = list.find((x) => x.members.includes(enrollmentId));
   if (previous && previous.id !== g.id) {
-    notLocked(previous);
     previous.members = previous.members.filter((id) => id !== enrollmentId);
   }
   if (!g.members.includes(enrollmentId)) g.members.push(enrollmentId);
@@ -1347,7 +1373,7 @@ on("POST", "/app/api/classrooms/:id/assignments/:aid/groups/:gid/members", (m, b
 });
 on("DELETE", "/app/api/classrooms/:id/assignments/:aid/groups/:gid/members/:eid", (m) => {
   const { r, a, list } = groupsCtx(m);
-  const g = notLocked(groupOr404(list, m.groups!.gid!));
+  const g = groupOr404(list, m.groups!.gid!);
   g.members = g.members.filter((id) => id !== m.groups!.eid);
   return groupsPayload(r, a);
 });

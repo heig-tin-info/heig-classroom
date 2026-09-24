@@ -319,11 +319,10 @@ describe("group formation (issue #2, lot 1)", () => {
     await app.close();
   });
 
-  it("a group that owns a repository is locked: no rename, no delete, no removal", async () => {
+  it("a group that owns a repository is locked: no rename, no delete", async () => {
     const s = await seed(db);
     const app = await serve(db, s.teacherId);
     const g1 = await addGroup(app, s);
-    const g2 = await addGroup(app, s);
     await addMember(app, s, g1.id, s.students.Ammann!);
     await addMember(app, s, g1.id, s.students.Bovet!);
     await giveRepo(db, s, g1.id, s.students.Ammann!);
@@ -336,15 +335,9 @@ describe("group formation (issue #2, lot 1)", () => {
     expect(rename.statusCode).toBe(409);
     expect(rename.json().error).toBe("has_repo");
     expect((await app.inject({ method: "DELETE", url: url(s, `/${g1.id}`) })).statusCode).toBe(409);
-    const removal = await app.inject({
-      method: "DELETE",
-      url: url(s, `/${g1.id}/members/${s.students.Bovet}`),
-    });
-    expect(removal.statusCode).toBe(409);
-    expect(removal.json().error).toBe("has_repo");
-    // Moving someone OUT of it is a removal in disguise: refused too…
-    expect((await addMember(app, s, g2.id, s.students.Bovet!)).statusCode).toBe(409);
-    // …while joining it stays possible (lot 2 will invite the newcomer).
+    // Membership changes are carried to GitHub instead (lot 2, see
+    // group-repos.db.test.ts): joining a member without a linked account
+    // has nothing to invite, so it simply goes through.
     expect((await addMember(app, s, g1.id, s.students.Curie!)).statusCode).toBe(200);
 
     const payload = (await app.inject({ method: "GET", url: url(s) })).json<AssignmentGroupsPayload>();

@@ -2,8 +2,9 @@
 
 ## Statut
 
-Acceptée (2026-09-21, phase 4, issue #2). Lot 1 (constitution des groupes) implémenté ; lots 2
-et 3 spécifiés ici et pas encore écrits.
+Acceptée (2026-09-21, phase 4, issue #2). Lot 1 (constitution des groupes) implémenté et déployé
+le 2026-09-21 ; lot 2 (un dépôt par groupe) implémenté le 2026-09-24, voir « Lot 2 » plus bas ;
+lot 3 spécifié ici et pas encore écrit.
 
 ## Contexte
 
@@ -45,7 +46,8 @@ l'espace de travail et pousse pour le compte de l'étudiant. Un espace de travai
    *déplace*.
 4. **Un groupe qui possède un dépôt est verrouillé** : pas de renommage (le dépôt porte le nom du
    slug), pas de suppression, pas de retrait de membre — tous répondus `409 has_repo`, et l'écran
-   affiche un cadenas. L'ajout d'un membre reste permis : le lot 2 n'a qu'à l'inviter. Le verrou
+   affiche un cadenas. L'ajout d'un membre reste permis : le lot 2 n'a qu'à l'inviter. (Le lot 2
+   lève le refus pour le seul retrait de membre, en révoquant réellement l'accès.) Le verrou
    se lit dans `student_repos.group_id`, c'est donc un fait sur GitHub, pas un drapeau à garder
    synchronisé.
 5. **La taille maximale est indicative** (`assignments.group_max_size`) : la dépasser affiche un
@@ -74,6 +76,67 @@ l'espace de travail et pousse pour le compte de l'étudiant. Un espace de travai
    - **Lot 3** : suivi de l'invitation GitHub par membre, et ajustement par membre de la note du
      groupe par l'enseignant.
 
+## Lot 2 — un dépôt par groupe
+
+**Modèle de données : une ligne `student_repos` par dépôt de groupe**, `group_id` renseigné,
+`user_id` l'étudiant dont l'acceptation l'a créé. Les membres se lisent dans
+`assignment_group_members`, jamais recopiés sur la ligne. Rejeté : une ligne par membre pointant
+vers le même dépôt — `github_repo_id` est unique, et chaque flux indexé sur le dépôt (webhooks,
+capture CI, délai de rendu, gel, déclenchement LLM, pull requests de synchronisation) aurait dû
+apprendre à se démultiplier, ou aurait lancé la revue une fois par membre. Avec une ligne par
+dépôt, aucun n'a changé : délai de rendu, gel, note CI et revue LLM sont par dépôt, donc par
+groupe, par construction.
+
+Ce qui a changé, c'est la seule question « quel dépôt est celui de cet étudiant ? », tranchée à
+un seul endroit (`apps/server/src/group-repos.ts`, règle `pickStudentRepo` dans `@hgc/domain`)
+et utilisée par le tableau de détail, le relevé de notes de la classe, l'export par devoir et
+l'accueil étudiant. Notes et exports restent **une ligne par étudiant**, chaque membre lisant la
+note du dépôt du groupe. Les indications de rafraîchissement et le courriel de note finale vont à
+chaque membre.
+
+- **Acceptation.** Le premier membre qui accepte crée le dépôt
+  `<assignment-slug>-<group-slug>` (tronqué aux 100 caractères de GitHub) et chaque membre dont
+  le compte GitHub est lié est invité (`push`) aussitôt. Les acceptations suivantes ne font que
+  rattacher le membre (invitation idempotente). Un étudiant sans groupe reçoit `409 no_group`.
+  Un membre sans identifiant GitHub est invité quand il lie son compte, ou quand il accepte.
+- **Un seul provisionnement à la fois.** La migration `0029_group-repos` ajoute un index unique
+  partiel sur `(assignment_id, group_id)`, si bien que deux membres qui acceptent à la même
+  seconde insèrent une seule ligne, et une colonne `provision_claimed_at` : une réclamation
+  atomique laisse une seule acceptation provisionner la ligne (une ligne en échec, ou en attente
+  sans réclamation ou avec une réclamation de plus de cinq minutes), l'autre répond
+  `409 provision_in_progress`. Un échec tardif n'écrase jamais une ligne provisionnée. La même
+  migration restreint `student_repos_assignment_user_uq` à `WHERE group_id IS NULL` (échange
+  d'index, aucune donnée modifiée) : le `user_id` d'un dépôt de groupe n'est que son créateur,
+  qui peut déjà détenir une autre ligne sur le devoir — une ligne du lot 1 en échec, un groupe
+  d'une personne formé après coup.
+- **Pas d'adoption d'une classe à l'autre.** Le provisionnement adopte un dépôt existant du même
+  nom (un 422 vaut « étape déjà faite »). La réclamation réserve donc le nom sur la ligne tant
+  qu'elle est en attente, et un nom qu'une autre ligne suivie porte ou réserve est désambiguïsé
+  avec l'identifiant du groupe. Et une ligne de groupe n'adopte jamais un dépôt dont une autre
+  ligne enregistre déjà l'identifiant GitHub : le provisionnement échoue avant que quiconque y
+  soit invité.
+- **Les changements de membres suivent sur GitHub.** Ajouter (ou déplacer vers) invite ; retirer
+  (ou déplacer hors de) révoque la place de collaborateur et annule une invitation en attente
+  **d'abord** — un refus de GitHub répond `502 revoke_failed` et laisse l'appartenance intacte.
+  Renommer, supprimer et copier par-dessus un groupe qui a un dépôt restent `409 has_repo`.
+  Retirer un étudiant de la liste des étudiants révoque son accès aux groupes avant la cascade,
+  avec le même refus.
+- **Les données existantes ne sont pas migrées.** Des devoirs en groupe peuvent contenir des
+  dépôts individuels créés par des acceptations du lot 1. Ils continuent de fonctionner pour leur
+  étudiant : un dépôt individuel vivant l'emporte sur celui du groupe dans chaque vue, son
+  titulaire n'est ni invité dans le dépôt du groupe ni destinataire de ses courriels, et une
+  acceptation le renvoie tel quel. « Vivant » est un seul prédicat, `isLiveIndividualRepo` dans
+  `@hgc/domain` (provisionné, nommé, non supprimé) : une ligne du lot 1 en échec ou en attente ne
+  tient personne à l'écart du dépôt de son groupe. Une fois supprimé sur GitHub, le dépôt du
+  groupe prend le relais.
+- Chaque écriture sur GitHub est auditée (`group.repo.invite`, `group.repo.revoke`), à côté des
+  entrées existantes `assignment.accept`, `group.member.*` et `roster.remove`, qui nomment
+  désormais ce qui a été invité ou révoqué.
+
+Reste pour le lot 3 : le suivi de l'invitation par membre (aujourd'hui l'`invitation_status` de
+la ligne et la réconciliation ne suivent que l'invitation du créateur), et l'ajustement par
+membre de la note du groupe par l'enseignant.
+
 ## Conséquences
 
 - La migration additive `0028_assignment-groups` ajoute deux tables et trois colonnes ; rien
@@ -86,7 +149,8 @@ l'espace de travail et pousse pour le compte de l'étudiant. Un espace de travai
   en lecture.
 - Le tableau de détail reste par étudiant au lot 1 : la colonne du dépôt est simplement vide pour
   un devoir en groupe tant que le lot 2 ne la remplit pas. C'est délibéré — le lot 1 doit être
-  déployable pendant que le lot 2 s'écrit encore.
+  déployable pendant que le lot 2 s'écrit encore. Le lot 2 regroupe le tableau par équipe : une
+  ligne par groupe, ses membres listés sous son nom.
 - Chaque écriture est auditée (`group.create`, `group.rename`, `group.delete`,
   `group.member.add`, `group.member.remove`, `group.copy`, `group.split`, `group.singles`) et
   publie une indication de rafraîchissement `assignments` sur le sujet de la classe.

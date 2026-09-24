@@ -13,6 +13,7 @@ import {
   MonitorPlay,
   Play,
   SearchX,
+  UsersRound,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -291,7 +292,10 @@ function RowAction({
   });
   const acceptError =
     accept.isError && accept.error instanceof ApiError
-      ? apiErrorMessage(accept.error, "Acceptance failed")
+      ? // A groupmate is creating the same repository right now (issue #2).
+        (accept.error.body as { error?: string } | null)?.error === "provision_in_progress"
+        ? t("student.provisionInProgress")
+        : apiErrorMessage(accept.error, "Acceptance failed")
       : null;
   const locked = isLocked(a);
   const accepted = isAccepted(a);
@@ -367,6 +371,23 @@ function StatusBadge({ a }: { a: StudentAssignment }) {
   return <Badge tone="amber">{t("status.notAccepted")}</Badge>;
 }
 
+/** Group assignment (issue #2): the group, and who the repository is shared with. */
+function GroupLine({ group }: { group: NonNullable<StudentAssignment["group"]> }) {
+  const t = useT();
+  return (
+    <Tip label={t("student.groupTip")}>
+      <p className="mt-1 flex items-center gap-x-2 text-[13px] text-fg-muted">
+        <UsersRound className="size-3.5 shrink-0 text-fg-faint" />
+        <span>
+          {group.teammates.length > 0
+            ? t("student.groupWith", { group: group.name, names: group.teammates.join(", ") })
+            : group.name}
+        </span>
+      </p>
+    </Tip>
+  );
+}
+
 /** One assignment as a row of the classroom card. */
 function StudentAssignmentRow({
   a,
@@ -392,6 +413,7 @@ function StudentAssignmentRow({
           <span className="whitespace-nowrap">{isoDateTime(a.deadlineAt)}</span>
           <Countdown deadline={a.deadlineAt} />
         </p>
+        {a.group ? <GroupLine group={a.group} /> : null}
       </div>
       {isAccepted(a) ? (
         <div className="flex-1">

@@ -1,14 +1,16 @@
 /**
- * Group assignments (issue #2, lot 1: group formation). Groups belong to ONE
- * assignment and are formed by the staff, never by the students: the screen
- * selects a group and clicks the students into it. The maximum size is a hint
- * — it warns, it never refuses.
+ * Group assignments (issue #2, ADR-014). Groups belong to ONE assignment and
+ * are formed by the staff, never by the students: the screen selects a group
+ * and clicks the students into it. The maximum size is a hint — it warns, it
+ * never refuses.
  *
- * Lot 1 stops at the formation: no GitHub call, no repository. What lot 2 will
- * create (one repository per group) already casts its shadow here — a group
- * whose repository exists is LOCKED: no rename (the repository is named after
- * the slug), no deletion, no member removal (revoking a collaborator is a
- * lot-2 action). Adding a member stays allowed: lot 2 will simply invite them.
+ * The group's repository is created at the first acceptance of any member
+ * (lot 2, `group-repos.ts`). From then on the group is LOCKED: no rename (the
+ * repository is named after the slug), no deletion, no copy over it. Its
+ * membership stays editable, and each change is carried to GitHub: a student
+ * added (or moved in) is invited on the repository, a student removed (or
+ * moved out) loses their access first — the membership only changes once
+ * GitHub has taken the access back.
  */
 import { randomUUID } from "node:crypto";
 
@@ -31,8 +33,10 @@ import {
   users,
 } from "../../db/schema.js";
 import { publish } from "../../events.js";
+import { installationClient } from "../../github/app.js";
+import { attachMember } from "../../group-repos.js";
 import { accessibleAssignment, teacherGuard } from "../guards.js";
-import { slugify } from "./shared.js";
+import { revokeGroupAccess, slugify } from "./shared.js";
 
 type AssignmentRow = typeof assignments.$inferSelect;
 type GroupRow = typeof assignmentGroups.$inferSelect;
@@ -68,8 +72,8 @@ async function rosterMembers(db: Db, classroomId: string): Promise<GroupMember[]
 }
 
 /**
- * Repository of each group (lot 2 fills `student_repos.group_id`; null
- * everywhere in lot 1). Its mere presence locks the group, hence one lookup
+ * Repository of each group (`student_repos.group_id`, written at the first
+ * acceptance of a member). Its mere presence locks the group, hence one lookup
  * shared by the read view and every write guard.
  */
 async function reposByGroup(db: Db, assignmentId: string) {
@@ -258,8 +262,9 @@ function freeSlug(base: string, taken: Set<string>): string {
 
 export async function assignmentGroupRoutes(
   app: FastifyInstance,
-  _opts: { config: AppConfig },
+  opts: { config: AppConfig },
 ) {
+  const { config } = opts;
   const requireTeacher = teacherGuard(app);
   const base = "/app/api/classrooms/:id/assignments/:aid/groups";
 
@@ -311,9 +316,71 @@ export async function assignmentGroupRoutes(
     if (!repos.has(groupId)) return false;
     await reply.code(409).send({
       error: "has_repo",
-      message: "This group already has a repository: its members and its name are frozen",
+      message: "This group already has a repository: its name is frozen and it cannot be deleted",
     });
     return true;
+  }
+
+  type Scope = NonNullable<Awaited<ReturnType<typeof groupScope>>>;
+
+  /**
+   * Takes a student's access away from the repository of the group they are
+   * leaving, if it has one. Answers the reply itself and returns null when
+   * GitHub could not be reached or refused — the caller must then leave the
+   * membership alone. Returns the repositories revoked (possibly none).
+   */
+  function revokeLeaving(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    scope: Scope,
+    enrollmentId: string,
+    groupId: string,
+  ): Promise<string[] | null> {
+    return revokeGroupAccess(app, config, req, reply, {
+      org: scope.org,
+      enrollmentId,
+      groupId,
+      reason: "group.member",
+      refusal:
+        "GitHub did not revoke this student's access to the group repository: nothing was changed, try again",
+    });
+  }
+
+  /**
+   * Invites a student who just joined a group on its repository, if it has
+   * one. True when invited, false when GitHub refused, null when there was
+   * nothing to do (no repository yet, no linked GitHub account — they are
+   * then invited at their acceptance or when they link their account).
+   */
+  async function inviteJoining(
+    req: FastifyRequest,
+    scope: Scope,
+    enrollmentId: string,
+    groupId: string,
+  ): Promise<boolean | null> {
+    const installationId = scope.org.installationId;
+    if (installationId === null) return null;
+    try {
+      const attached = await attachMember(
+        app.db,
+        async () => (await installationClient(config, installationId)).octokit,
+        { assignmentId: scope.assignment.id, groupId, enrollmentId },
+        { actorUserId: req.user!.id, reason: "group.member" },
+      );
+      return attached ? true : null;
+    } catch (err) {
+      req.log.error({ err, enrollmentId, groupId }, "group repository invitation failed");
+      return false;
+    }
+  }
+
+  /** 502 after a membership change GitHub did not follow with an invitation. */
+  function inviteFailed(reply: FastifyReply) {
+    return reply.code(502).send({
+      error: "invite_failed",
+      message:
+        "The student is in the group, but GitHub refused the invitation to its repository: remove them and add them again to retry",
+    });
   }
 
   /** The groups of the assignment and the names/slugs already taken. */
@@ -408,7 +475,7 @@ export async function assignmentGroupRoutes(
       return reply.code(400).send({ error: "validation", issues: body.error.issues });
     }
     // The slug names the repository: renaming a group that has one would
-    // desynchronize the two (lot 2 territory), so the whole rename is refused.
+    // desynchronize the two, so the whole rename is refused.
     if (await refuseLocked(reply, scope.assignment.id, group.id)) return reply;
     const name = body.data.name.trim();
     const slug = slugify(name);
@@ -486,9 +553,12 @@ export async function assignmentGroupRoutes(
       )
       .limit(1);
     if (current?.groupId === group.id) return groupsPayload(app.db, scope.assignment);
-    // Moving out of a group that has a repository would mean revoking a
-    // collaborator — lot 2. Adding INTO one stays fine: lot 2 invites them.
-    if (current && (await refuseLocked(reply, scope.assignment.id, current.groupId))) return reply;
+    // Moving out of a group that has a repository: GitHub takes the access
+    // back first, and a refusal leaves the student where they were.
+    const revoked = current
+      ? await revokeLeaving(req, reply, scope, student.id, current.groupId)
+      : [];
+    if (revoked === null) return reply;
     if (current) {
       // A move is ONE row changing group: an UPDATE, never a delete followed
       // by an insert. A failure in between would have left the student in no
@@ -511,11 +581,16 @@ export async function assignmentGroupRoutes(
         })
         .onConflictDoNothing();
     }
+    // Joining a group that has a repository: invited right away.
+    const invited = await inviteJoining(req, scope, student.id, group.id);
     await trace(req, scope.assignment, "group.member.add", {
       group: group.name,
       enrollmentId: student.id,
       from: current?.groupId ?? null,
+      ...(revoked.length > 0 ? { revoked } : {}),
+      ...(invited !== null ? { invited } : {}),
     });
+    if (invited === false) return inviteFailed(reply);
     return groupsPayload(app.db, scope.assignment);
   });
 
@@ -526,7 +601,21 @@ export async function assignmentGroupRoutes(
     if (!group) return reply;
     const params = z.object({ eid: z.uuid() }).safeParse(req.params);
     if (!params.success) return reply.code(404).send({ error: "not_found" });
-    if (await refuseLocked(reply, scope.assignment.id, group.id)) return reply;
+    const [membership] = await app.db
+      .select({ id: assignmentGroupMembers.id })
+      .from(assignmentGroupMembers)
+      .where(
+        and(
+          eq(assignmentGroupMembers.groupId, group.id),
+          eq(assignmentGroupMembers.enrollmentId, params.data.eid),
+        ),
+      )
+      .limit(1);
+    if (!membership) return reply.code(404).send({ error: "not_found" });
+    // A group with a repository: the student loses their access on GitHub
+    // first; the membership only goes once GitHub has followed.
+    const revoked = await revokeLeaving(req, reply, scope, params.data.eid, group.id);
+    if (revoked === null) return reply;
     const [gone] = await app.db
       .delete(assignmentGroupMembers)
       .where(
@@ -541,6 +630,7 @@ export async function assignmentGroupRoutes(
     await trace(req, scope.assignment, "group.member.remove", {
       group: group.name,
       enrollmentId: params.data.eid,
+      ...(revoked.length > 0 ? { revoked } : {}),
     });
     return groupsPayload(app.db, scope.assignment);
   });

@@ -164,6 +164,7 @@ export function makeGrade(overrides: Partial<GradeView> = {}): GradeView {
 export function makeDetailRepo(overrides: Partial<AssignmentDetailRepo> = {}): AssignmentDetailRepo {
   return {
     id: "r-1",
+    groupId: null,
     fullName: "heig-prg1-2026/labo-02-quadratic-lucas",
     provisionStatus: "ok",
     provisionError: null,
@@ -196,6 +197,7 @@ export function makeDetailStudent(
     email: "lucas.rochat@heig-vd.ch",
     claimStatus: "claimed",
     githubLogin: "lucas-roch",
+    group: null,
     repo: makeDetailRepo(),
     ...overrides,
   };
@@ -310,6 +312,7 @@ export function makeStudentAssignment(
     gradingMode: "auto",
     gradesValidatedAt: null,
     workMode: "free",
+    group: null,
     repo: makeStudentRepo(),
     ...overrides,
   };

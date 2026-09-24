@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted (2026-09-21, phase 4, issue #2). Lot 1 (group formation) implemented; lots 2 and 3
-specified here and not yet written.
+Accepted (2026-09-21, phase 4, issue #2). Lot 1 (group formation) implemented and deployed on
+2026-09-21; lot 2 (one repository per group) implemented on 2026-09-24, see "Lot 2" below;
+lot 3 specified here and not yet written.
 
 ## Context
 
@@ -40,7 +41,8 @@ construction, so shared work has no meaning there.
    per assignment — and adding someone to another group *moves* them.
 4. **A group that owns a repository is locked**: no rename (the repository is named after the
    slug), no deletion, no member removal — all answered `409 has_repo`, and the screen shows a
-   lock. Adding a member stays allowed: lot 2 only has to invite them. The lock is read from
+   lock. Adding a member stays allowed: lot 2 only has to invite them. (Lot 2 lifts the refusal
+   for member removal only, by revoking the access for real.) The lock is read from
    `student_repos.group_id`, so it is a fact about GitHub, not a flag to keep in sync.
 5. **The maximum size is advisory** (`assignments.group_max_size`): exceeding it shows a
    warning, it never refuses. Real classes have an odd student, a repeater, a late arrival.
@@ -66,6 +68,60 @@ construction, so shared work has no meaning there.
    - **Lot 3**: per-member GitHub invitation follow-up, and the teacher's per-member
      adjustment of the group grade.
 
+## Lot 2 — one repository per group
+
+**Data model: one `student_repos` row per group repository**, `group_id` set, `user_id` the
+student whose acceptance created it. The members are read from `assignment_group_members`,
+never copied onto the row. Rejected: one row per member pointing at the same repository —
+`github_repo_id` is unique, and every flow keyed on the repository (webhooks, CI capture,
+deadline, freeze, LLM dispatch, sync pull requests) would have had to learn to fan out, or would
+have dispatched the review once per member. With one row per repository none of them changed:
+deadline, freeze, CI grade and LLM review are per repository, hence per group, by construction.
+
+What did change is the single question "which repository is this student's?", answered in one
+place (`apps/server/src/group-repos.ts`, rule `pickStudentRepo` in `@hgc/domain`) and used by
+the detail table, the classroom grade sheet, the per-assignment export and the student home. Grades
+and exports stay **one line per student**, each member reading the group repository's grade.
+Refresh hints and the final-grade e-mail go to every member.
+
+- **Acceptance.** The first member to accept creates the repository
+  `<assignment-slug>-<group-slug>` (capped at GitHub's 100 characters) and every member with a
+  linked GitHub account is invited (`push`) right away. Later acceptances only attach the member
+  (idempotent invitation). A student in no group gets `409 no_group`. A member without a GitHub
+  login is invited when they link their account, or when they accept.
+- **One provisioning at a time.** Migration `0029_group-repos` adds a partial unique index on
+  `(assignment_id, group_id)`, so two members accepting at the same second insert one row, and a
+  `provision_claimed_at` column: an atomic claim lets one acceptance provision the row (a failed
+  row, or a pending one with no claim or a claim older than five minutes), the other answers
+  `409 provision_in_progress`. A late failure never overwrites a provisioned row. The same
+  migration narrows `student_repos_assignment_user_uq` to `WHERE group_id IS NULL` (an index swap,
+  no data change): a group repository's `user_id` is only its creator, who may already hold
+  another row on the assignment — a failed lot-1 row, a solo group formed afterwards.
+- **No adoption across classrooms.** Provisioning adopts an existing repository of the same name
+  (a 422 is "step already done"). The claim therefore reserves the name on the row while it is
+  still pending, and a name another tracked row bears or reserves is disambiguated with the group
+  id. And a group row never adopts a repository whose GitHub id another row already records: the
+  provisioning fails before anyone is invited on it.
+- **Membership changes follow on GitHub.** Adding (or moving in) invites; removing (or moving
+  out) revokes the collaborator seat and cancels a pending invitation **first** — a refusal from
+  GitHub answers `502 revoke_failed` and leaves the membership untouched. Rename, deletion and
+  copy over a group with a repository stay `409 has_repo`. Removing a student from the roster
+  revokes their group access before the cascade, with the same refusal.
+- **Existing data is not migrated.** Group assignments may hold individual repositories created
+  by lot-1 acceptances. They keep working for their student: a live individual repository wins
+  over the group one in every read view, its holder is not invited into the group repository nor
+  mailed about it, and an acceptance returns it unchanged. "Live" is one predicate,
+  `isLiveIndividualRepo` in `@hgc/domain` (provisioned, named, not deleted): a failed or pending
+  lot-1 row holds nobody out of their group's repository. Once deleted on GitHub, the group
+  repository takes over.
+- Every GitHub write is audited (`group.repo.invite`, `group.repo.revoke`), next to the existing
+  `assignment.accept`, `group.member.*` and `roster.remove` entries which now name what was
+  invited or revoked.
+
+Left for lot 3: the per-member invitation follow-up (today the row's `invitation_status` and the
+reconciliation track the creator's invitation only), and the teacher's per-member adjustment of
+the group grade.
+
 ## Consequences
 
 - The additive migration `0028_assignment-groups` adds two tables and three columns; nothing
@@ -76,7 +132,8 @@ construction, so shared work has no meaning there.
   `accessibleAssignment`; an individual assignment answers `409 group_mode_off` even on a read.
 - The detail table stays per student in lot 1: the repository column is simply empty for a
   group assignment until lot 2 fills it. That is deliberate — lot 1 must be deployable while
-  lot 2 is still being written.
+  lot 2 is still being written. Lot 2 groups the table by team: one row per group, its members
+  listed under its name.
 - Every write is audited (`group.create`, `group.rename`, `group.delete`, `group.member.add`,
   `group.member.remove`, `group.copy`, `group.split`, `group.singles`) and publishes an
   `assignments` refresh hint to the classroom topic.

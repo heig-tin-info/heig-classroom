@@ -15,6 +15,7 @@ import type { Octokit } from "octokit";
 
 import type { WorkMode } from "@hgc/contracts";
 
+import { inviteCollaborator } from "./collaborators.js";
 import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
 
@@ -64,6 +65,13 @@ export async function provisionStudentRepo(opts: {
    * student has no access to the repository before grading.
    */
   workMode?: WorkMode;
+  /**
+   * Adoption guard: called when the repository name already exists on
+   * GitHub, with that repository's id, BEFORE anything is pushed to it or
+   * anyone invited on it. False aborts the provisioning. Group repositories
+   * use it so a name collision never hands a group someone else's repository.
+   */
+  canAdopt?: (repoId: number) => Promise<boolean>;
 }): Promise<ProvisionResult> {
   const { octokit, token, org, squashedRepo, targetRepo, branches, studentLogin } = opts;
   const workMode: WorkMode = opts.workMode ?? "free";
@@ -95,6 +103,9 @@ export async function provisionStudentRepo(opts: {
     });
     repoId = data.id;
     fullName = data.full_name;
+    if (opts.canAdopt && !(await opts.canAdopt(repoId))) {
+      throw new Error(`${fullName} already exists and belongs to another tracked repository`);
+    }
   }
 
   // 2. Push of the squashed repo's refs (skipped if the default branch already exists).
@@ -181,18 +192,15 @@ export async function provisionStudentRepo(opts: {
   //    student until the teacher opens it after grading.
   let invitationStatus: ProvisionResult["invitationStatus"] = "none";
   if (workMode !== "online_seb") {
-    const invite = await octokit.request(
-      "PUT /repos/{owner}/{repo}/collaborators/{username}",
-      {
-        owner: org,
-        repo: targetRepo,
-        username: studentLogin,
-        // `pull` in online mode: no write access means no student credential
-        // to manage, and the force-push ruleset above still stands.
-        permission: workMode === "free" ? "push" : "pull",
-      },
+    invitationStatus = await inviteCollaborator(
+      octokit,
+      org,
+      targetRepo,
+      studentLogin,
+      // `pull` in online mode: no write access means no student credential
+      // to manage, and the force-push ruleset above still stands.
+      workMode === "free" ? "push" : "pull",
     );
-    invitationStatus = invite.status === 201 ? "pending" : "accepted";
   }
 
   return {

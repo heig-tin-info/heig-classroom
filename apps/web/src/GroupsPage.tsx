@@ -50,7 +50,7 @@ import {
 } from "./ui";
 
 /*
- * Group formation (issue #2, lot 1). A teacher screen, so English throughout.
+ * Group formation (issue #2, lots 1 and 2). A teacher screen, so English throughout.
  *
  * The four decisions behind it:
  * - Type: the 28 px page title over 13 px dense rows; a group name steps to
@@ -181,33 +181,21 @@ function UnassignedPane({
 
 // --- Group card --------------------------------------------------------
 
-function MemberChip({
-  member,
-  locked,
-  onRemove,
-}: {
-  member: GroupMember;
-  locked: boolean;
-  onRemove: () => void;
-}) {
+function MemberChip({ member, onRemove }: { member: GroupMember; onRemove: () => void }) {
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-surface-2 py-0.5 pl-1 pr-1 text-[13px]">
       <Initials name={[member.prenom, member.nom]} className="size-5 text-[9px]" />
       <span className="min-w-0 truncate">{fullName(member)}</span>
-      {locked ? (
-        <span className="pr-1.5" />
-      ) : (
-        <IconButton
-          size="sm"
-          label={`Remove ${fullName(member)} from the group`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          <X />
-        </IconButton>
-      )}
+      <IconButton
+        size="sm"
+        label={`Remove ${fullName(member)} from the group`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
+      >
+        <X />
+      </IconButton>
     </span>
   );
 }
@@ -330,7 +318,7 @@ function GroupCard({
         </span>
         {over ? <Badge tone="amber">over the hint</Badge> : null}
         {locked ? (
-          <Tip label="The group repository exists — renaming, deleting and removing members would have to revoke GitHub access">
+          <Tip label="The group repository exists: the group can no longer be renamed nor deleted. A student added is invited on it, a student removed loses their access">
             <Badge tone="zinc" icon={Lock}>
               repository exists
             </Badge>
@@ -348,7 +336,6 @@ function GroupCard({
             <MemberChip
               key={m.enrollmentId}
               member={m}
-              locked={locked}
               onRemove={() => onRemoveMember(m)}
             />
           ))}
@@ -359,9 +346,11 @@ function GroupCard({
 
       {/* The affordance carries the selection, so the card still reads with
           the accent stripped. */}
-      {selected && !locked ? (
+      {selected ? (
         <p className="mt-3 border-t border-line pt-2.5 text-xs text-fg-muted">
-          Click a student in the Unassigned list to add them here.
+          {locked
+            ? "Click a student in the Unassigned list to add them here — they are invited on the repository."
+            : "Click a student in the Unassigned list to add them here."}
         </p>
       ) : null}
       {error ? <p className="mt-3 text-[13px] text-danger">{error}</p> : null}
@@ -416,7 +405,7 @@ export function GroupsPage({
       groupId,
       message:
         code === "has_repo"
-          ? "This group already has a repository — removing a member would have to revoke their GitHub access (lot 2)."
+          ? "This group already has a repository: it can no longer be renamed nor deleted."
           : apiErrorMessage(err, fallback),
     });
   };
@@ -684,8 +673,9 @@ export function GroupsPage({
 
       {assignment.state !== "draft" ? (
         <Alert tone="neutral" icon={Lock} title="This assignment is published">
-          Groups whose repository already exists are locked: they cannot be renamed, deleted, nor
-          lose a member.
+          Groups whose repository already exists can no longer be renamed nor deleted. Their members
+          still change: a student added is invited on the repository, a student removed loses their
+          access to it.
         </Alert>
       ) : null}
       {failure && failure.groupId === null ? (
@@ -731,9 +721,22 @@ export function GroupsPage({
                 error={failure?.groupId === g.id ? failure.message : null}
                 onSelect={() => setSelectedId(g.id)}
                 onRename={(name) => rename.mutate({ id: g.id, name })}
-                onRemoveMember={(m) =>
-                  removeMember.mutate({ groupId: g.id, enrollmentId: m.enrollmentId })
-                }
+                onRemoveMember={async (m) => {
+                  // A group with a repository: the removal revokes a GitHub
+                  // access, which deserves a confirmation.
+                  if (
+                    g.repo &&
+                    !(await confirm({
+                      title: `Remove ${fullName(m)} from “${g.name}”?`,
+                      message: `They lose their access to ${g.repo.fullName ?? "the group repository"} on GitHub.`,
+                      confirmLabel: "Remove",
+                      danger: true,
+                    }))
+                  ) {
+                    return;
+                  }
+                  removeMember.mutate({ groupId: g.id, enrollmentId: m.enrollmentId });
+                }}
                 onDelete={async () => {
                   if (
                     await confirm({

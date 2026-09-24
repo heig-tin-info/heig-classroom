@@ -47,6 +47,8 @@ export type AuditAction =
   | "group.member.add"
   | "group.member.remove"
   | "group.rename"
+  | "group.repo.invite"
+  | "group.repo.revoke"
   | "group.singles"
   | "group.split"
   | "milestone.create"

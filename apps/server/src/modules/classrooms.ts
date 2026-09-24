@@ -18,6 +18,7 @@ import {
   orgExistsOnGithub,
   resolveOrgInstallation,
 } from "../github/app.js";
+import { revokeGroupAccess } from "./assignments/shared.js";
 import { classroomGrades } from "./grades.js";
 import {
   accessibleClassroom,
@@ -633,14 +634,24 @@ export async function classroomsPlugin(
     async (req, reply) => {
       const entry = await accessibleEnrollment(app, req, reply);
       if (!entry) return reply;
-      // TODO(lot 2, issue #2): removing a student from the roster cascades
-      // their `assignment_group_members` rows away (ON DELETE CASCADE), and
-      // that silently takes them out of groups the group screen refuses to
-      // touch — the ones whose repository already exists, where a removal
-      // owes GitHub a revocation (409 `has_repo` on the group routes). Once
-      // lot 2 can revoke a collaborator, this route must do the same: either
-      // refuse while the enrollment belongs to a group that has a repository,
-      // or revoke their access before deleting the roster entry.
+      // Issue #2, lot 2: removing the entry cascades its group memberships
+      // away (ON DELETE CASCADE). A group whose repository exists owes GitHub
+      // a revocation for that, so it happens first — and a refusal keeps the
+      // student on the roster rather than leaving them a silent access.
+      const [org] = await app.db
+        .select({ login: organizations.login, installationId: organizations.installationId })
+        .from(classrooms)
+        .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
+        .where(eq(classrooms.id, entry.classroomId))
+        .limit(1);
+      const revoked = await revokeGroupAccess(app, config, req, reply, {
+        org: org!,
+        enrollmentId: entry.id,
+        reason: "roster.remove",
+        refusal:
+          "GitHub did not revoke this student's access to their group repositories: the student was not removed, try again",
+      });
+      if (revoked === null) return reply;
       await app.db.delete(enrollments).where(eq(enrollments.id, entry.id));
       await audit(app.db, {
         actorUserId: req.user!.id,
@@ -648,7 +659,12 @@ export async function classroomsPlugin(
         action: "roster.remove",
         subjectType: "enrollment",
         subjectId: entry.id,
-        payload: { nom: entry.nom, prenom: entry.prenom, email: entry.email },
+        payload: {
+          nom: entry.nom,
+          prenom: entry.prenom,
+          email: entry.email,
+          ...(revoked.length > 0 ? { revoked } : {}),
+        },
       });
       return reply.code(204).send();
     },

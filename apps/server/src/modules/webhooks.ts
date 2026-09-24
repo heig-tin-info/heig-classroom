@@ -17,10 +17,11 @@ import {
   studentRepos,
   webhookDeliveries,
 } from "../db/schema.js";
-import { publish } from "../events.js";
+import { publish, type Topic } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
+import { repoUserTopics } from "../group-repos.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
 import { mailRecipient, queueEmail } from "../mailer.js";
 import { markRepoDeleted } from "../repos.js";
@@ -86,7 +87,14 @@ async function repoContext(db: Db, githubRepoId: number) {
     .innerJoin(organizations, eq(classrooms.orgId, organizations.id))
     .where(eq(studentRepos.githubRepoId, githubRepoId))
     .limit(1);
-  return row ?? null;
+  if (!row) return null;
+  // Who a change of this repository concerns: the classroom's staff and the
+  // student(s) reading it — every member of a group repository (issue #2).
+  const audience: Topic[] = [
+    `classroom:${row.classroomId}`,
+    ...(await repoUserTopics(db, [row.repo])),
+  ];
+  return { ...row, audience };
 }
 
 /** Asynchronous processing of a delivery (replayable: every step is idempotent). */
@@ -170,7 +178,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
       .insert(botCommits)
       .values({ studentRepoId: ctx.repo.id, sha: p.after, kind: "grader" })
       .onConflictDoNothing();
-    publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+    publish("repos", ctx.audience);
     return;
   }
 
@@ -185,7 +193,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   const shortRepo = ctx.repo.fullName?.split("/")[1] ?? "repository";
   publish(
     "repos",
-    [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`],
+    ctx.audience,
     isBot
       ? undefined
       : { kind: "commit_pushed", message: `New push on ${shortRepo} (${branch})` },
@@ -257,7 +265,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
     subjectId: ctx.repo.id,
     payload: { files: result.files, sha: result.sha },
   });
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
+  publish("repos", ctx.audience, {
     kind: "protected_reverted",
     message: `Protected files restored on ${shortRepo} (${result.files.join(", ")})`,
   });
@@ -293,7 +301,7 @@ async function handleMember(app: FastifyInstance, p: MemberPayload) {
     .update(studentRepos)
     .set({ invitationStatus: "accepted" })
     .where(eq(studentRepos.id, ctx.repo.id));
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish("repos", ctx.audience);
 }
 
 interface RepositoryPayload {
@@ -325,7 +333,7 @@ export async function handleRepository(app: FastifyInstance, p: RepositoryPayloa
   } else {
     return;
   }
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish("repos", ctx.audience);
 }
 
 interface InstallationPayload {
@@ -512,7 +520,7 @@ async function handlePullRequest(app: FastifyInstance, p: PullRequestPayload) {
     .where(eq(studentRepos.id, ctx.repo.id));
   publish(
     "repos",
-    [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`],
+    ctx.audience,
     state === "merged"
       ? {
           kind: "sync",
@@ -545,7 +553,7 @@ async function handleWorkflowRun(
       .update(studentRepos)
       .set({ ciStatus: "pending" })
       .where(eq(studentRepos.id, ctx.repo.id));
-    publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+    publish("repos", ctx.audience);
     return;
   }
 
@@ -562,8 +570,8 @@ async function handleWorkflowRun(
     checkSuiteId: run.check_suite_id ?? null,
     completedAt: run.updated_at ? new Date(run.updated_at) : new Date(),
   }, config);
-  publish("repos", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
-  publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`]);
+  publish("repos", ctx.audience);
+  publish("grades", ctx.audience);
 }
 
 /** Public endpoint: HMAC, dedup, synchronous receipt, enqueue, 200 < 5 s (GH-60). */
