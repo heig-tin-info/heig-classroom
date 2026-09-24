@@ -251,6 +251,12 @@ export interface AssignmentDetailStudent {
   email: string;
   claimStatus: "pending" | "claimed";
   githubLogin: string | null;
+  /**
+   * Group assignment (issue #2): the student's group, whose repository is
+   * then `repo` — the same object on every member's line. Null for an
+   * individual assignment or a student in no group.
+   */
+  group: { id: string; name: string } | null;
   repo: AssignmentDetailRepo | null;
 }
 
@@ -297,7 +303,7 @@ export interface AssignmentDetailPayload {
      * is configured or the assignment is not in `online_seb` mode.
      */
     codespaceSebUrl: string | null;
-    /** Group assignment (issue #2); the detail table stays per student in lot 1. */
+    /** Group assignment (issue #2): the detail table groups its lines by team. */
     groupMode: boolean;
     groupMaxSize: number | null;
   };
@@ -395,6 +401,12 @@ export interface StudentAssignment {
    * are secrets and never leave the teacher side.
    */
   workMode: WorkMode;
+  /**
+   * Group assignment (issue #2): the student's group and the names of the
+   * other members; `repo` is then the group's repository. Null when the
+   * assignment is individual or the student is in no group.
+   */
+  group: { name: string; teammates: string[] } | null;
   repo: StudentRepo | null;
 }
 
@@ -427,9 +439,10 @@ export interface AssignmentGroup {
   slug: string;
   members: GroupMember[];
   /**
-   * The group's repository, created at the first acceptance (lot 2). While
-   * it exists the group is locked: no rename, no delete, no member removal
-   * (a removal would have to revoke access, which is a lot-2 action).
+   * The group's repository, created at the first acceptance of any member
+   * (lot 2). While it exists the group is locked: no rename, no delete. A
+   * member can still be added (invited on it) or removed (their access is
+   * revoked on GitHub).
    */
   repo: { fullName: string | null; provisionStatus: ProvisionStatus } | null;
 }

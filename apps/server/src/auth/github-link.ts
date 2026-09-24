@@ -14,6 +14,7 @@ import { audit } from "../audit.js";
 import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { enrollments, users } from "../db/schema.js";
+import { inviteOnGithubLink } from "../group-repos.js";
 
 const STATE_COOKIE = "hgc_ghlink";
 
@@ -140,6 +141,13 @@ export async function githubLinkPlugin(
         subjectId: req.user!.id,
         payload: { githubUserId: gh.id, githubLogin: gh.login },
       });
+      // Issue #2, lot 2: a group repository created before this student had
+      // a login could not invite them; now it can. Never fails the link.
+      try {
+        await inviteOnGithubLink(app, config, req.user!.id, gh.login);
+      } catch (err) {
+        req.log.warn({ err }, "group repository invitations on link failed");
+      }
       return reply.redirect("/?github=linked", 303);
     },
   );

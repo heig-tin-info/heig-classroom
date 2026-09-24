@@ -24,6 +24,7 @@ import { githubApp, installationClient } from "./github/app.js";
 import { fetchRepoLiveState } from "./github/metrics.js";
 import { ingestCompletedRun, type RepoCtx } from "./grading.js";
 import { WEBHOOK_QUEUE } from "./jobs.js";
+import { repoUserTopics, type RepoRow } from "./group-repos.js";
 import { repoIsLive } from "./repos.js";
 
 export interface TaskDef {
@@ -149,6 +150,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
     );
   const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
   const touched = new Set<Topic>();
+  const touchedRepos: RepoRow[] = [];
   let ingested = 0;
   for (const { repo, assignment, classroomId, installationId } of rows) {
     let client = clients.get(installationId!);
@@ -180,13 +182,15 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
         if (id) {
           ingested += 1;
           touched.add(`classroom:${classroomId}`);
-          touched.add(`user:${repo.userId}`);
+          touchedRepos.push(repo);
         }
       }
     } catch (err) {
       app.log.warn({ err, repo: repo.fullName }, "reconcile.grades: repo fetch failed");
     }
   }
+  // Every member of a group repository, not only its creator (issue #2).
+  for (const t of await repoUserTopics(app.db, touchedRepos)) touched.add(t);
   if (touched.size > 0) {
     publish("grades", [...touched]);
     publish("repos", [...touched]);
@@ -217,6 +221,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
     );
   const clients = new Map<number, Awaited<ReturnType<typeof installationClient>>>();
   const touched = new Set<Topic>();
+  const touchedRepos: RepoRow[] = [];
   let updated = 0;
   for (const { repo, classroomId, installationId, githubLogin } of rows) {
     let client = clients.get(installationId!);
@@ -226,7 +231,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
     }
     const notify = () => {
       touched.add(`classroom:${classroomId}`);
-      touched.add(`user:${repo.userId}`);
+      touchedRepos.push(repo);
     };
     // Invitation acceptance has no reliable retro-active webhook: a pending
     // invite whose invitee is now a collaborator has been accepted (204),
@@ -268,6 +273,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
       app.log.warn({ err, repo: repo.fullName }, "reconcile.repos: repo fetch failed");
     }
   }
+  for (const t of await repoUserTopics(app.db, touchedRepos)) touched.add(t);
   if (touched.size > 0) publish("repos", [...touched]);
   return `${rows.length} repositories checked, ${updated} updated`;
 }

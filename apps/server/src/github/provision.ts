@@ -15,6 +15,7 @@ import type { Octokit } from "octokit";
 
 import type { WorkMode } from "@hgc/contracts";
 
+import { inviteCollaborator } from "./collaborators.js";
 import { authUrl, gitRunner } from "./git.js";
 import { pushWithRetry } from "./retry.js";
 
@@ -181,18 +182,15 @@ export async function provisionStudentRepo(opts: {
   //    student until the teacher opens it after grading.
   let invitationStatus: ProvisionResult["invitationStatus"] = "none";
   if (workMode !== "online_seb") {
-    const invite = await octokit.request(
-      "PUT /repos/{owner}/{repo}/collaborators/{username}",
-      {
-        owner: org,
-        repo: targetRepo,
-        username: studentLogin,
-        // `pull` in online mode: no write access means no student credential
-        // to manage, and the force-push ruleset above still stands.
-        permission: workMode === "free" ? "push" : "pull",
-      },
+    invitationStatus = await inviteCollaborator(
+      octokit,
+      org,
+      targetRepo,
+      studentLogin,
+      // `pull` in online mode: no write access means no student credential
+      // to manage, and the force-push ruleset above still stands.
+      workMode === "free" ? "push" : "pull",
     );
-    invitationStatus = invite.status === 201 ? "pending" : "accepted";
   }
 
   return {

@@ -7,14 +7,15 @@
  * very one the assignment detail view and the student view apply: teacher
  * adjustment, else LLM review, else frozen CI grade.
  */
-import { and, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 
 import type { ClassroomGradesPayload } from "@hgc/contracts";
 import { finalPoints } from "@hgc/domain";
 
-import { assignments, enrollments, studentRepos } from "../db/schema.js";
+import { assignments, enrollments } from "../db/schema.js";
 import { gradeViewsByIds } from "../grading.js";
+import { studentRepoResolver } from "../group-repos.js";
 
 export async function classroomGrades(
   app: FastifyInstance,
@@ -38,24 +39,18 @@ export async function classroomGrades(
     .where(and(eq(enrollments.classroomId, classroom.id), eq(enrollments.staff, false)))
     .orderBy(enrollments.nom, enrollments.prenom);
 
-  const repos = graded.length
-    ? await app.db
-        .select()
-        .from(studentRepos)
-        .where(
-          inArray(
-            studentRepos.assignmentId,
-            graded.map((a) => a.id),
-          ),
-        )
-    : [];
+  // One line per student even in a group assignment: every member reads the
+  // grade of the group's repository (issue #2, ADR-014).
+  const resolver = await studentRepoResolver(
+    app.db,
+    graded.map((a) => a.id),
+  );
   // Current, frozen and LLM slots of every repository, in one query.
   const grades = await gradeViewsByIds(
     app,
-    repos.flatMap((r) => [r.currentGradeRunId, r.frozenGradeRunId, r.llmGradeRunId]),
+    resolver.repos.flatMap((r) => [r.currentGradeRunId, r.frozenGradeRunId, r.llmGradeRunId]),
   );
   const view = (id: string | null) => (id ? (grades.get(id) ?? null) : null);
-  const byAssignmentUser = new Map(repos.map((r) => [`${r.assignmentId}:${r.userId}`, r]));
 
   return {
     classroom: { id: classroom.id, name: classroom.name },
@@ -68,7 +63,7 @@ export async function classroomGrades(
     students: roster.map((s) => {
       const points: Record<string, number | null> = {};
       for (const a of graded) {
-        const repo = s.userId ? byAssignmentUser.get(`${a.id}:${s.userId}`) : undefined;
+        const repo = resolver.repoOf(a.id, { enrollmentId: s.id, userId: s.userId });
         points[a.id] = repo
           ? finalPoints({
               teacherPoints: repo.teacherPoints,

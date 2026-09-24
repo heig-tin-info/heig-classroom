@@ -515,10 +515,13 @@ export const studentRepos = pgTable(
     teacherGradedBy: uuid("teacher_graded_by").references(() => users.id),
     teacherGradedAt: timestamp("teacher_graded_at", { withTimezone: true }),
     /**
-     * Group assignment (issue #2): the group this repository belongs to; the
-     * members share it. Filled by lot 2 (one repository per group at the first
-     * acceptance); lot 1 only reads it — a group with a repository is locked.
-     * `set null` so deleting a group never deletes a repository.
+     * Group assignment (issue #2, ADR-014): the group this repository belongs
+     * to. Lot 2 writes ONE row per group repository, created at the first
+     * acceptance of any member; the members are read from
+     * `assignment_group_members`, never stored here, and `user_id` is then
+     * merely the student whose acceptance created it. A group with a
+     * repository is locked (no rename, no deletion). `set null` so deleting a
+     * group never deletes a repository.
      */
     groupId: uuid("group_id").references(() => assignmentGroups.id, { onDelete: "set null" }),
   },
@@ -526,6 +529,11 @@ export const studentRepos = pgTable(
     // Provisioning idempotency key (GH-20, NFR-09).
     uniqueIndex("student_repos_assignment_user_uq").on(t.assignmentId, t.userId),
     index("student_repos_group_idx").on(t.groupId),
+    // Group provisioning idempotency key (lot 2): two members accepting at
+    // the same second insert the same row, and only one wins.
+    uniqueIndex("student_repos_assignment_group_uq")
+      .on(t.assignmentId, t.groupId)
+      .where(sql`${t.groupId} IS NOT NULL`),
   ],
 );
 

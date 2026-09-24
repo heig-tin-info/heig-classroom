@@ -14,6 +14,7 @@ import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, classrooms, organizations, studentRepos } from "./db/schema.js";
 import { publish } from "./events.js";
+import { repoUserTopics } from "./group-repos.js";
 import { installationClient } from "./github/app.js";
 import { openSyncWorkspace, updateSquashedRepo } from "./github/sync.js";
 import { repoIsLive } from "./repos.js";
@@ -189,7 +190,7 @@ export function makeSyncHandler(app: FastifyInstance, config: AppConfig) {
     });
     publish(
       "repos",
-      [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
+      [...(await repoUserTopics(app.db, repos)), `classroom:${row.classroomId}`],
     );
     if (failures.length > 0) {
       throw new Error(`sync incomplete: ${failures.join(", ")}`);

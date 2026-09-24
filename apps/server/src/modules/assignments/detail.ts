@@ -9,6 +9,7 @@ import { enrollments, gradeRuns, studentRepos, users } from "../../db/schema.js"
 import { installationClient } from "../../github/app.js";
 import { fetchRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
 import { gradeView, gradeViewsByIds } from "../../grading.js";
+import { studentRepoResolver } from "../../group-repos.js";
 import { accessibleAssignment, accessibleStudentRepo, teacherGuard } from "../guards.js";
 
 export async function assignmentDetailRoutes(
@@ -44,10 +45,10 @@ export async function assignmentDetailRoutes(
         .where(eq(enrollments.classroomId, a.classroomId))
         .orderBy(enrollments.nom, enrollments.prenom);
 
-      const repos = await app.db
-        .select()
-        .from(studentRepos)
-        .where(eq(studentRepos.assignmentId, a.id));
+      // Each student reads their own repository or their group's (issue #2):
+      // one line per student, a group repository shared by its members.
+      const resolver = await studentRepoResolver(app.db, [a.id]);
+      const repos = resolver.repos;
 
       // Current and frozen grades (GR-11) in a single query.
       const grades = await gradeViewsByIds(
@@ -105,7 +106,7 @@ export async function assignmentDetailRoutes(
           codespaceSebUrl: sebFileUrl(config, a),
         },
         students: roster.map((s) => {
-          const repo = s.userId ? repos.find((r) => r.userId === s.userId) : undefined;
+          const repo = resolver.repoOf(a.id, s);
           return {
             enrollmentId: s.enrollmentId,
             nom: s.nom,
@@ -113,6 +114,7 @@ export async function assignmentDetailRoutes(
             email: s.email,
             claimStatus: s.status,
             githubLogin: s.githubLogin,
+            group: a.groupMode ? resolver.groupOf(a.id, s.enrollmentId) : null,
             repo: repo
               ? {
                   id: repo.id,

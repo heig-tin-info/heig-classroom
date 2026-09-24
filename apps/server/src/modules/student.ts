@@ -18,6 +18,16 @@ import {
 import { installationClient } from "../github/app.js";
 import { fetchRepoLiveState } from "../github/metrics.js";
 import { provisionStudentRepo } from "../github/provision.js";
+import {
+  claimGroupRepo,
+  groupMemberAccounts,
+  inviteMember,
+  inviteMembers,
+  invitableMembers,
+  studentRepoResolver,
+  type GroupRow,
+  type RepoRow,
+} from "../group-repos.js";
 import { gradeViewsByIds } from "../grading.js";
 import { mailRecipient, queueEmail } from "../mailer.js";
 import { claimEnrollments } from "./roster.js";
@@ -46,6 +56,7 @@ export async function studentPlugin(
       const rooms = await app.db
         .select({
           id: classrooms.id,
+          enrollmentId: enrollments.id,
           name: classrooms.name,
           orgLogin: organizations.login,
           teacher: users.givenName,
@@ -80,6 +91,7 @@ export async function studentPlugin(
               // ADR-013: drives the Start button. The Browser Exam Keys are
               // deliberately NOT selected — they are secrets.
               workMode: assignments.workMode,
+              groupMode: assignments.groupMode,
             })
             .from(assignments)
             .where(
@@ -92,20 +104,30 @@ export async function studentPlugin(
             .orderBy(asc(assignments.deadlineAt))
         : [];
 
-      const repos = published.length
-        ? await app.db
-            .select()
-            .from(studentRepos)
-            .where(
-              and(
-                eq(studentRepos.userId, me.id),
-                inArray(
-                  studentRepos.assignmentId,
-                  published.map((a) => a.id),
-                ),
-              ),
-            )
-        : [];
+      // My repository per assignment: my own, or my group's (issue #2).
+      const enrollmentOf = new Map(rooms.map((r) => [r.id, r.enrollmentId]));
+      const resolver = await studentRepoResolver(
+        app.db,
+        published.map((a) => a.id),
+      );
+      const repoOf = new Map(
+        published.map((a) => [
+          a.id,
+          resolver.repoOf(a.id, { enrollmentId: enrollmentOf.get(a.classroomId)!, userId: me.id }),
+        ]),
+      );
+      const repos = [...repoOf.values()].filter((r): r is RepoRow => r !== undefined);
+      // My groups and who I share them with, for the line under the name.
+      const groupOf = new Map(
+        published.map((a) => [
+          a.id,
+          a.groupMode ? resolver.groupOf(a.id, enrollmentOf.get(a.classroomId)!) : null,
+        ]),
+      );
+      const teammates = await groupMemberAccounts(
+        app.db,
+        [...groupOf.values()].flatMap((g) => (g ? [g.id] : [])),
+      );
 
       // GR-10: indicative grade (current, or frozen as soon as the deadline
       // is applied, GR-12/13).
@@ -156,8 +178,9 @@ export async function studentPlugin(
         teacher: `${r.teacher} ${r.teacherFamily}`.trim(),
         assignments: published
           .filter((a) => a.classroomId === r.id)
-          .map((a) => {
-            const repo = repos.find((sr) => sr.assignmentId === a.id);
+          .map(({ groupMode: _groupMode, ...a }) => {
+            const repo = repoOf.get(a.id);
+            const group = groupOf.get(a.id);
             const frozen = a.state === "locked";
             const gradeRunId = repo
               ? frozen
@@ -167,6 +190,18 @@ export async function studentPlugin(
             const state = repo ? live.get(repo.id) : null;
             return {
               ...a,
+              group: group
+                ? {
+                    name: group.name,
+                    teammates: teammates
+                      .filter(
+                        (m) =>
+                          m.groupId === group.id &&
+                          m.enrollmentId !== enrollmentOf.get(a.classroomId),
+                      )
+                      .map((m) => `${m.prenom} ${m.nom}`.trim()),
+                  }
+                : null,
               repo: repo
                 ? {
                     fullName: repo.fullName,
@@ -248,49 +283,96 @@ export async function studentPlugin(
           .send({ error: "not_provisionable", message: "Assignment is not ready — contact your teacher" });
       }
 
-      // Idempotency (GH-20): one row per (assignment, user).
-      let [repoRow] = await app.db
-        .select()
-        .from(studentRepos)
-        .where(
-          and(
-            eq(studentRepos.assignmentId, row.assignment.id),
-            eq(studentRepos.userId, me.id),
-          ),
-        )
-        .limit(1);
-      if (repoRow && repoRow.provisionStatus === "ok") return repoRow;
-      if (!repoRow) {
-        await app.db
-          .insert(studentRepos)
-          .values({ id: randomUUID(), assignmentId: row.assignment.id, userId: me.id })
-          .onConflictDoNothing();
+      const assignment = row.assignment;
+      const client = await installationClient(config, row.org.installationId);
+
+      let repoRow: RepoRow | undefined;
+      let targetRepo = `${assignment.slug}-${me.githubLogin}`;
+      let group: GroupRow | null = null;
+      if (assignment.groupMode) {
+        // Issue #2, lot 2: ONE repository per group, created by the first
+        // member to accept, every member invited on it (ADR-014).
+        const claim = await claimGroupRepo(app.db, {
+          assignment,
+          orgLogin: row.org.login,
+          enrollmentId: enrolled.id,
+          userId: me.id,
+        });
+        if (claim.kind === "refused") {
+          return reply.code(409).send({ error: claim.error, message: claim.message });
+        }
+        // A lot-1 individual repository: the student keeps working in it.
+        if (claim.kind === "individual") return claim.row;
+        ({ group, row: repoRow, repoName: targetRepo } = claim);
+        if (repoRow.provisionStatus === "ok") {
+          // Dead is dead (issue #10), exactly like an individual repository.
+          if (repoRow.deletedAt) return repoRow;
+          // The repository exists: this acceptance only attaches the member.
+          let invitation: "pending" | "accepted";
+          try {
+            invitation = await inviteMember(
+              app.db,
+              client.octokit,
+              repoRow,
+              { enrollmentId: enrolled.id, githubLogin: me.githubLogin },
+              { actorUserId: me.id, reason: "accept" },
+            );
+          } catch (err) {
+            req.log.error({ err, repo: repoRow.fullName }, "group repository invitation failed");
+            return reply.code(502).send({
+              error: "invite_failed",
+              message: "Could not invite you on your group's repository — try again",
+            });
+          }
+          await audit(app.db, {
+            actorUserId: me.id,
+            actorType: "user",
+            action: "assignment.accept",
+            subjectType: "student_repo",
+            subjectId: repoRow.id,
+            payload: { repo: repoRow.fullName, group: group.name, joined: true, invitation },
+          });
+          publish("repos", [`classroom:${assignment.classroomId}`, `user:${me.id}`]);
+          return repoRow;
+        }
+      } else {
+        // Idempotency (GH-20): one row per (assignment, user).
         [repoRow] = await app.db
           .select()
           .from(studentRepos)
           .where(
-            and(
-              eq(studentRepos.assignmentId, row.assignment.id),
-              eq(studentRepos.userId, me.id),
-            ),
+            and(eq(studentRepos.assignmentId, assignment.id), eq(studentRepos.userId, me.id)),
           )
           .limit(1);
+        if (repoRow && repoRow.provisionStatus === "ok") return repoRow;
+        if (!repoRow) {
+          await app.db
+            .insert(studentRepos)
+            .values({ id: randomUUID(), assignmentId: assignment.id, userId: me.id })
+            .onConflictDoNothing();
+          [repoRow] = await app.db
+            .select()
+            .from(studentRepos)
+            .where(
+              and(eq(studentRepos.assignmentId, assignment.id), eq(studentRepos.userId, me.id)),
+            )
+            .limit(1);
+        }
       }
 
-      const client = await installationClient(config, row.org.installationId);
-      const defaultBranch = row.assignment.branches[0] ?? "main";
+      const defaultBranch = assignment.branches[0] ?? "main";
       try {
         const result = await provisionStudentRepo({
           octokit: client.octokit,
           token: client.token,
           org: row.org.login,
           squashedRepo: row.assignment.squashedFullName.split("/")[1]!,
-          targetRepo: `${row.assignment.slug}-${me.githubLogin}`,
-          branches: row.assignment.branches,
+          targetRepo,
+          branches: assignment.branches,
           defaultBranch,
           studentLogin: me.githubLogin,
           // ADR-013: read-only in online mode, no invitation at all in exam mode.
-          workMode: row.assignment.workMode,
+          workMode: assignment.workMode,
         });
         const [updated] = await app.db
           .update(studentRepos)
@@ -305,6 +387,23 @@ export async function studentPlugin(
           })
           .where(eq(studentRepos.id, repoRow!.id))
           .returning();
+
+        // The rest of the group gets access right away, not at their own
+        // acceptance: whoever accepts first opens the repository for all.
+        // Best effort per member — their own acceptance re-invites them.
+        const others = group
+          ? (await invitableMembers(app.db, assignment.id, group.id)).filter(
+              (m) => m.userId !== me.id,
+            )
+          : [];
+        const { invited, failed } = await inviteMembers(app.db, client.octokit, updated!, others, {
+          actorUserId: me.id,
+          reason: "group_repo_created",
+        });
+        if (failed.length > 0) {
+          req.log.warn({ repo: result.fullName, failed }, "group members not invited");
+        }
+
         await audit(app.db, {
           actorUserId: me.id,
           actorType: "user",
@@ -317,18 +416,33 @@ export async function studentPlugin(
             repo: result.fullName,
             invitation: result.invitationStatus,
             protected: result.rulesetId !== null,
+            ...(group ? { group: group.name, invited, failed } : {}),
           },
         });
-        publish("repos", [`classroom:${row.assignment.classroomId}`, `user:${me.id}`], {
-          kind: "assignment_accepted",
-          message: `${me.givenName} ${me.familyName} accepted “${row.assignment.name}”`.trim(),
-        });
-        // Repo confirmation: the GitHub invitation must still be accepted.
-        await queueEmail(app, config, me, "repo.invitation", {
-          assignmentName: row.assignment.name,
-          classroomName: row.classroomName,
-          repoFullName: result.fullName,
-        });
+        publish(
+          "repos",
+          [
+            `classroom:${assignment.classroomId}`,
+            `user:${me.id}`,
+            ...others.map((m) => `user:${m.userId}` as const),
+          ],
+          {
+            kind: "assignment_accepted",
+            message: `${me.givenName} ${me.familyName} accepted “${assignment.name}”`.trim(),
+          },
+        );
+        // Repo confirmation: the GitHub invitation must still be accepted —
+        // by every member who was just invited, not only by the acceptor.
+        const notified = [me.id, ...others.filter((m) => invited.includes(m.githubLogin)).map((m) => m.userId)];
+        for (const userId of notified) {
+          const recipient = userId === me.id ? me : await mailRecipient(app, userId);
+          if (!recipient) continue;
+          await queueEmail(app, config, recipient, "repo.invitation", {
+            assignmentName: assignment.name,
+            classroomName: row.classroomName,
+            repoFullName: result.fullName,
+          });
+        }
         return updated;
       } catch (err) {
         req.log.error({ err }, "provisioning failed");
@@ -347,7 +461,7 @@ export async function studentPlugin(
         const teacher = await mailRecipient(app, row.teacherId);
         if (teacher) {
           await queueEmail(app, config, teacher, "provision.error", {
-            assignmentName: row.assignment.name,
+            assignmentName: assignment.name,
             classroomName: row.classroomName,
             detail: `${me.givenName} ${me.familyName}`.trim() || me.email,
           });

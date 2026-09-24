@@ -11,6 +11,7 @@ import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, classrooms, organizations, studentRepos } from "./db/schema.js";
 import { publish } from "./events.js";
+import { repoUserTopics } from "./group-repos.js";
 import { installationClient } from "./github/app.js";
 import { pushEmptyCommit, zurichIso } from "./github/commit.js";
 import { lockStudentRepo } from "./github/lock.js";
@@ -190,7 +191,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
     if (applied > 0 || deleted > 0) {
       publish(
         "repos",
-        [...repos.map((r) => `user:${r.userId}` as const), `classroom:${row.classroomId}`],
+        [...(await repoUserTopics(app.db, repos)), `classroom:${row.classroomId}`],
       );
     }
     if (claimedNow) {
