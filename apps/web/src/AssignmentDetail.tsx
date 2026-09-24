@@ -1233,6 +1233,9 @@ function DeadlineStat({ a }: { a: AssignmentDetailPayload["assignment"] }) {
 
 type SortKey = "name" | "lastCommitAt" | "commitCount" | "grade" | "status";
 
+/** Delay before re-reading counters the server served stale (~2 s GitHub refresh). */
+const LIVE_STALE_REFETCH_MS = 4_000;
+
 export function AssignmentDetail({
   classroomId,
   assignmentId,
@@ -1254,6 +1257,8 @@ export function AssignmentDetail({
     queryKey: ["assignment-detail", assignmentId],
     queryFn: () =>
       api(`/app/api/classrooms/${classroomId}/assignments/${assignmentId}/detail`),
+    // Stale counters were served at once; the server is re-reading GitHub.
+    refetchInterval: (q) => (q.state.data?.liveStale ? LIVE_STALE_REFETCH_MS : false),
   });
   const validate = useMutation({
     mutationFn: () =>

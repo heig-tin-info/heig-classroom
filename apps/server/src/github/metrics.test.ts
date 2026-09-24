@@ -4,19 +4,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cachedRepoLiveState,
   forgetRepoLiveState,
+  LIVE_STATE_MAX_STALE_MS,
   LIVE_STATE_TTL_MS,
+  readRepoLiveState,
   resetLiveStateCache,
 } from "./metrics.js";
 
 /** An Octokit whose `request` answers the two live-state calls. */
-function fakeOctokit(fail?: unknown) {
+function fakeOctokit(fail?: unknown, sha = "abc") {
   const request = vi.fn(async (route: string, params: { request?: unknown }) => {
     if (fail) throw fail;
     if (route.endsWith("/check-runs")) {
       return { data: { check_runs: [{ status: "completed", conclusion: "success" }] }, params };
     }
     return {
-      data: [{ sha: "abc", commit: { committer: { date: "2026-09-24T12:00:00Z" } } }],
+      data: [{ sha, commit: { committer: { date: "2026-09-24T12:00:00Z" } } }],
       headers: {},
     };
   });
@@ -81,5 +83,40 @@ describe("cachedRepoLiveState", () => {
     const { octokit, request } = fakeOctokit();
     await cachedRepoLiveState(octokit, 1, "org/repo", 0);
     expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("serves the last state at once past the TTL and refreshes it in the background", async () => {
+    const first = fakeOctokit(undefined, "old");
+    await readRepoLiveState(first.octokit, 1, "org/repo", 0);
+
+    const next = fakeOctokit(undefined, "new");
+    const read = await readRepoLiveState(next.octokit, 1, "org/repo", LIVE_STATE_TTL_MS);
+    expect(read).toMatchObject({ stale: true, state: { lastCommitSha: "old" } });
+    // While the refresh is in flight, other readers get the old value too.
+    const during = await readRepoLiveState(next.octokit, 1, "org/repo", LIVE_STATE_TTL_MS + 1);
+    expect(during.stale).toBe(true);
+
+    await vi.waitFor(() => expect(next.request).toHaveBeenCalledTimes(2));
+    await new Promise((r) => setTimeout(r, 0));
+    const after = await readRepoLiveState(next.octokit, 1, "org/repo", LIVE_STATE_TTL_MS + 2);
+    expect(after).toMatchObject({ stale: false, state: { lastCommitSha: "new" } });
+    expect(next.request).toHaveBeenCalledTimes(2); // one refresh, not one per reader
+  });
+
+  it("waits for GitHub again once the state is older than MAX_STALE", async () => {
+    await readRepoLiveState(fakeOctokit(undefined, "old").octokit, 1, "org/repo", 0);
+    const next = fakeOctokit(undefined, "new");
+    const read = await readRepoLiveState(next.octokit, 1, "org/repo", LIVE_STATE_MAX_STALE_MS);
+    expect(read).toMatchObject({ stale: false, state: { lastCommitSha: "new" } });
+  });
+
+  it("keeps the last state when the background refresh hits the rate limit", async () => {
+    await readRepoLiveState(fakeOctokit(undefined, "old").octokit, 1, "org/repo", 0);
+    const limited = fakeOctokit(quotaExhausted);
+    await readRepoLiveState(limited.octokit, 1, "org/repo", LIVE_STATE_TTL_MS);
+    await new Promise((r) => setTimeout(r, 0));
+    const read = await readRepoLiveState(limited.octokit, 1, "org/repo", LIVE_STATE_TTL_MS + 1);
+    expect(read.state?.lastCommitSha).toBe("old");
+    expect(limited.request).toHaveBeenCalledTimes(1);
   });
 });
