@@ -11,6 +11,38 @@ import type { AppConfig } from "../config.js";
 
 let cached: App | null | undefined;
 
+/**
+ * Throttling policy. Octokit's default waits out a rate limit and retries
+ * once — until the quota resets for a primary limit, up to an hour. Right
+ * for background jobs (provisioning, reconciliation); wrong for a read that
+ * serves an HTTP request: on 2026-09-24 the detail view of Prog-C hung for
+ * 35 minutes. Such reads pass `request: { noRateLimitWait: true }` and get
+ * the 403/429 at once, then fall back to the stored state.
+ */
+type ThrottleOptions = {
+  method: string;
+  url: string;
+  request: { retryCount: number; noRateLimitWait?: boolean };
+};
+function waitOutRateLimit(
+  retryAfter: number,
+  options: ThrottleOptions,
+  octokit: Octokit,
+  kind: string,
+): boolean {
+  const { method, url, request } = options;
+  octokit.log.warn(`${kind} for request ${method} ${url} (retry after ${retryAfter} s)`);
+  return !request.noRateLimitWait && request.retryCount === 0;
+}
+export const ThrottledOctokit: typeof Octokit = Octokit.defaults({
+  throttle: {
+    onRateLimit: (retryAfter: number, options: ThrottleOptions, octokit: Octokit) =>
+      waitOutRateLimit(retryAfter, options, octokit, "Request quota exhausted"),
+    onSecondaryRateLimit: (retryAfter: number, options: ThrottleOptions, octokit: Octokit) =>
+      waitOutRateLimit(retryAfter, options, octokit, "SecondaryRateLimit detected"),
+  },
+});
+
 export function githubApp(config: AppConfig): App | null {
   if (cached !== undefined) return cached;
   if (!config.GITHUB_APP_ID || !existsSync(config.GITHUB_APP_PRIVATE_KEY_PATH)) {
@@ -20,6 +52,7 @@ export function githubApp(config: AppConfig): App | null {
   cached = new App({
     appId: config.GITHUB_APP_ID,
     privateKey: readFileSync(config.GITHUB_APP_PRIVATE_KEY_PATH, "utf8"),
+    Octokit: ThrottledOctokit,
   });
   return cached;
 }

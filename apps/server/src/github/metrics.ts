@@ -18,14 +18,16 @@ export interface RepoLiveState {
 export async function fetchRepoLiveState(
   octokit: Octokit,
   fullName: string,
+  opts: { noRateLimitWait?: boolean } = {},
 ): Promise<RepoLiveState | null> {
   const [owner, repo] = fullName.split("/") as [string, string];
+  const request = { retries: 0, noRateLimitWait: opts.noRateLimitWait === true };
   try {
     const commits = await octokit.request("GET /repos/{owner}/{repo}/commits", {
       owner,
       repo,
       per_page: 1,
-      request: { retries: 0 },
+      request,
     });
     const head = commits.data[0];
     if (!head) throw Object.assign(new Error("empty"), { status: 409 });
@@ -35,7 +37,7 @@ export async function fetchRepoLiveState(
       owner,
       repo,
       ref: head.sha,
-      request: { retries: 0 },
+      request,
     });
     // skipped/neutral (e.g. anti-bot condition GH-44) is not a failure.
     const runs = checks.data.check_runs.filter(
@@ -78,4 +80,69 @@ export async function fetchRepoLiveState(
     }
     throw err;
   }
+}
+
+/**
+ * Live state for the views (teacher detail, student dashboard), which every
+ * SSE hint refetches. On 2026-09-24 a lab of Prog-C (64 acceptances, 99
+ * webhooks in 15 minutes) turned those refetches into ~5,000 GitHub calls
+ * and exhausted the org's hourly quota. Hence:
+ * - a per-repository cache (TTL below), shared by concurrent requests;
+ *   webhooks that change the state drop the entry (`forgetRepoLiveState`);
+ * - no waiting on a rate limit: the installation is skipped until the reset
+ *   and the caller falls back to the stored state (`null`).
+ */
+export const LIVE_STATE_TTL_MS = 60_000;
+const liveCache = new Map<string, { at: number; state: Promise<RepoLiveState | null> }>();
+const rateLimitedUntil = new Map<number, number>();
+
+export function forgetRepoLiveState(fullName: string | null | undefined): void {
+  if (fullName) liveCache.delete(fullName.toLowerCase());
+}
+
+/** Test hook: start from an empty cache and no rate-limited installation. */
+export function resetLiveStateCache(): void {
+  liveCache.clear();
+  rateLimitedUntil.clear();
+}
+
+/** Epoch ms when a rate-limited request may be retried, or null. */
+function rateLimitReset(err: unknown, now: number): number | null {
+  const e = err as { status?: number; response?: { headers?: Record<string, string> } };
+  if (e.status !== 403 && e.status !== 429) return null;
+  const headers = e.response?.headers ?? {};
+  if (headers["x-ratelimit-remaining"] === "0" && headers["x-ratelimit-reset"]) {
+    return Number(headers["x-ratelimit-reset"]) * 1000;
+  }
+  if (headers["retry-after"]) return now + Number(headers["retry-after"]) * 1000;
+  return null;
+}
+
+export async function cachedRepoLiveState(
+  octokit: Octokit,
+  installationId: number,
+  fullName: string,
+  now = Date.now(),
+): Promise<RepoLiveState | null> {
+  const key = fullName.toLowerCase();
+  const hit = liveCache.get(key);
+  if (hit && now - hit.at < LIVE_STATE_TTL_MS) return hit.state;
+  if ((rateLimitedUntil.get(installationId) ?? 0) > now) return null;
+
+  if (liveCache.size > 5000) {
+    for (const [k, v] of liveCache) if (now - v.at >= LIVE_STATE_TTL_MS) liveCache.delete(k);
+  }
+  // The stored promise settles the same way for every concurrent caller:
+  // a rate limit resolves to null (fallback), other errors reject.
+  const state = fetchRepoLiveState(octokit, fullName, { noRateLimitWait: true }).catch(
+    (err: unknown) => {
+      if (liveCache.get(key)?.state === state) liveCache.delete(key);
+      const reset = rateLimitReset(err, Date.now());
+      if (reset === null) throw err;
+      rateLimitedUntil.set(installationId, reset);
+      return null;
+    },
+  );
+  liveCache.set(key, { at: now, state });
+  return state;
 }

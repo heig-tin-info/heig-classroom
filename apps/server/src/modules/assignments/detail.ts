@@ -7,7 +7,7 @@ import { sebFileUrl } from "../../codespace.js";
 import type { AppConfig } from "../../config.js";
 import { enrollments, gradeRuns, studentRepos, users } from "../../db/schema.js";
 import { installationClient } from "../../github/app.js";
-import { fetchRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
+import { cachedRepoLiveState, type RepoLiveState } from "../../github/metrics.js";
 import { gradeView, gradeViewsByIds } from "../../grading.js";
 import { accessibleAssignment, accessibleStudentRepo, teacherGuard } from "../guards.js";
 
@@ -63,17 +63,21 @@ export async function assignmentDetailRoutes(
         (r) => r.provisionStatus === "ok" && r.fullName && !r.deletedAt,
       );
       if (provisioned.length > 0 && scope.org.installationId !== null) {
-        // Instrumentation for the planned live-state cache: N GitHub calls
-        // per view; decide TTL vs SSE refresh on these numbers.
+        // Up to 2N GitHub calls per view, fewer with the cache warm; a rate
+        // limit leaves `live` partial and the stored state fills the gaps.
         const liveStart = Date.now();
-        const client = await installationClient(config, scope.org.installationId);
+        const installationId = scope.org.installationId;
+        const client = await installationClient(config, installationId);
         await Promise.all(
           provisioned.map(async (r) => {
             try {
-              const state = await fetchRepoLiveState(client.octokit, r.fullName!);
+              const state = await cachedRepoLiveState(client.octokit, installationId, r.fullName!);
               if (!state) return;
               live.set(r.id, state);
-              if (state.lastCommitSha) {
+              if (
+                state.lastCommitSha &&
+                (state.lastCommitSha !== r.lastCommitSha || state.ciStatus !== r.ciStatus)
+              ) {
                 await app.db
                   .update(studentRepos)
                   .set({
@@ -89,7 +93,12 @@ export async function assignmentDetailRoutes(
           }),
         );
         req.log.info(
-          { assignment: a.id, repos: provisioned.length, ms: Date.now() - liveStart },
+          {
+            assignment: a.id,
+            repos: provisioned.length,
+            live: live.size,
+            ms: Date.now() - liveStart,
+          },
           "detail: live repo states fetched",
         );
       }

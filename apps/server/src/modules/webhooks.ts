@@ -19,6 +19,7 @@ import {
 } from "../db/schema.js";
 import { publish } from "../events.js";
 import { installationClient } from "../github/app.js";
+import { forgetRepoLiveState } from "../github/metrics.js";
 import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
 import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
@@ -157,6 +158,7 @@ async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayloa
   if (!p.repository?.id || !p.after) return;
   const ctx = await repoContext(app.db, p.repository.id);
   if (!ctx) return; // repository unknown to the platform
+  forgetRepoLiveState(ctx.repo.fullName);
   const branch = p.ref?.replace("refs/heads/", "") ?? "";
   const botLogin = config.GITHUB_APP_SLUG ? `${config.GITHUB_APP_SLUG}[bot]` : "";
   const isGraderPush = p.sender?.login === GITHUB_ACTIONS_BOT;
@@ -314,6 +316,7 @@ export async function handleRepository(app: FastifyInstance, p: RepositoryPayloa
   if (!p.repository?.id) return;
   const ctx = await repoContext(app.db, p.repository.id);
   if (!ctx) return; // not a student repository we track
+  forgetRepoLiveState(ctx.repo.fullName);
   if (p.action === "renamed") {
     if (!p.repository.full_name || p.repository.full_name === ctx.repo.fullName) return;
     await app.db
@@ -532,6 +535,7 @@ async function handleWorkflowRun(
   if (!p.repository?.id || !p.workflow_run) return;
   const ctx = await repoContext(app.db, p.repository.id);
   if (!ctx) return;
+  forgetRepoLiveState(ctx.repo.fullName);
   const run = p.workflow_run;
 
   // GR-16: the dispatched review run may sit on a bot head commit.
