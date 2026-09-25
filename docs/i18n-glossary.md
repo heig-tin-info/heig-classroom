@@ -76,7 +76,7 @@ Safe Exam Browser, GitHub, GitHub App, GitHub Classroom, GitHub Actions,
 Switch edu-ID, code-server, Podman, Docker, Fastify, PostgreSQL, Drizzle,
 pg-boss, React, SPA, SSE (server-sent events), REST, API, CI, CD, runner,
 webhook, workflow, pull request, push, commit, fork, squash, token, monorepo,
-Codespace, DigitalOcean, Keycloak, Zod, HEIG-VD, TIN.
+Codespace, DigitalOcean, Hetzner, Keycloak, Zod, HEIG-VD, TIN.
 
 ## Rules
 

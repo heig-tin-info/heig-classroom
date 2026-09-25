@@ -36,7 +36,7 @@ Environment variables recognised by both scripts:
 `CODESPACE_CLASSROOM_URL`, `CODESPACE_IMAGE_TAG`.
 
 One manual step remains, and it cannot be automated: the private key of the
-GitHub App, which comes from the classroom droplet (§ 5). Without it, the
+GitHub App, which comes from the classroom VM (§ 5). Without it, the
 students' repositories — private ones — are unreachable.
 
 Two tools accompany the recipe, both playing the role of classroom by signing a
@@ -143,7 +143,7 @@ alphanumeric characters each, and are **never** rewritten by a replayed
 
 A fourth secret is **not** in that file and cannot be invented: the private key
 of the GitHub App, `/etc/codespace/github-app.pem`, in `0640
-root:codespace`. It is copied from the classroom droplet — it is the same App —
+root:codespace`. It is copied from the classroom VM — it is the same App —
 and `GITHUB_APP_PRIVATE_KEY_PATH` points at it. Procedure in § 5. A PEM spans
 several lines: it could not live in an `EnvironmentFile=`.
 
@@ -261,11 +261,13 @@ installation and renewed one minute before it expires.
 
 ### Copying the private key without putting it on the workstation's disk
 
-The PEM already lives on the classroom droplet. It goes from one droplet to the
-other in a single pipe, without ever touching the workstation:
+The PEM already lives on the classroom VM (`portal.heig.chevallier.io`, account
+`srv`). There it is owned by the container's uid (host uid 100999, rootless
+Docker) with mode 600, so `srv` reads it through a container. It goes from one
+VM to the other in a single pipe, without ever touching the workstation:
 
 ```bash
-ssh root@classroom.chevallier.io 'cat /opt/heig-classroom/secrets/heig-classroom.private-key.pem' \
+ssh srv@portal.heig.chevallier.io 'docker run --rm -v /srv/heig-classroom/secrets:/s:ro alpine cat /s/heig-classroom.private-key.pem' \
   | ssh root@code.chevallier.io 'cat > /etc/codespace/github-app.pem \
       && chown root:codespace /etc/codespace/github-app.pem \
       && chmod 0640 /etc/codespace/github-app.pem'
@@ -274,8 +276,8 @@ ssh root@classroom.chevallier.io 'cat /opt/heig-classroom/secrets/heig-classroom
 # systemd (as root) before start-up, but the PEM is read by the process.
 ssh root@code.chevallier.io 'chgrp codespace /etc/codespace && chmod 0750 /etc/codespace'
 
-# the identifier, for its part, is not a secret
-ssh root@classroom.chevallier.io "sed -n 's/^GITHUB_APP_ID=//p' /opt/heig-classroom/.env.prod"
+# the identifier, for its part, is not a secret (.env.prod is owned by srv)
+ssh srv@portal.heig.chevallier.io "sed -n 's/^GITHUB_APP_ID=//p' /srv/heig-classroom/.env.prod"
 # … then, on the portal's VM, in /etc/codespace/env:
 #   GITHUB_APP_ID=<the value read>
 #   GITHUB_APP_PRIVATE_KEY_PATH=/etc/codespace/github-app.pem

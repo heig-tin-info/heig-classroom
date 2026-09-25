@@ -1,4 +1,7 @@
-# NATIVE Caddy (apt) -- copy to /etc/caddy/Caddyfile, then:
+# NATIVE Caddy (apt) -- installed as this project's fragment (the host
+# /etc/caddy/Caddyfile only imports /etc/caddy/conf.d/*.caddy), as srv:
+#   cp Caddyfile /etc/caddy/conf.d/classroom.caddy
+#   sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 #   sudo systemctl reload caddy
 classroom.chevallier.io {
 	encode gzip
