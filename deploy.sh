@@ -22,6 +22,14 @@ if [ "$(id -u)" != 0 ] && [ -z "${DOCKER_HOST:-}" ]; then
   export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
 fi
 
+# The registry login lives in a throwaway directory, never in the shared
+# ~/.docker/config.json: quiz deploys on the same account, and a concurrent
+# deploy's login (a token scoped to ITS package) overwrites ours between login
+# and pull -- "denied", seen on 2026-09-25.
+DOCKER_CONFIG="$(mktemp -d)"
+export DOCKER_CONFIG
+trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+
 # Optional GHCR login (private package): the token comes in over SSH, is piped
 # straight to docker login's stdin (never eval'd), and is discarded after.
 if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
