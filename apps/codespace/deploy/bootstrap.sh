@@ -260,7 +260,7 @@ SESSION_TTL_HOURS=12
 # bootstrap nor the relay works, and the session is refused with a named cause
 # rather than opened on an empty directory.
 # The id is copied from classroom's .env.prod; the PEM key is copied from
-# droplet to droplet without touching the workstation's disk, see
+# VM to VM without touching the workstation's disk, see
 # docs/deploy.md § 5.
 FORGE_KIND=github
 FORGE_URL=https://github.com
@@ -336,7 +336,7 @@ for pair in \
 done
 
 # ------------------------------------------------ 8bis. GitHub App private key
-# The file cannot be produced here: it comes from the classroom droplet, it is
+# The file cannot be produced here: it comes from the classroom VM, it is
 # the same App. This script only checks that it is present with the right
 # permissions, and says what to do if it is missing. The copy procedure, which
 # never goes through the workstation's disk, is in docs/deploy.md § 5.
@@ -353,7 +353,7 @@ if [ -f "$PEM" ]; then
 	fi
 else
 	info "$PEM missing: only public repositories will be reachable (docs/deploy.md § 5)"
-	info "  ssh root@<classroom> cat /opt/heig-classroom/secrets/heig-classroom.private-key.pem \\"
+	info "  ssh srv@portal.heig.chevallier.io 'docker run --rm -v /srv/heig-classroom/secrets:/s:ro alpine cat /s/heig-classroom.private-key.pem' \\"
 	info "    | ssh root@<vm> 'cat > $PEM && chown root:$SVC_USER $PEM && chmod 0640 $PEM'"
 fi
 

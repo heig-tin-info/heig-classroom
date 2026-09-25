@@ -16,7 +16,7 @@ RUN pnpm install --frozen-lockfile
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
-# The production VM has ~450 MiB of RAM (ADR-009): let Node spill into swap
+# The production VM is small (1 vCPU / 2 GB, deploy.md): let Node spill into swap
 # instead of aborting (exit 134), and keep the workspace build sequential.
 ENV NODE_OPTIONS=--max-old-space-size=1536
 RUN pnpm --filter '!@hgc/codespace' --workspace-concurrency=1 build

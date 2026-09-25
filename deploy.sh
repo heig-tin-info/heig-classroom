@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # Deploy target for the CI's forced-command SSH key. The VM's authorized_keys
 # pins this key to this script:
-#   command="/opt/heig-classroom/deploy.sh",restrict ssh-ed25519 AAAA… ci-deploy
+#   command="/srv/heig-classroom/deploy.sh",restrict ssh-ed25519 AAAA… ci-deploy
 # so the runner can ONLY deploy — never open a shell, even if the key leaks.
 #
 # The runner passes its ephemeral GHCR token as the SSH "command"; it lands in
 # $SSH_ORIGINAL_COMMAND and is used only to log in for the private-image pull,
 # then expires with the job — no registry credential is ever stored on the VM.
 #
-# NEVER build here: an on-VM build (453 MiB / 1 CPU) starves Postgres and fills
+# NEVER build here: an on-VM build (1 vCPU / 2 GB) starves Postgres and fills
 # the disk (deploy.md §7). This only pulls a prebuilt image and restarts.
 set -euo pipefail
 
-# The script's own checkout: /opt/heig-classroom on the DigitalOcean VM (root, rootful
-# Docker), /srv/heig-classroom on the Hetzner VM (the `srv` account, rootless Docker).
+# The script's own checkout: /srv/heig-classroom on the Hetzner VM, run by the
+# `srv` account (rootless Docker).
 cd "$(dirname "$(readlink -f "$0")")"
 
 # Rootless Docker listens on a per-user socket; a forced-command SSH session

@@ -8,7 +8,8 @@ enseignante se fait entièrement depuis le portail (voir la page
 
 ## À quoi ressemble un déploiement
 
-Une seule petite VM fait tourner l'ensemble (ADR-009) : le monolithe Node
+Une seule petite VM fait tourner l'ensemble (ADR-009) — en production une VM
+Hetzner Cloud (1 vCPU / 2 Go) partagée avec deux autres services : le monolithe Node
 (API + SPA compilée), PostgreSQL et une tâche de sauvegarde quotidienne sous
 Docker Compose, derrière un Caddy natif pour le TLS. L'état ne vit que dans
 PostgreSQL (ADR-004) ; les secrets transitent par l'environnement et un
@@ -22,12 +23,15 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
 
 ## Étapes
 
-1. **Provisionner la VM** — Ubuntu/Debian, 2 Go de swap si la RAM est juste,
-   UFW avec SSH/80/443, Docker + le plugin compose, Caddy. La liste complète
+1. **Provisionner la VM** — Ubuntu, 2 Go de swap, UFW avec SSH/80/443 (plus
+   le pare-feu Hetzner Cloud), Docker rootless + le plugin compose pour le
+   compte de service `srv`, Caddy natif avec un fragment par projet sous
+   `/etc/caddy/conf.d/`, SSH durci (pas de connexion root). La liste complète
    des commandes se trouve dans [`deploy.md`](https://github.com/heig-tin-info/heig-classroom/blob/main/deploy.md)
    à la racine du dépôt.
-2. **DNS** — pointer le nom d'hôte du portail vers la VM (enregistrements A/AAAA).
-3. **Cloner et configurer** — cloner le dépôt dans `/opt/heig-classroom`,
+2. **DNS** — faire du nom d'hôte du portail un CNAME vers le nom de la VM
+   (`portal.heig.chevallier.io`).
+3. **Cloner et configurer** — en tant que `srv`, cloner le dépôt dans `/srv/heig-classroom`,
    copier `.env.prod.example` vers `.env.prod` et le remplir : mot de passe
    PostgreSQL, secret de cookie, fournisseur d'identité OIDC (SWITCH edu-ID en
    production), e-mail du super-administrateur, identifiants Scaleway TEM pour
@@ -41,8 +45,9 @@ Caddy (TLS) ──► app (Fastify + SPA, :3000) ──► PostgreSQL
    `docker compose -f compose.prod.yml --env-file .env.prod up -d`.
    Les migrations s'exécutent au démarrage (`MIGRATE_ON_START=1`) ; vérifiez que
    `https://<host>/healthz` renvoie `database: up, jobs: up`.
-6. **Sauvegardes** — deux niveaux. DigitalOcean prend un instantané quotidien
-   du droplet, hors de la VM : cela couvre la perte de la machine, même si une
+6. **Sauvegardes** — deux niveaux. Hetzner Backups (à activer dans la console
+   Hetzner) conserve une image quotidienne de toute la VM, hors de la VM : cela
+   couvre la perte de la machine, même si une
    image disque d'un Postgres en fonctionnement est cohérente au crash plutôt
    qu'un dump propre. Le service compose `backup` y ajoute un `pg_dump`
    quotidien avec 30 jours de rétention — un dump logique, restaurable table par
@@ -55,7 +60,7 @@ Chaque push sur `main` construit l'image dans la CI et la déploie
 automatiquement ; l'équivalent manuel sur la VM est :
 
 ```bash
-cd /opt/heig-classroom && git pull --ff-only
+cd /srv/heig-classroom && git pull --ff-only
 docker compose -f compose.prod.yml --env-file .env.prod pull app
 docker compose -f compose.prod.yml --env-file .env.prod up -d
 ```

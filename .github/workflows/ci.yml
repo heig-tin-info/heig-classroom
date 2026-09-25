@@ -20,7 +20,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
-  # Production image, built HERE and pushed to GHCR: the 453 MiB / 1 CPU VM
+  # Production image, built HERE and pushed to GHCR: the 1 vCPU / 2 GB VM
   # must never build again (an on-VM build starves Postgres — deploy.md §7).
   image:
     needs: checks
@@ -48,13 +48,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Deploy: the runner SSHes to the VM, whose authorized_keys pins the CI key
-  # to /opt/heig-classroom/deploy.sh (forced command) — the key can ONLY
-  # deploy, never open a shell. The ephemeral GHCR token is passed as the SSH
-  # command (→ $SSH_ORIGINAL_COMMAND) so the private image pulls without any
-  # credential stored on the VM. Requires the DEPLOY_SSH_KEY secret (private
-  # key whose public half is that forced-command line); without it the job
-  # no-ops so the pipeline stays green until the key is provisioned.
+  # Deploy: the runner SSHes to the VM as srv (vars.DEPLOY_USER), whose
+  # authorized_keys pins the CI key to /srv/heig-classroom/deploy.sh (forced
+  # command) — the key can ONLY deploy, never open a shell. The ephemeral GHCR
+  # token is passed as the SSH command (→ $SSH_ORIGINAL_COMMAND) so the
+  # private image pulls without any credential stored on the VM. Requires the
+  # DEPLOY_SSH_KEY secret (private key whose public half is that forced-command
+  # line); without it the job no-ops so the pipeline stays green until the key
+  # is provisioned.
   deploy:
     needs: image
     runs-on: ubuntu-latest

@@ -55,7 +55,7 @@ every push to `main`
 3. SSHes to the VM and triggers [deploy.sh](deploy.sh), which pulls the new
    image and runs `docker compose up -d` — a few seconds, no contention.
 
-The image is **never built on the VM** (453 MiB / 1 CPU): an on-VM build swaps
+The image is **never built on the VM** (1 vCPU / 2 GB): an on-VM build swaps
 the host and starves Postgres, and fills the disk. Security: the CI key is
 pinned to `deploy.sh` in the VM's `authorized_keys`
 (`command="…",restrict`), so it can only deploy — never open a shell. The GHCR

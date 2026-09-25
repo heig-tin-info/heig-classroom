@@ -82,15 +82,18 @@ secret** (liaison de compte) et une **clé privée** (un `.pem` se télécharge)
 ## Installer les valeurs sur le serveur
 
 ```bash
-# From your workstation, ship the downloaded PEM
-scp heig-classroom.*.private-key.pem root@classroom.chevallier.io:/opt/heig-classroom/secrets/heig-classroom.private-key.pem
+# From your workstation, ship the downloaded PEM next to the checkout
+scp heig-classroom.*.private-key.pem srv@portal.heig.chevallier.io:/srv/heig-classroom/heig-classroom.private-key.pem
 
-ssh root@classroom.chevallier.io
-chmod 600 /opt/heig-classroom/secrets/heig-classroom.private-key.pem
-chown 1000:1000 /opt/heig-classroom/secrets/heig-classroom.private-key.pem   # container uid
+ssh srv@portal.heig.chevallier.io
+cd /srv/heig-classroom
+# secrets/ belongs to the container's uid 1000 (rootless Docker): install through a container
+docker run --rm -v "$PWD":/w alpine sh -c 'mv /w/heig-classroom.private-key.pem /w/secrets/ \
+  && chown 1000:1000 /w/secrets/heig-classroom.private-key.pem \
+  && chmod 600 /w/secrets/heig-classroom.private-key.pem'
 ```
 
-Dans `/opt/heig-classroom/.env.prod` :
+Dans `/srv/heig-classroom/.env.prod` :
 
 ```bash
 GITHUB_APP_ID=<App ID>

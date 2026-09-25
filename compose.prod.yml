@@ -5,7 +5,7 @@
 services:
   app:
     # Image built in CI and pulled from GHCR — NEVER built on this VM
-    # (453 MiB / 1 CPU: an on-VM build starves Postgres, deploy.md §7).
+    # (1 vCPU / 2 GB: an on-VM build starves Postgres, deploy.md §7).
     # Rollback: IMAGE_TAG=<commit sha> docker compose ... up -d
     image: ghcr.io/heig-tin-info/heig-classroom:${IMAGE_TAG:-latest}
     restart: always
@@ -29,11 +29,14 @@ services:
       POSTGRES_USER: hgc
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
       POSTGRES_DB: hgc
-    # Tuned for a 453 MiB / 1-CPU VM: correctness over throughput. These are
-    # runtime GUCs (no re-init, data untouched). shared_buffers 128->32 MiB is
-    # the big saving; parallel query is disabled (pointless on 1 CPU and each
-    # worker is a process); max_connections 100->40 fits app(10)+pg-boss(10)+
-    # backup with headroom. effective_cache_size is only a planner hint.
+    # Tuned for a small shared VM (1 vCPU / 2 GB + 2 GB swap, three services,
+    # two PostgreSQL instances -- quiz and classroom, ~50 MB each measured;
+    # kept separate so each service stays independently movable and
+    # restorable): correctness over throughput. These are runtime GUCs (no
+    # re-init, data untouched). shared_buffers 128->32 MiB is the big saving;
+    # parallel query is disabled (pointless on 1 CPU and each worker is a
+    # process); max_connections 100->40 fits app(10)+pg-boss(10)+backup with
+    # headroom. effective_cache_size is only a planner hint.
     command:
       - postgres
       - -c
