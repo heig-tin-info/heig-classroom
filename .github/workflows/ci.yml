@@ -81,4 +81,4 @@ jobs:
         if: env.DEPLOY_SSH_KEY != ''
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ssh -i ~/.ssh/id_ed25519 root@classroom.chevallier.io "$GHCR_TOKEN"
+        run: ssh -i ~/.ssh/id_ed25519 ${{ vars.DEPLOY_USER || 'root' }}@classroom.chevallier.io "$GHCR_TOKEN"
