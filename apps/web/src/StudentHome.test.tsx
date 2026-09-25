@@ -270,4 +270,25 @@ describe("StudentHome group assignment (issue #2, lot 2)", () => {
       await screen.findByText("Your repository is being created right now — try again in a moment."),
     ).toBeVisible();
   });
+  it("offers to reconnect GitHub when the linked account was renamed", async () => {
+    mockFetch({
+      [`GET ${ROOMS}`]: ok([
+        makeStudentClassroom({
+          assignments: [makeStudentAssignment({ id: "a1", name: "Lab 5", repo: null })],
+        }),
+      ]),
+      "POST /app/api/student/assignments/a1/accept": fail(409, {
+        error: "github_account_stale",
+        message: "Cannot reach your GitHub account.",
+      }),
+    });
+    renderStudent();
+    await screen.findByText("Up next");
+    await userEvent.click(within(upNextCard()).getByRole("button", { name: "Accept assignment" }));
+    expect(await screen.findByText(/Did you rename or change it\?/)).toBeVisible();
+    expect(within(upNextCard()).getByRole("link", { name: "Reconnect GitHub account" })).toHaveAttribute(
+      "href",
+      "/app/auth/github/link",
+    );
+  });
 });

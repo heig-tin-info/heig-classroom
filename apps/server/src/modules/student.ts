@@ -16,6 +16,7 @@ import {
   users,
 } from "../db/schema.js";
 import { installationClient } from "../github/app.js";
+import { currentLogin, isInvitationRefused } from "../github/collaborators.js";
 import { cachedRepoLiveState, type RepoLiveState } from "../github/metrics.js";
 import { provisionStudentRepo } from "../github/provision.js";
 import {
@@ -41,6 +42,13 @@ import { claimEnrollments } from "./roster.js";
  * attempts a claim (AU-18): an entry added during an active session is
  * attached without a re-login.
  */
+/** The linked GitHub account no longer answers to its stored login. */
+const STALE_GITHUB_ACCOUNT = {
+  error: "github_account_stale",
+  message:
+    "Cannot reach your GitHub account. Did you rename or change it? Reconnect your GitHub account, then try again.",
+} as const;
+
 export async function studentPlugin(
   app: FastifyInstance,
   opts: { config: AppConfig },
@@ -292,6 +300,32 @@ export async function studentPlugin(
       const assignment = row.assignment;
       const client = await installationClient(config, row.org.installationId);
 
+      // The linked account may have been renamed since it was linked: follow
+      // the immutable id to today's login before naming or inviting anything.
+      // A lookup failure is not fatal — the stored login usually still holds.
+      let login = me.githubLogin;
+      if (me.githubUserId !== null) {
+        let current: string | null | undefined;
+        try {
+          current = await currentLogin(client.octokit, me.githubUserId);
+        } catch (err) {
+          req.log.warn({ err }, "GitHub login lookup failed");
+        }
+        if (current === null) return reply.code(409).send(STALE_GITHUB_ACCOUNT);
+        if (current && current !== login) {
+          await app.db.update(users).set({ githubLogin: current }).where(eq(users.id, me.id));
+          await audit(app.db, {
+            actorUserId: me.id,
+            actorType: "system",
+            action: "github.renamed",
+            subjectType: "user",
+            subjectId: me.id,
+            payload: { githubUserId: me.githubUserId, from: login, to: current },
+          });
+          login = current;
+        }
+      }
+
       /** The group's repository exists: this acceptance only attaches the member. */
       const joinGroupRepo = async (group: GroupRow, repoRow: RepoRow) => {
         // Dead is dead (issue #10), exactly like an individual repository.
@@ -329,7 +363,7 @@ export async function studentPlugin(
       };
 
       let repoRow: RepoRow | undefined;
-      let targetRepo = `${assignment.slug}-${me.githubLogin}`;
+      let targetRepo = `${assignment.slug}-${login}`;
       let group: GroupRow | null = null;
       if (assignment.groupMode) {
         // Issue #2, lot 2: ONE repository per group, created by the first
@@ -394,7 +428,7 @@ export async function studentPlugin(
           targetRepo,
           branches: assignment.branches,
           defaultBranch,
-          studentLogin: me.githubLogin,
+          studentLogin: login,
           // ADR-013: read-only in online mode, no invitation at all in exam mode.
           workMode: assignment.workMode,
           // A group never adopts a repository another row already records.
@@ -480,8 +514,14 @@ export async function studentPlugin(
           subjectType: "student_repo",
           subjectId: rowId,
         });
+        // Only the student can fix a refused invitation (renamed, flagged or
+        // deleted account): tell them how, and leave the teacher out of it.
+        if (isInvitationRefused(err)) return reply.code(409).send(STALE_GITHUB_ACCOUNT);
         // The teacher can often fix the cause (permissions, quota, template).
-        const teacher = await mailRecipient(app, row.teacherId);
+        // Once per repository: every "Retry" of a stuck student used to send
+        // the same email again.
+        const teacher =
+          repoRow!.provisionStatus === "error" ? null : await mailRecipient(app, row.teacherId);
         if (teacher) {
           await queueEmail(app, config, teacher, "provision.error", {
             assignmentName: assignment.name,
