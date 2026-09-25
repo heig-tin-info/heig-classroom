@@ -290,12 +290,20 @@ function RowAction({
     mutationFn: () => api(`/app/api/student/assignments/${a.id}/accept`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["student-classrooms"] }),
   });
+  const acceptCode =
+    accept.isError && accept.error instanceof ApiError
+      ? (accept.error.body as { error?: string } | null)?.error
+      : undefined;
+  // A renamed or deleted GitHub account: only relinking it can help.
+  const staleGithub = acceptCode === "github_account_stale";
   const acceptError =
     accept.isError && accept.error instanceof ApiError
       ? // A groupmate is creating the same repository right now (issue #2).
-        (accept.error.body as { error?: string } | null)?.error === "provision_in_progress"
+        acceptCode === "provision_in_progress"
         ? t("student.provisionInProgress")
-        : apiErrorMessage(accept.error, "Acceptance failed")
+        : staleGithub
+          ? t("student.githubStale")
+          : apiErrorMessage(accept.error, "Acceptance failed")
       : null;
   const locked = isLocked(a);
   const accepted = isAccepted(a);
@@ -353,7 +361,14 @@ function RowAction({
               : t("student.accept")}
         </Button>
       </Tip>
-      {acceptError ? <p className="text-xs text-danger">{acceptError}</p> : null}
+      {acceptError ? <p className="max-w-xs text-xs text-danger">{acceptError}</p> : null}
+      {staleGithub ? (
+        // The link flow overwrites the stored login for the same account:
+        // no need to unlink first.
+        <LinkButton href="/app/auth/github/link" size="sm" variant="secondary">
+          <GithubIcon /> {t("student.githubRelink")}
+        </LinkButton>
+      ) : null}
     </div>
   );
 }

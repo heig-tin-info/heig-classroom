@@ -40,6 +40,7 @@ export type AuditAction =
   | "email.sent"
   | "email.unsubscribe"
   | "github.link"
+  | "github.renamed"
   | "github.unlink"
   | "group.copy"
   | "group.create"

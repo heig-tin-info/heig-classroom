@@ -9,6 +9,37 @@ import type { Octokit } from "octokit";
 export type CollaboratorPermission = "push" | "pull";
 
 /**
+ * The login GitHub knows today for the immutable account id we linked.
+ * Students rename their account: the stored login then points at nobody, and
+ * GitHub refuses any invitation for it with a misleading 403 "Resource not
+ * accessible by integration" (seen live 2026-09-25, Prog-A Labo-01). `null`
+ * when the account no longer exists; any other failure throws.
+ */
+export async function currentLogin(octokit: Octokit, githubUserId: number): Promise<string | null> {
+  try {
+    const { data } = await octokit.request("GET /user/{account_id}", {
+      account_id: githubUserId,
+      request: { retries: 0 },
+    });
+    return data.login;
+  } catch (err) {
+    if ((err as { status?: number }).status === 404) return null;
+    throw err;
+  }
+}
+
+/**
+ * True when GitHub refused the invitation itself (403/404 on the
+ * collaborators endpoint): the repository was created with the same App
+ * permissions, so the refusal points at the student's account, not at the
+ * installation.
+ */
+export function isInvitationRefused(err: unknown): boolean {
+  const { status, request } = err as { status?: number; request?: { url?: string } };
+  return (status === 403 || status === 404) && /\/collaborators\//.test(request?.url ?? "");
+}
+
+/**
  * Invites `login` on `owner/repo`. `pending` when GitHub created an
  * invitation (201), `accepted` when the user already is a collaborator (204).
  */

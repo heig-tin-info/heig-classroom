@@ -130,6 +130,9 @@ const en = {
   "student.acceptInvite": "Accept the GitHub invitation first (check your notifications).",
   "student.groupWith": "{group} · with {names}",
   "student.provisionInProgress": "Your repository is being created right now — try again in a moment.",
+  "student.githubStale":
+    "Cannot reach your GitHub account. Did you rename or change it? Reconnect your GitHub account, then try again.",
+  "student.githubRelink": "Reconnect GitHub account",
   "student.groupTip": "Group work: one repository, shared by the whole group",
   "student.accept": "Accept assignment",
   "student.retry": "Retry acceptance",
@@ -397,6 +400,9 @@ const fr: Record<keyof Dict, string> = {
   "student.acceptInvite": "Acceptez d'abord l'invitation GitHub (vérifiez vos notifications).",
   "student.groupWith": "{group} · avec {names}",
   "student.provisionInProgress": "Votre dépôt est en cours de création — réessayez dans un instant.",
+  "student.githubStale":
+    "Impossible de joindre votre compte GitHub. L'avez-vous renommé ou changé ? Reconnectez votre compte GitHub, puis réessayez.",
+  "student.githubRelink": "Reconnecter le compte GitHub",
   "student.groupTip": "Travail de groupe : un seul dépôt, partagé par tout le groupe",
   "student.accept": "Accepter le devoir",
   "student.retry": "Réessayer l'acceptation",
