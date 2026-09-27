@@ -21,6 +21,8 @@
  *
  * See `docs/development/ui-mock-and-screenshots.md`.
  */
+import { buildNav, homePage, navSortKey } from "@hgc/domain";
+
 import type {
   ActivityData,
   Assignment,
@@ -36,6 +38,9 @@ import type {
   GradeRunHistory,
   GradeView,
   GroupMember,
+  JournalPage as JournalPageData,
+  JournalPayload,
+  JournalTocEntry,
   Me,
   OrgRepo,
   RepoTree,
@@ -804,6 +809,9 @@ function studentRooms(): StudentClassroom[] {
     name: room.summary.name,
     orgLogin: room.summary.orgLogin,
     teacher: room.teacher,
+    // Issue #45: the first classroom has a journal, the second has none, so
+    // both states of the student header are on screen at once.
+    hasJournal: ri === 0 && journalOf(room.summary.id) !== null,
     assignments: room.assignments
       .filter((a) => a.state !== "draft" || (ri === 1 && a.id === "b2"))
       .map((a, i) => {
@@ -1524,3 +1532,306 @@ console.info(
   `[mock] persona: ${role} — switch with ?as=teacher|student|admin` +
     `\n[mock] scene flags: ${on_.length ? on_.join(", ") : "none"} — ?empty=1 ?fail=1 ?slow=1 ?many=1 (append =0 to clear)`,
 );
+
+// --- Journal routes (issue #45) ---------------------------------------------
+//
+// Same URLs and payload shapes as `apps/server/src/modules/journal.ts`, so the
+// screen is exercised against what it will actually meet. The HTML is written
+// out here rather than rendered: in production the SERVER renders it once at
+// ingestion, and the point of the mock is to show the page that arrives.
+
+interface MockJournalPage {
+  path: string;
+  title: string;
+  markdown: string;
+  html: string;
+  toc: JournalTocEntry[];
+  draft?: boolean;
+  visibleFrom?: string | null;
+  warnings?: string[];
+}
+
+const mockJournalPages: MockJournalPage[] = [
+  {
+    path: "README.md",
+    title: "Programmation en C",
+    markdown:
+      "# Programmation en C\n\nCe journal rassemble le support du cours. Chaque semaine y ajoute une page.\n\n- Les exercices notés vivent dans l'onglet **Travaux**.\n- Ici, rien n'est évalué : c'est la documentation.\n",
+    html:
+      '<h1 id="programmation-en-c">Programmation en C</h1>\n' +
+      "<p>Ce journal rassemble le support du cours. Chaque semaine y ajoute une page.</p>\n" +
+      "<ul>\n<li>Les exercices notés vivent dans l'onglet <strong>Travaux</strong>.</li>\n" +
+      "<li>Ici, rien n'est évalué : c'est la documentation.</li>\n</ul>\n",
+    toc: [{ id: "programmation-en-c", depth: 1, text: "Programmation en C" }],
+  },
+  {
+    path: "010-bases/README.md",
+    title: "Les bases",
+    markdown: "---\ntitle: Les bases\n---\n\nTypes, variables, et la mémoire.\n",
+    html: "<p>Types, variables, et la mémoire.</p>\n",
+    toc: [],
+  },
+  {
+    path: "010-bases/010-variables.md",
+    title: "Variables",
+    markdown:
+      "# Variables\n\nUne variable est un nom pour une case mémoire.\n\n```c\nint compteur = 0; // une case de 4 octets\ncompteur += 1;\n```\n",
+    html:
+      '<h1 id="variables">Variables</h1>\n' +
+      "<p>Une variable est un nom pour une case mémoire.</p>\n" +
+      '<pre><code class="language-c"><span class="tok-kw">int</span> compteur = ' +
+      '<span class="tok-num">0</span>; <span class="tok-com">// une case de 4 octets</span>\n' +
+      'compteur += <span class="tok-num">1</span>;\n</code></pre>\n',
+    toc: [{ id: "variables", depth: 1, text: "Variables" }],
+  },
+  {
+    path: "010-bases/020-pointeurs.md",
+    title: "Pointeurs",
+    markdown:
+      "# Pointeurs\n\n## La pile\n\nUn pointeur contient une adresse.\n\n```c\nint x = 42;\nint *p = &x;\n```\n\n## L'arithmétique\n\nAvancer de $n$ cases, c'est ajouter $n \\times \\texttt{sizeof(T)}$ octets.\n\nVoir aussi [Make](../020-outils/010-make.md).\n",
+    html:
+      '<h1 id="pointeurs">Pointeurs</h1>\n<h2 id="la-pile">La pile</h2>\n' +
+      "<p>Un pointeur contient une adresse.</p>\n" +
+      '<pre><code class="language-c"><span class="tok-kw">int</span> x = <span class="tok-num">42</span>;\n' +
+      '<span class="tok-kw">int</span> *p = &amp;x;\n</code></pre>\n' +
+      '<h2 id="l-arithmetique">L\'arithmétique</h2>\n' +
+      // Real KaTeX output, so the stylesheet imported by the journal chunk is
+      // exercised on screen exactly as the server's renderer emits it.
+      "<p>Avancer de <code>n</code> cases, c'est ajouter " +
+      "<span class=\"katex\"><span class=\"katex-mathml\"><math xmlns=\"http://www.w3.org/1998/Math/MathML\"><semantics><mrow><mi>n</mi><mo>\u00d7</mo><mtext mathvariant=\"monospace\">sizeof(T)</mtext></mrow><annotation encoding=\"application/x-tex\">n \\times \\texttt{sizeof(T)}</annotation></semantics></math></span><span class=\"katex-html\" aria-hidden=\"true\"><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.6667em;vertical-align:-0.0833em;\"></span><span class=\"mord mathnormal\">n</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span><span class=\"mbin\">\u00d7</span><span class=\"mspace\" style=\"margin-right:0.2222em;\"></span></span><span class=\"katex-base\"><span class=\"katex-strut\" style=\"height:0.7778em;vertical-align:-0.0833em;\"></span><span class=\"mord text\"><span class=\"mord texttt\">sizeof(T)</span></span></span></span></span>" +
+      " octets.</p>\n" +
+      '<p>Voir aussi <a href="../020-outils/010-make.md">Make</a>.</p>\n',
+    toc: [
+      { id: "pointeurs", depth: 1, text: "Pointeurs" },
+      { id: "la-pile", depth: 2, text: "La pile" },
+      { id: "l-arithmetique", depth: 2, text: "L'arithmétique" },
+    ],
+  },
+  {
+    path: "020-outils/README.md",
+    title: "Outils",
+    markdown: "---\ntitle: Outils\n---\n\nLa chaîne de compilation.\n",
+    html: "<p>La chaîne de compilation.</p>\n",
+    toc: [],
+  },
+  {
+    path: "020-outils/010-make.md",
+    title: "Make",
+    markdown: "# Make\n\n| Cible | Effet |\n| --- | --- |\n| `all` | compile |\n| `clean` | nettoie |\n",
+    html:
+      '<h1 id="make">Make</h1>\n<table>\n<thead>\n<tr><th>Cible</th><th>Effet</th></tr>\n</thead>\n' +
+      "<tbody>\n<tr><td><code>all</code></td><td>compile</td></tr>\n" +
+      "<tr><td><code>clean</code></td><td>nettoie</td></tr>\n</tbody>\n</table>\n",
+    toc: [{ id: "make", depth: 1, text: "Make" }],
+    warnings: ["`schema.svg` points at 020-outils/schema.svg, which is not in the journal."],
+  },
+  {
+    path: "030-threads.md",
+    title: "Threads",
+    markdown: "---\ndraft: true\n---\n\n# Threads\n\nÀ écrire pour la semaine 9.\n",
+    html: '<h1 id="threads">Threads</h1>\n<p>À écrire pour la semaine 9.</p>\n',
+    toc: [{ id: "threads", depth: 1, text: "Threads" }],
+    draft: true,
+  },
+];
+
+/** Classrooms that have a journal. The second one deliberately has none. */
+const journalAttached = new Map<string, { fullName: string; ref: string; syncStatus: "ok" }>([
+  [
+    "c1",
+    { fullName: "heig-prg1-2026/prg1-2026-journal", ref: "main", syncStatus: "ok" },
+  ],
+]);
+
+const journalOf = (classroomId: string) => journalAttached.get(classroomId) ?? null;
+
+const visibleJournalPages = (staff: boolean) =>
+  mockJournalPages.filter((p) => staff || !p.draft);
+
+function journalPayload(classroomId: string): JournalPayload {
+  const room = roomOr404(classroomId);
+  const staff = role !== "student";
+  const attached = journalOf(classroomId);
+  if (!attached) {
+    return {
+      classroomId,
+      classroomName: room.summary.name,
+      orgLogin: room.summary.orgLogin,
+      staff,
+      journal: null,
+      nav: [],
+      homePath: null,
+      ...(staff
+        ? { proposedName: `${slugify(room.summary.name)}-journal`, appInstalled: true }
+        : {}),
+    };
+  }
+  const pages = visibleJournalPages(staff).map((p) => ({
+    path: p.path,
+    parentPath: p.path.includes("/") ? p.path.slice(0, p.path.lastIndexOf("/")) : "",
+    sortKey: navSortKey(p.path),
+    title: p.title,
+  }));
+  const hiddenPaths = mockJournalPages.filter((p) => p.draft).map((p) => p.path);
+  return {
+    classroomId,
+    classroomName: room.summary.name,
+    orgLogin: room.summary.orgLogin,
+    staff,
+    journal: {
+      id: "j1",
+      fullName: attached.fullName,
+      ref: attached.ref,
+      htmlUrl: `https://github.com/${attached.fullName}`,
+      cloneUrl: `git@github.com:${attached.fullName}.git`,
+      syncStatus: attached.syncStatus,
+      syncError: null,
+      lastSyncedAt: iso(-20 * 60 * 1000),
+      lastCommitSha: sha(),
+      editable: true,
+    },
+    nav: buildNav(pages),
+    homePath: homePage(pages)?.path ?? null,
+    ...(staff
+      ? {
+          appInstalled: true,
+          hiddenCount: hiddenPaths.length,
+          hiddenPaths,
+          warningCount: mockJournalPages.filter((p) => (p.warnings ?? []).length > 0).length,
+        }
+      : {}),
+  };
+}
+
+on("GET", "/app/api/classrooms/:id/journal", (m) => journalPayload(m.groups!.id!));
+
+on("GET", "/app/api/classrooms/:id/journal/pages/(?<path>.+)", (m) => {
+  const staff = role !== "student";
+  const path = decodeURIComponent(m.groups!.path!);
+  const page = visibleJournalPages(staff).find((p) => p.path === path);
+  if (!page || !journalOf(m.groups!.id!)) throw new MockError(404, "Page not found");
+  const payload: JournalPageData = {
+    path: page.path,
+    title: page.title,
+    html: page.html,
+    toc: page.toc,
+    updatedAt: iso(-3 * D),
+    hidden: page.draft === true,
+    draft: page.draft === true,
+    visibleFrom: page.visibleFrom ?? null,
+    ...(staff
+      ? { markdown: page.markdown, blobSha: sha(), warnings: page.warnings ?? [] }
+      : {}),
+  };
+  return payload;
+});
+
+on("POST", "/app/api/classrooms/:id/journal", (m, body) => {
+  const room = roomOr404(m.groups!.id!);
+  const name = (body.name as string) || `${slugify(room.summary.name)}-journal`;
+  journalAttached.set(room.summary.id, {
+    fullName: `${room.summary.orgLogin}/${name}`,
+    ref: "main",
+    syncStatus: "ok",
+  });
+  return { id: "j1", fullName: `${room.summary.orgLogin}/${name}` };
+});
+
+on("POST", "/app/api/classrooms/:id/journal/attach", (m, body) => {
+  const room = roomOr404(m.groups!.id!);
+  const full = String(body.fullName ?? "");
+  if (!full.startsWith(`${room.summary.orgLogin}/`)) {
+    throw new MockError(400, `The journal must live in ${room.summary.orgLogin}`, {
+      error: "foreign_org",
+    });
+  }
+  journalAttached.set(room.summary.id, {
+    fullName: full,
+    ref: (body.ref as string) || "main",
+    syncStatus: "ok",
+  });
+  return { id: "j1", fullName: full, reused: false };
+});
+
+on("DELETE", "/app/api/classrooms/:id/journal", (m) => {
+  journalAttached.delete(roomOr404(m.groups!.id!).summary.id);
+  return null;
+});
+
+on("POST", "/app/api/classrooms/:id/journal/refresh", (m) => {
+  roomOr404(m.groups!.id!);
+  return { commitSha: sha(), pages: mockJournalPages.length, assets: 1, oversized: [] };
+});
+
+on("PUT", "/app/api/classrooms/:id/journal/pages/(?<path>.+)", (m, body) => {
+  const path = decodeURIComponent(m.groups!.path!);
+  const page = mockJournalPages.find((p) => p.path === path);
+  if (!page) throw new MockError(404, "Page not found");
+  page.markdown = String(body.markdown ?? "");
+  page.html = mockRender(page.markdown);
+  return { path, blobSha: sha(), title: page.title };
+});
+
+on("POST", "/app/api/classrooms/:id/journal/pages", (m, body) => {
+  const path = String(body.path ?? "");
+  if (mockJournalPages.some((p) => p.path === path)) {
+    throw new MockError(409, "That file already exists", { error: "page_exists" });
+  }
+  const title = String(body.title ?? path);
+  mockJournalPages.push({
+    path,
+    title,
+    markdown: `# ${title}\n`,
+    html: mockRender(`# ${title}\n`),
+    toc: [],
+  });
+  return { path };
+});
+
+on("POST", "/app/api/classrooms/:id/journal/preview", (_m, body) => ({
+  html: mockRender(String(body.markdown ?? "")),
+  title: "Preview",
+  toc: [],
+  warnings: [],
+  draft: false,
+  visibleFrom: null,
+}));
+
+on("POST", "/app/api/classrooms/:id/journal/assets/(?<path>.+)", (m) => ({
+  path: decodeURIComponent(m.groups!.path!),
+}));
+
+/**
+ * The crudest possible markdown: headings, fences and paragraphs. The real
+ * renderer is on the server (marked + KaTeX + the tokenizer of @hgc/domain) and
+ * the mock has no business reimplementing it — this exists so the editor's
+ * preview shows something that moves when you type.
+ */
+function mockRender(markdown: string): string {
+  const escape = (t: string) =>
+    t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return markdown
+    .split(/\n{2,}/)
+    .map((block) => {
+      const b = block.trim();
+      if (!b) return "";
+      const heading = /^(#{1,4})\s+(.*)$/.exec(b);
+      if (heading) {
+        const level = heading[1]!.length;
+        return `<h${level}>${escape(heading[2]!)}</h${level}>`;
+      }
+      if (b.startsWith("```")) {
+        const body = b.replace(/^```[^\n]*\n?/, "").replace(/```$/, "");
+        return `<pre><code>${escape(body)}</code></pre>`;
+      }
+      if (/^[-*]\s/.test(b)) {
+        const items = b
+          .split("\n")
+          .map((l) => `<li>${escape(l.replace(/^[-*]\s+/, ""))}</li>`)
+          .join("");
+        return `<ul>${items}</ul>`;
+      }
+      return `<p>${escape(b)}</p>`;
+    })
+    .join("\n");
+}

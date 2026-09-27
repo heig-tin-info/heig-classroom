@@ -425,6 +425,12 @@ export interface StudentClassroom {
   orgLogin: string;
   teacher: string;
   assignments: StudentAssignment[];
+  /**
+   * The classroom has a journal with at least one page this student may read
+   * (issue #45). False rather than a link to an empty page: a journal whose
+   * pages are all still drafts has nothing to show yet.
+   */
+  hasJournal: boolean;
 }
 
 // --- Group assignments (issue #2, lot 1: group formation) ---
@@ -481,4 +487,79 @@ export interface UnassignedStudentsError {
   error: "unassigned_students";
   message: string;
   students: { enrollmentId: string; nom: string; prenom: string }[];
+}
+
+/**
+ * Classroom journal (issue #45). The navigation and the pages are produced by
+ * the ingestion, so what travels here is already rendered: the reading path
+ * carries no markdown library at all.
+ */
+export interface JournalNavNode {
+  /** Page path, or directory path for a section with no landing page. */
+  path: string;
+  title: string;
+  /** What opens when the entry is clicked; null for a bare section heading. */
+  pagePath: string | null;
+  children: JournalNavNode[];
+}
+
+export interface JournalTocEntry {
+  id: string;
+  depth: number;
+  text: string;
+}
+
+export interface JournalPage {
+  path: string;
+  title: string;
+  html: string;
+  toc: JournalTocEntry[];
+  updatedAt: string;
+  /** Hidden from students: a draft, or not visible yet. */
+  hidden: boolean;
+  draft: boolean;
+  visibleFrom: string | null;
+  /** Staff only: the source, its optimistic lock, and the ingestion warnings. */
+  markdown?: string;
+  blobSha?: string;
+  warnings?: string[];
+}
+
+export interface JournalRepoInfo {
+  id: string;
+  fullName: string;
+  ref: string;
+  htmlUrl: string;
+  cloneUrl: string;
+  syncStatus: "pending" | "ok" | "error";
+  syncError: string | null;
+  lastSyncedAt: string | null;
+  lastCommitSha: string | null;
+  /** Head of the tracked branch, as the mirror knows it: the write lock. */
+  editable: boolean;
+}
+
+export interface JournalPayload {
+  classroomId: string;
+  /** Named in the breadcrumb: a student reads several journals. */
+  classroomName: string;
+  orgLogin: string;
+  staff: boolean;
+  /** Null when no journal is attached to this classroom yet. */
+  journal: JournalRepoInfo | null;
+  nav: JournalNavNode[];
+  /** The front page (root landing page), or null when the journal has none. */
+  homePath: string | null;
+  /** Staff only: what the creation form proposes, and whether it can run. */
+  proposedName?: string;
+  appInstalled?: boolean;
+  /** Staff only: pages the students do not see yet, and pages with warnings. */
+  hiddenCount?: number;
+  warningCount?: number;
+  /**
+   * Staff only: the paths of those hidden pages, so the navigation can mark
+   * them. A count alone tells a teacher that something is unpublished without
+   * telling them what — which is the question they actually have.
+   */
+  hiddenPaths?: string[];
 }

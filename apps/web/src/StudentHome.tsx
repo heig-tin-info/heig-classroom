@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  BookOpen,
   Bot,
   CalendarClock,
   CheckCircle2,
@@ -21,6 +22,7 @@ import type { GradeView, Me, StudentAssignment, StudentClassroom, StudentRepo } 
 import { resolveFinalGrade } from "@hgc/domain";
 
 import { api, ApiError, apiErrorMessage } from "./api";
+import type { Route } from "./router";
 import { GradeScale, gradeToSix, TestDonut } from "./charts";
 import { fuzzyFilter } from "./fuzzy";
 import { HelpIcon } from "./help";
@@ -460,11 +462,13 @@ function StudentClassroomCard({
   githubLinked,
   query,
   codespaceHost,
+  navigate,
 }: {
   room: StudentClassroom;
   githubLinked: boolean;
   query: string;
   codespaceHost: string | null;
+  navigate: (r: Route) => void;
 }) {
   const t = useT();
   const roomHit = query === "" || fuzzyFilter(query, [room], (r) => r.name).length > 0;
@@ -478,6 +482,19 @@ function StudentClassroomCard({
         <OrgAvatar login={room.orgLogin} className="size-6 rounded-md" />
         <h2 className="text-base font-bold tracking-tight">{room.name}</h2>
         <span className="text-[13px] text-fg-muted">{t("student.teacher", { name: room.teacher })}</span>
+        {/* Issue #45: the course documentation of this classroom, when there is
+            one to read. A quiet text link and not a button: the assignments
+            below are what this page is for. */}
+        {room.hasJournal ? (
+          <button
+            type="button"
+            onClick={() => navigate({ view: "journal", classroomId: room.id, pagePath: "" })}
+            className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[13px] text-fg-muted transition-colors hover:bg-surface-2 hover:text-fg"
+          >
+            <BookOpen className="size-3.5" aria-hidden />
+            {t("journal.title")}
+          </button>
+        ) : null}
       </div>
       <Card>
         {sorted.length ? (
@@ -659,7 +676,7 @@ function UpNext({
 
 type StudentView = "cards" | "list";
 
-export function StudentHome({ me }: { me: Me }) {
+export function StudentHome({ me, navigate }: { me: Me; navigate: (r: Route) => void }) {
   const t = useT();
   const now = useNow(60_000);
   const [query, setQuery] = useState("");
@@ -787,6 +804,7 @@ export function StudentHome({ me }: { me: Me }) {
                   githubLinked={linked}
                   query={query}
                   codespaceHost={me.codespaceHost}
+                  navigate={navigate}
                 />
               ))}
             </div>

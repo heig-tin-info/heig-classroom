@@ -722,3 +722,132 @@ export const webhookDeliveries = pgTable(
       .where(sql`${t.processedAt} IS NULL`),
   ],
 );
+
+/**
+ * Classroom journal (issue #45): the course documentation of a classroom,
+ * held in a private GitHub repository of its organization and mirrored here.
+ *
+ * GitHub is the source of truth for the CONTENT; these tables are a read
+ * model, rebuilt from a push (or from a browser save) and never the thing a
+ * teacher edits. That is why every row carries the blob sha it was rendered
+ * from: the ingestion re-renders a page only when its blob actually moved,
+ * and a page whose sha is unchanged survives a full re-scan untouched.
+ *
+ * One row per (repository, ref): two classrooms sharing a journal share the
+ * row, and a classroom pinned to last semester's branch gets a row of its own
+ * on the same repository — one mirror per ref, never two refs in one mirror.
+ */
+export const journals = pgTable(
+  "journals",
+  {
+    id: uuid("id").primaryKey(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id),
+    /** Null until the repository is created or resolved on GitHub. */
+    githubRepoId: bigint("github_repo_id", { mode: "number" }),
+    fullName: text("full_name").notNull(),
+    /** The branch this mirror tracks. */
+    ref: text("ref").notNull().default("main"),
+    /** Sub-directory holding the pages, "" for the repository root. */
+    rootPath: text("root_path").notNull().default(""),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    /** Head commit the mirror was built from; null before the first ingestion. */
+    lastCommitSha: text("last_commit_sha"),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    syncStatus: text("sync_status", { enum: ["pending", "ok", "error"] })
+      .notNull()
+      .default("pending"),
+    syncError: text("sync_error"),
+  },
+  (t) => [
+    uniqueIndex("journals_repo_ref_uq").on(t.githubRepoId, t.ref),
+    uniqueIndex("journals_full_name_ref_uq").on(sql`lower(${t.fullName})`, t.ref),
+  ],
+);
+
+/**
+ * Which journal a classroom reads. A table rather than a column on
+ * `classrooms` because several classrooms may read the SAME journal — the
+ * same course given to three sections, or repeated next semester — and
+ * because `classrooms` is a hot table that stays untouched.
+ */
+export const classroomJournals = pgTable("classroom_journals", {
+  classroomId: uuid("classroom_id")
+    .primaryKey()
+    .references(() => classrooms.id, { onDelete: "cascade" }),
+  journalId: uuid("journal_id")
+    .notNull()
+    .references(() => journals.id, { onDelete: "cascade" }),
+  attachedAt: timestamp("attached_at", { withTimezone: true }).notNull().defaultNow(),
+  attachedBy: uuid("attached_by")
+    .notNull()
+    .references(() => users.id),
+});
+
+/**
+ * One markdown file of the journal, rendered. `markdown` is mirrored next to
+ * `html` so the editor opens a page without a GitHub round-trip and so a
+ * GitHub outage degrades the journal to read-only instead of breaking it.
+ *
+ * `path` is repository-relative (`010-basics/020-pointers.md`) and is the
+ * identity of a page: renaming a file is a new page and a deleted one, which
+ * is exactly what happened in the repository.
+ */
+export const journalPages = pgTable(
+  "journal_pages",
+  {
+    id: uuid("id").primaryKey(),
+    journalId: uuid("journal_id")
+      .notNull()
+      .references(() => journals.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    /** Directory holding the file, "" at the root. Drives the navigation. */
+    parentPath: text("parent_path").notNull(),
+    /** What the navigation sorts on: the raw file name, index page first. */
+    sortKey: text("sort_key").notNull(),
+    title: text("title").notNull(),
+    frontMatter: jsonb("front_matter").notNull().default({}),
+    blobSha: text("blob_sha").notNull(),
+    markdown: text("markdown").notNull(),
+    html: text("html").notNull(),
+    toc: jsonb("toc").notNull().default([]),
+    /** `draft: true` in the front matter: staff see it, students do not. */
+    draft: boolean("draft").notNull().default(false),
+    /** `visible_from:` in the front matter: hidden from students until then. */
+    visibleFrom: timestamp("visible_from", { withTimezone: true }),
+    /** Non-fatal ingestion warnings (raw HTML escaped, link resolving nowhere). */
+    warnings: jsonb("warnings").notNull().default([]),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("journal_pages_journal_path_uq").on(t.journalId, t.path),
+    index("journal_pages_nav_idx").on(t.journalId, t.parentPath, t.sortKey),
+  ],
+);
+
+/**
+ * An image or a handout of the journal, cached out of the repository (the
+ * precedent is `avatars`). Served by the platform with an ETag on the blob
+ * sha: the repository is private, so a `raw.githubusercontent` link would
+ * need a token in the page and would 404 for every student.
+ */
+export const journalAssets = pgTable(
+  "journal_assets",
+  {
+    id: uuid("id").primaryKey(),
+    journalId: uuid("journal_id")
+      .notNull()
+      .references(() => journals.id, { onDelete: "cascade" }),
+    path: text("path").notNull(),
+    blobSha: text("blob_sha").notNull(),
+    contentType: text("content_type").notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    cachedAt: timestamp("cached_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("journal_assets_journal_path_uq").on(t.journalId, t.path)],
+);

@@ -14,12 +14,19 @@ export interface AppNotice {
   message: string;
 }
 
-/** Refresh-hint families the client knows how to react to. */
+/**
+ * Refresh-hint families the client knows how to react to. `journal` is
+ * classroom-wide on purpose: the pages of a journal are the same for every
+ * reader, so one hint on `classroom:<id>` is right, and it is NOT in
+ * `PER_STUDENT_TYPES` below — a student SHOULD hear that the course material
+ * changed.
+ */
 export type EventType =
   | "assignments"
   | "roster"
   | "repos"
   | "grades"
+  | "journal"
   | "tasks"
   | "github"
   | "orgs"

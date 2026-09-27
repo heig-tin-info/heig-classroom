@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Archive,
+  BookOpen,
   CheckCircle2,
   ClipboardList,
   ExternalLink,
@@ -23,6 +24,7 @@ import { api, ApiError, apiErrorMessage, useMe } from "./api";
 import { AssignmentsSection } from "./AssignmentsCard";
 import { Breadcrumb } from "./Breadcrumb";
 import { useConfirm } from "./confirm";
+import { JournalTab } from "./journal/JournalTab";
 import { fuzzyFilter } from "./fuzzy";
 import { useT } from "./i18n";
 import { useSearchParam, type Route } from "./router";
@@ -50,10 +52,10 @@ import {
   Tabs,
 } from "./ui";
 
-type Tab = "assignments" | "students" | "staff" | "settings";
+type Tab = "assignments" | "journal" | "students" | "staff" | "settings";
 
 /** The only `?tab=` values the page answers to; anything else is ignored. */
-const TABS: Tab[] = ["assignments", "students", "staff", "settings"];
+const TABS: Tab[] = ["assignments", "journal", "students", "staff", "settings"];
 
 /** Rename, archive, delete — inline on the Settings tab, no modal. */
 function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => void }) {
@@ -729,6 +731,7 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
         label="Classroom sections"
         items={[
           { value: "assignments", label: "Assignments", icon: ClipboardList },
+          { value: "journal", label: "Journal", icon: BookOpen },
           { value: "students", label: "Students", icon: Users, count: room.roster.length },
           { value: "staff", label: t("staff.title"), icon: UsersRound, count: room.staff.length },
           { value: "settings", label: "Settings", icon: SettingsIcon },
@@ -738,7 +741,9 @@ export function ClassroomView({ id, navigate }: { id: string; navigate: (r: Rout
       {/* One panel, named after the selected tab: `idPrefix` on Tabs makes
           each tab point at it with aria-controls. */}
       <div role="tabpanel" id={`classroom-panel-${tab}`} aria-labelledby={`classroom-tab-${tab}`}>
-        {tab === "students" ? (
+        {tab === "journal" ? (
+          <JournalTab classroomId={room.id} navigate={navigate} />
+        ) : tab === "students" ? (
           <StudentsTab room={room} />
         ) : tab === "staff" ? (
           <StaffTab room={room} />

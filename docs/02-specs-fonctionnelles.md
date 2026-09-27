@@ -930,3 +930,92 @@ specification).
 | Roster claim conflict | Teacher | AU-21 |
 | Upcoming expiration of an API key | Teacher | AU-40 |
 | Deadline applied (summary per assignment) | Teacher | GH-43 |
+
+# Classroom journal (JN)
+
+> Issue #45, ADR-015. The course documentation of a classroom: a private GitHub
+> repository of its organization, holding markdown, rendered by the platform.
+> Deliberately not a Moodle course — no activities, no assessments, no
+> completion tracking. Documentation, and nothing else.
+
+## The repository
+
+- **JN-01** — A classroom MAY have **one journal**. A journal is a private
+  repository of the classroom's organization, tracked at **one branch**. Several
+  classrooms MAY read the same journal (same course, several sections or several
+  semesters); a classroom pinned to another branch of the same repository is a
+  separate mirror.
+- **JN-02** — The platform MUST create the repository on request, private, seeded
+  with a `README.md` that states the layout, and MUST invite the classroom's staff
+  as collaborators. Students are NEVER collaborators: the repository is private
+  and the platform is its only reader.
+- **JN-03** — Creation MUST NOT adopt an existing repository. A name already taken
+  is refused, with a deterministic alternative proposed
+  (`<classroom-slug>-journal-<8 hex of the classroom id>`; see
+  `packages/domain/src/repoName.ts`). Attaching an existing repository is a
+  separate, explicit action, restricted to the classroom's own organization.
+- **JN-04** — Detaching a journal MUST NOT touch the repository. The mirror is
+  dropped only when no classroom reads it any more.
+
+## Layout and navigation
+
+- **JN-10** — The navigation is derived from the file tree, with no manifest
+  file: markdown files sorted **alphabetically on the raw file name**, the landing
+  page of a directory first. A directory holding at least one page is a section.
+- **JN-11** — The landing page of a directory is its `README.md` (or `index.md`).
+  At the root it is the front page of the journal; in a directory it titles that
+  section. A section without one is a heading that opens nothing.
+- **JN-12** — A leading numeric prefix (`010-`) orders a page and MUST NOT be
+  displayed. The title of a page is its front matter `title:`, else its first
+  `#` heading, else its prettified file name.
+- **JN-13** — Front matter keys honoured: `title`, `date`, `draft` (staff only),
+  `visible_from` (hidden from students until then). An unusable `visible_from`
+  MUST leave the page visible and be reported — hiding course material because a
+  date is misspelt is the wrong way round.
+- **JN-14** — Links and images MUST be relative and are resolved against the
+  page's own directory, so the same markdown renders correctly both on github.com
+  and in the platform. A reference that resolves to nothing loses its link and
+  keeps its text, and is reported to the staff.
+
+## Rendering
+
+- **JN-20** — Markdown is rendered **once at ingestion, on the server**, to HTML
+  and a table of contents, and stored. A page view MUST NOT call GitHub, and the
+  student bundle MUST NOT carry a markdown library.
+- **JN-21** — **Raw HTML in the markdown MUST be escaped into visible text**, not
+  rendered and not sanitised. The output is then safe by construction. Images MUST
+  come from the repository: an external image is dropped and its alt text kept.
+  KaTeX runs with `trust: false`.
+- **JN-22** — Assets are served by the platform from a cache, with an `ETag` on
+  the blob sha, `X-Content-Type-Options: nosniff` and a `Content-Security-Policy`
+  that neutralises a committed SVG opened directly. Only assets a page references
+  are downloaded; anything over **5 MB** is neither served nor linked, and the
+  page says so.
+
+## Ingestion
+
+- **JN-30** — A `push` on the tracked branch MUST rebuild the mirror (one job per
+  journal tracking that branch). The staff MUST also be able to trigger it
+  explicitly. Ingestion MUST be idempotent, and a push carrying the commit the
+  mirror already holds is skipped.
+- **JN-31** — Ingestion MUST fetch a blob only when its sha moved, and MUST
+  re-render every page anyway: a page's HTML depends on its neighbours, since a
+  link to a page that did not exist yesterday must become a link today.
+- **JN-32** — A terminal failure (no installation, no commit on the branch, a tree
+  too large to read in one request, a repository deleted) MUST be recorded on the
+  journal and surfaced to the staff, and MUST NOT drop the pages already
+  mirrored: the classroom keeps reading the last good version.
+
+## Reading and writing
+
+- **JN-40** — One read surface serves the staff and the students. A student MUST
+  NOT see a draft, a page whose `visible_from` has not come, the markdown source,
+  the ingestion warnings or any write action.
+- **JN-41** — A browser save MUST carry the blob sha the page was opened at.
+  GitHub answering 409 MUST be reported as a conflict; the platform MUST NOT
+  merge and MUST NOT overwrite, and the unsaved text MUST survive in the browser.
+- **JN-42** — A commit made from the browser MUST be attributed to the teacher who
+  made it (`author`), so the repository's history names them.
+- **JN-43** — Creating, deleting, renaming and reordering pages are writes to the
+  repository like any other. A reorder is a rename; several renames MUST be
+  applied as a single commit.

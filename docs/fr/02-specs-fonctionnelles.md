@@ -934,3 +934,101 @@ des charges).
 | Conflit de réclamation de la liste des étudiants | Enseignant | AU-21 |
 | Expiration prochaine d'une clé d'API | Enseignant | AU-40 |
 | Délai de rendu appliqué (synthèse par devoir) | Enseignant | GH-43 |
+
+# Journal de classe (JN)
+
+> Issue #45, ADR-015. La documentation de cours d'une classe : un dépôt GitHub
+> privé de son organisation, contenant du markdown, rendu par la plateforme.
+> Délibérément pas un cours Moodle — pas d'activités, pas d'évaluations, pas de
+> suivi de progression. De la documentation, et rien d'autre.
+
+## Le dépôt
+
+- **JN-01** — Une classe PEUT avoir **un journal**. Un journal est un dépôt privé
+  de l'organisation de la classe, suivi sur **une branche**. Plusieurs classes
+  PEUVENT lire le même journal (même cours, plusieurs sections ou plusieurs
+  semestres) ; une classe épinglée sur une autre branche du même dépôt constitue
+  un miroir distinct.
+- **JN-02** — La plateforme DOIT créer le dépôt à la demande, privé, initialisé
+  avec un `README.md` qui énonce la structure, et DOIT inviter l'équipe
+  enseignante de la classe comme collaborateurs. Les étudiants ne sont JAMAIS
+  collaborateurs : le dépôt est privé et la plateforme en est le seul lecteur.
+- **JN-03** — La création NE DOIT PAS adopter un dépôt existant. Un nom déjà pris
+  est refusé, avec une alternative déterministe proposée
+  (`<slug-de-la-classe>-journal-<8 caractères hexadécimaux de l'identifiant de la
+  classe>` ; voir `packages/domain/src/repoName.ts`). Rattacher un dépôt existant
+  est une action distincte et explicite, restreinte à l'organisation de la classe.
+- **JN-04** — Détacher un journal NE DOIT PAS toucher au dépôt. Le miroir n'est
+  supprimé que lorsque plus aucune classe ne le lit.
+
+## Structure et navigation
+
+- **JN-10** — La navigation est déduite de l'arborescence des fichiers, sans
+  fichier manifeste : les fichiers markdown triés **alphabétiquement sur le nom de
+  fichier brut**, la page d'accueil d'un répertoire en premier. Un répertoire
+  contenant au moins une page constitue une section.
+- **JN-11** — La page d'accueil d'un répertoire est son `README.md` (ou
+  `index.md`). À la racine, c'est la page d'accueil du journal ; dans un
+  répertoire, elle donne son titre à la section. Une section qui n'en a pas est un
+  intitulé qui n'ouvre rien.
+- **JN-12** — Un préfixe numérique initial (`010-`) ordonne une page et NE DOIT PAS
+  être affiché. Le titre d'une page est son `title:` de front matter, sinon son
+  premier titre `#`, sinon son nom de fichier embelli.
+- **JN-13** — Clés de front matter honorées : `title`, `date`, `draft` (équipe
+  enseignante uniquement), `visible_from` (masquée aux étudiants jusqu'à cette
+  date). Un `visible_from` inutilisable DOIT laisser la page visible et être
+  signalé — masquer du support de cours parce qu'une date est mal orthographiée
+  est le mauvais sens.
+- **JN-14** — Les liens et les images DOIVENT être relatifs et sont résolus par
+  rapport au répertoire de la page, de sorte que le même markdown s'affiche
+  correctement aussi bien sur github.com que dans la plateforme. Une référence qui
+  ne résout rien perd son lien, conserve son texte, et est signalée à l'équipe
+  enseignante.
+
+## Rendu
+
+- **JN-20** — Le markdown est rendu **une seule fois à l'ingestion, sur le
+  serveur**, en HTML et en table des matières, puis stocké. L'affichage d'une page
+  NE DOIT PAS appeler GitHub, et le bundle étudiant NE DOIT PAS embarquer de
+  bibliothèque markdown.
+- **JN-21** — Le **HTML brut du markdown DOIT être échappé en texte visible**, ni
+  rendu ni assaini. La sortie est alors sûre par construction. Les images DOIVENT
+  provenir du dépôt : une image externe est abandonnée et son texte alternatif
+  conservé. KaTeX s'exécute avec `trust: false`.
+- **JN-22** — Les fichiers joints sont servis par la plateforme depuis un cache,
+  avec un `ETag` sur le sha du blob, `X-Content-Type-Options: nosniff` et une
+  `Content-Security-Policy` qui neutralise un SVG commité ouvert directement.
+  Seuls les fichiers qu'une page référence sont téléchargés ; tout ce qui dépasse
+  **5 Mo** n'est ni servi ni lié, et la page le signale.
+
+## Ingestion
+
+- **JN-30** — Un `push` sur la branche suivie DOIT reconstruire le miroir (une
+  tâche par journal suivant cette branche). L'équipe enseignante DOIT également
+  pouvoir le déclencher explicitement. L'ingestion DOIT être idempotente, et un
+  push portant le commit que le miroir contient déjà est ignoré.
+- **JN-31** — L'ingestion DOIT ne récupérer un blob que lorsque son sha a changé,
+  et DOIT malgré tout refaire le rendu de chaque page : le HTML d'une page dépend
+  de ses voisines, puisqu'un lien vers une page qui n'existait pas hier doit
+  devenir un lien aujourd'hui.
+- **JN-32** — Un échec terminal (pas d'installation, pas de commit sur la branche,
+  une arborescence trop grande pour être lue en une requête, un dépôt supprimé)
+  DOIT être enregistré sur le journal et remonté à l'équipe enseignante, et NE
+  DOIT PAS supprimer les pages déjà en miroir : la classe continue de lire la
+  dernière version valide.
+
+## Lecture et écriture
+
+- **JN-40** — Une seule surface de lecture sert l'équipe enseignante et les
+  étudiants. Un étudiant NE DOIT voir ni un brouillon, ni une page dont le
+  `visible_from` n'est pas atteint, ni la source markdown, ni les avertissements
+  d'ingestion, ni aucune action d'écriture.
+- **JN-41** — Un enregistrement depuis le navigateur DOIT porter le sha du blob
+  avec lequel la page a été ouverte. Une réponse 409 de GitHub DOIT être signalée
+  comme un conflit ; la plateforme NE DOIT PAS fusionner ni écraser, et le texte
+  non enregistré DOIT survivre dans le navigateur.
+- **JN-42** — Un commit effectué depuis le navigateur DOIT être attribué à
+  l'enseignant qui l'a fait (`author`), pour que l'historique du dépôt le nomme.
+- **JN-43** — Créer, supprimer, renommer et réordonner des pages sont des
+  écritures dans le dépôt comme les autres. Un changement d'ordre est un
+  renommage ; plusieurs renommages DOIVENT être appliqués en un seul commit.

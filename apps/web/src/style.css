@@ -278,3 +278,111 @@ html.dark {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* --- Markdown body: the journal (issue #45, journal/JournalBody.tsx) ---
+   Adapted from the same block in ~/heig-quiz. The one place a stylesheet is
+   unavoidable: the HTML is rendered by the SERVER and never passes through
+   React, so there is no markup to hang a utility class on. Every value here is
+   a token or a step of the type scale of DESIGN.md — the same decisions,
+   applied to tags instead of components.
+
+   The one difference with the quiz's copy is the heading scale: there a
+   heading sits inside a question card, so h1 enters at 20 px; here the page IS
+   the document, so h1 enters at the page-title step (28) and the rest walks
+   down the same scale. */
+.md-body {
+  color: var(--fg);
+  font-size: 14px;
+  /* A reading surface, not a table: the leading is what makes a 40-line page
+     bearable. Measure capped at 72 characters for the same reason — the 1120
+     content column is right for a dashboard and too wide for prose. */
+  line-height: 1.75;
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+.md-body > :first-child { margin-top: 0; }
+.md-body > :last-child { margin-bottom: 0; }
+.md-body p,
+.md-body ul,
+.md-body ol,
+.md-body blockquote,
+.md-body pre,
+.md-body table { margin: 0 0 16px; }
+.md-body h1, .md-body h2, .md-body h3,
+.md-body h4, .md-body h5, .md-body h6 {
+  /* Generous above, tight below: a heading belongs to what follows it. */
+  margin: 32px 0 12px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.md-body h1 {
+  font-size: 28px;
+  letter-spacing: -0.02em;
+  margin-top: 0;
+}
+.md-body h2 { font-size: 20px; }
+.md-body h3 { font-size: 16px; }
+.md-body h4, .md-body h5, .md-body h6 { font-size: 14px; font-weight: 600; }
+.md-body ul, .md-body ol { padding-left: 22px; }
+.md-body ul { list-style: disc; }
+.md-body ol { list-style: decimal; }
+.md-body li { margin: 4px 0; }
+.md-body li input[type="checkbox"] { margin-right: 8px; accent-color: var(--accent); }
+.md-body a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.md-body strong { font-weight: 600; }
+.md-body del { color: var(--fg-faint); }
+.md-body hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+.md-body blockquote {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 12px;
+  color: var(--fg-muted);
+}
+.md-body code {
+  font-family: var(--font-mono);
+  font-size: 0.87em;
+  background: var(--surface-3);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md-body pre {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-field);
+  padding: 12px 14px;
+  overflow-x: auto;
+  line-height: 1.6;
+}
+.md-body pre code { background: none; border-radius: 0; padding: 0; font-size: 13px; }
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-field);
+  border: 1px solid var(--line);
+}
+.md-body table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.md-body th, .md-body td {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 10px;
+  text-align: left;
+}
+.md-body th { font-weight: 600; color: var(--fg-muted); }
+/* A wide table scrolls with the block rather than pushing the whole column. */
+.md-body > table { display: block; overflow-x: auto; }
+
+/* The four token classes the tokenizer of @hgc/domain emits. Comment and
+   string carry the reading; keyword and number are the accents. Syntax colour
+   inside a code block is semantic, not the screen's one accent use. */
+.md-body .tok-com { color: var(--fg-faint); font-style: italic; }
+.md-body .tok-str { color: var(--success); }
+.md-body .tok-kw { color: var(--accent); }
+.md-body .tok-num { color: var(--warning); }
+
+/* KaTeX: inherit the surrounding size (its own stylesheet forces 1.21em) and
+   let a long display formula scroll instead of widening the page. */
+.md-body .katex { font-size: 1.05em; }
+.md-body .katex-display { overflow-x: auto; overflow-y: hidden; margin: 16px 0; }
+/* A formula the server could not compile: shown as the source it is, flagged
+   in the staff's warning list rather than silently dropped. */
+.md-body .md-math-error { color: var(--danger); background: var(--danger-soft); }
+.md-body .md-math-block { display: block; margin: 16px 0; }
