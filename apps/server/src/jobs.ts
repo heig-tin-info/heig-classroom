@@ -15,6 +15,8 @@ export const GRADE_DISPATCH_QUEUE = "grade.dispatch";
 export const EMAIL_QUEUE = "email.send";
 /** ADR-013: push an online assignment to the codespace portal. */
 export const CODESPACE_SYNC_QUEUE = "codespace.sync";
+/** Issue #45: rebuild the read model of a classroom journal from its repository. */
+export const JOURNAL_QUEUE = "journal.ingest";
 
 export interface WebhookJob {
   deliveryId: string;
@@ -49,6 +51,7 @@ export async function startJobs(
     taskRunner: (key: string) => Promise<void>;
     emailHandler: (job: EmailJobData) => Promise<void>;
     codespaceSyncHandler: (job: { assignmentId: string }) => Promise<void>;
+    journalHandler: (job: { journalId: string }) => Promise<void>;
   },
 ) {
   const boss = new PgBoss({
@@ -87,6 +90,13 @@ export async function startJobs(
   });
   // The portal may be restarting or down (separate VM): retry generously,
   // the assignment row keeps the last error for the teacher to see.
+  // One ingestion at a time per journal: two pushes in a row would otherwise
+  // race to write the same mirror rows.
+  await boss.createQueue(JOURNAL_QUEUE, {
+    retryLimit: 3,
+    retryDelay: 20,
+    retryBackoff: true,
+  });
   await boss.createQueue(CODESPACE_SYNC_QUEUE, {
     retryLimit: 10,
     retryBackoff: true,
@@ -111,6 +121,9 @@ export async function startJobs(
     });
     await boss.work<EmailJobData>(EMAIL_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.emailHandler(job.data);
+    });
+    await boss.work<{ journalId: string }>(JOURNAL_QUEUE, async (jobs) => {
+      for (const job of jobs) await opts.journalHandler(job.data);
     });
     await boss.work<{ assignmentId: string }>(CODESPACE_SYNC_QUEUE, async (jobs) => {
       for (const job of jobs) await opts.codespaceSyncHandler(job.data);

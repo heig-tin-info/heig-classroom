@@ -17,6 +17,7 @@
     "@hgc/contracts": "workspace:*",
     "@hgc/domain": "workspace:*",
     "@tanstack/react-query": "^5.101.2",
+    "katex": "^0.18.9",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

@@ -19,6 +19,11 @@ const AssignmentPage = lazy(() =>
   import("./AssignmentDetail").then((m) => ({ default: m.AssignmentPage })),
 );
 const GroupsPage = lazy(() => import("./GroupsPage").then((m) => ({ default: m.GroupsPage })));
+// The journal is the one page BOTH audiences open, and the only chunk carrying
+// the KaTeX stylesheet: lazy, so a dashboard never downloads it.
+const JournalPage = lazy(() =>
+  import("./journal/JournalPage").then((m) => ({ default: m.JournalPage })),
+);
 
 /*
  * Signed-out page. The four decisions, so the door looks like the house:
@@ -87,8 +92,17 @@ export default function App() {
   const page =
     route.view === "settings" ? (
       <SettingsPage me={me.data} />
+    ) : route.view === "journal" ? (
+      // Before the student branch on purpose: a student reads the journal of
+      // their classroom, and the server decides in what capacity.
+      <JournalPage
+        classroomId={route.classroomId}
+        pagePath={route.pagePath}
+        navigate={navigate}
+        readOnly={inStudentView}
+      />
     ) : !teacherUi ? (
-      <StudentHome me={me.data} />
+      <StudentHome me={me.data} navigate={navigate} />
     ) : route.view === "admin" && role === "admin" ? (
       <AdminPage />
     ) : route.view === "classroom" ? (

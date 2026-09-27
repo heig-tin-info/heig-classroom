@@ -43,3 +43,34 @@ describe("routeToPath / parsePath", () => {
     });
   });
 });
+
+describe("journal routes", () => {
+  it("round-trips the front page and a nested page", () => {
+    for (const pagePath of ["", "README.md", "010-basics/020-pointers.md"]) {
+      const route = { view: "journal", classroomId: "c1", pagePath } as const;
+      expect(parsePath(routeToPath(route))).toEqual(route);
+    }
+  });
+
+  it("keeps the trailing slash on the front page, so relative hrefs resolve", () => {
+    expect(routeToPath({ view: "journal", classroomId: "c1", pagePath: "" })).toBe(
+      "/classrooms/c1/journal/",
+    );
+  });
+
+  it("resolves a relative href of a rendered page against the page's URL", () => {
+    // What the ingestion emits for a link from 010-basics/020-pointers.md to
+    // 020-tooling/010-make.md, resolved the way the browser will resolve it.
+    const from = routeToPath({
+      view: "journal",
+      classroomId: "c1",
+      pagePath: "010-basics/020-pointers.md",
+    });
+    const url = new URL("../020-tooling/010-make.md", `https://app.test${from}`);
+    expect(parsePath(url.pathname)).toEqual({
+      view: "journal",
+      classroomId: "c1",
+      pagePath: "020-tooling/010-make.md",
+    });
+  });
+});

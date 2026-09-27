@@ -327,6 +327,7 @@ export function makeStudentClassroom(
     orgLogin: "heig-prg1-2026",
     teacher: "Marie Dupont",
     assignments: [makeStudentAssignment()],
+    hasJournal: false,
     ...overrides,
   };
 }

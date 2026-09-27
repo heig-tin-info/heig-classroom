@@ -11,7 +11,14 @@ export type Route =
   | { view: "admin" }
   | { view: "classroom"; id: string }
   | { view: "assignment"; classroomId: string; assignmentId: string }
-  | { view: "assignment-groups"; classroomId: string; assignmentId: string };
+  | { view: "assignment-groups"; classroomId: string; assignmentId: string }
+  /**
+   * The journal of a classroom (issue #45). A route of its own and not only a
+   * tab, because a STUDENT reads it: the classroom page is a teacher surface,
+   * and a student has no page there to hang a tab on. `pagePath` is the
+   * journal-relative path of the page, empty for the front page.
+   */
+  | { view: "journal"; classroomId: string; pagePath: string };
 
 export function routeToPath(r: Route): string {
   switch (r.view) {
@@ -27,6 +34,10 @@ export function routeToPath(r: Route): string {
       return `/classrooms/${r.classroomId}/assignments/${r.assignmentId}`;
     case "assignment-groups":
       return `/classrooms/${r.classroomId}/assignments/${r.assignmentId}/groups`;
+    case "journal":
+      // The trailing slash matters: the hrefs inside a rendered page are
+      // relative, and the browser resolves them against this directory.
+      return `/classrooms/${r.classroomId}/journal/${r.pagePath}`;
   }
 }
 
@@ -35,6 +46,10 @@ export function parsePath(path: string): Route {
   if (parts[0] === "settings") return { view: "settings" };
   if (parts[0] === "admin") return { view: "admin" };
   if (parts[0] === "classrooms" && parts[1]) {
+    if (parts[2] === "journal") {
+      // Everything past `journal/` is the page path, slashes included.
+      return { view: "journal", classroomId: parts[1], pagePath: parts.slice(3).join("/") };
+    }
     if (parts[2] === "assignments" && parts[3]) {
       // The group-formation screen is a page of its own under the assignment,
       // not a tab: it is a different job (forming teams) with its own toolbar.

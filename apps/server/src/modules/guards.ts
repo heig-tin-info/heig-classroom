@@ -186,3 +186,42 @@ export async function accessibleEnrollment(
   if (!row) return notFound(reply);
   return row.enrollment;
 }
+
+/**
+ * Loads a classroom the current user may READ, and says in what capacity.
+ *
+ * The other loaders above answer "may this person work in this classroom" and
+ * 404 for everyone else, which is right for the teacher API. The journal
+ * (issue #45) is the first surface a STUDENT reads through a classroom-scoped
+ * route, and it must not become a second, parallel access rule: one predicate,
+ * two capacities. `staff: false` is what hides the drafts, the markdown source
+ * and every write.
+ */
+export async function readableClassroom(
+  app: FastifyInstance,
+  req: FastifyRequest,
+  reply: FastifyReply,
+): Promise<{ room: typeof classrooms.$inferSelect; staff: boolean } | null> {
+  const params = IdParam.safeParse(req.params);
+  if (!params.success) return notFound(reply);
+  const [staffRoom] = await app.db
+    .select()
+    .from(classrooms)
+    .where(and(eq(classrooms.id, params.data.id), staffAccess(req.user!.id)))
+    .limit(1);
+  if (staffRoom) return { room: staffRoom, staff: true };
+  const [enrolled] = await app.db
+    .select({ room: classrooms })
+    .from(enrollments)
+    .innerJoin(classrooms, eq(enrollments.classroomId, classrooms.id))
+    .where(
+      and(
+        eq(enrollments.classroomId, params.data.id),
+        eq(enrollments.userId, req.user!.id),
+        eq(enrollments.status, "claimed"),
+      ),
+    )
+    .limit(1);
+  if (!enrolled) return notFound(reply);
+  return { room: enrolled.room, staff: false };
+}

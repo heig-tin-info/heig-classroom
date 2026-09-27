@@ -11,6 +11,7 @@ import {
   assignments,
   botCommits,
   classrooms,
+  journals,
   organizations,
   pushReceipts,
   reverts,
@@ -23,7 +24,8 @@ import { forgetRepoLiveState } from "../github/metrics.js";
 import { revertProtectedFiles } from "../github/revert.js";
 import { ingestCompletedRun, isEligible, runKind } from "../grading.js";
 import { repoUserTopics } from "../group-repos.js";
-import { WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
+import { JOURNAL_QUEUE, WEBHOOK_QUEUE, type WebhookJob } from "../jobs.js";
+import { journalsForPush, journalsOfRepo, journalTopics } from "../journal/ingest.js";
 import { mailRecipient, queueEmail } from "../mailer.js";
 import { markRepoDeleted } from "../repos.js";
 
@@ -111,6 +113,7 @@ export function makeWebhookHandler(app: FastifyInstance, config: AppConfig) {
     try {
       if (delivery.event === "push") {
         await handleSourcePush(app, delivery.payload as PushPayload);
+        await handleJournalPush(app, delivery.payload as PushPayload);
         await handlePush(app, config, delivery.payload as PushPayload);
       } else if (delivery.event === "workflow_run") {
         await handleWorkflowRun(app, config, delivery.payload as WorkflowRunPayload);
@@ -160,6 +163,28 @@ async function handleSourcePush(app: FastifyInstance, p: PushPayload) {
     )
     .returning({ classroomId: assignments.classroomId });
   for (const a of affected) publish("assignments", [`classroom:${a.classroomId}`]);
+}
+
+/**
+ * Issue #45: a push on a journal repository rebuilds that journal's read model.
+ * One job per journal tracking the pushed BRANCH — the same repository can hold
+ * this semester's journal on `main` and last semester's on its own branch.
+ *
+ * A push that carries the commit the mirror is already on is skipped: a browser
+ * save re-ingests synchronously and the webhook arrives right after it.
+ */
+async function handleJournalPush(app: FastifyInstance, p: PushPayload) {
+  if (!p.repository?.id || !p.after || /^0+$/.test(p.after)) return;
+  const branch = p.ref?.replace("refs/heads/", "") ?? "";
+  if (!branch) return;
+  for (const journal of await journalsForPush(app, p.repository.id, branch)) {
+    if (journal.lastCommitSha === p.after) continue;
+    await app.boss?.send(
+      JOURNAL_QUEUE,
+      { journalId: journal.id },
+      { singletonKey: journal.id },
+    );
+  }
 }
 
 async function handlePush(app: FastifyInstance, config: AppConfig, p: PushPayload) {
@@ -322,6 +347,7 @@ interface RepositoryPayload {
  */
 export async function handleRepository(app: FastifyInstance, p: RepositoryPayload) {
   if (!p.repository?.id) return;
+  await handleJournalRepository(app, p);
   const ctx = await repoContext(app.db, p.repository.id);
   if (!ctx) return; // not a student repository we track
   forgetRepoLiveState(ctx.repo.fullName);
@@ -337,6 +363,39 @@ export async function handleRepository(app: FastifyInstance, p: RepositoryPayloa
     return;
   }
   publish("repos", ctx.audience);
+}
+
+/**
+ * A journal repository renamed or deleted on GitHub. Renaming is followed (the
+ * mirror keeps working, and `git` follows the redirect anyway); deletion is
+ * recorded as a sync error rather than dropping the pages, so the classroom
+ * still reads its course material while the staff work out what happened.
+ */
+async function handleJournalRepository(app: FastifyInstance, p: RepositoryPayload) {
+  if (!p.repository?.id) return;
+  const tracked = await journalsOfRepo(app, p.repository.id);
+  if (tracked.length === 0) return;
+  for (const journal of tracked) {
+    if (p.action === "renamed" && p.repository.full_name) {
+      if (p.repository.full_name === journal.fullName) continue;
+      await app.db
+        .update(journals)
+        .set({ fullName: p.repository.full_name })
+        .where(eq(journals.id, journal.id));
+    } else if (p.action === "deleted") {
+      await app.db
+        .update(journals)
+        .set({
+          syncStatus: "error",
+          syncError: `${journal.fullName} was deleted on GitHub`,
+          lastSyncedAt: new Date(),
+        })
+        .where(eq(journals.id, journal.id));
+    } else {
+      continue;
+    }
+    publish("journal", await journalTopics(app, journal.id));
+  }
 }
 
 interface InstallationPayload {

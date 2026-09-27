@@ -115,6 +115,29 @@ Two pairs stay below their target, on purpose:
 - Focus: 2 px accent ring at 2 px offset, on every interactive element. It is
   declared once in `style.css` on `:focus-visible`; no component restyles it.
 
+## Long-form reading (the journal)
+
+The journal (issue #45) is the only surface of the product that is a *document*
+rather than a dashboard, and it needs two values the rest of the app does not:
+
+- **Measure capped at 72 characters**, not the 1120 px content column. That
+  column is right for a table of repositories and too wide for prose: past
+  roughly 75 characters the eye loses the line it is returning to.
+- **Leading 1.75** on 14 px body text, against the 1.6 the rest of the app
+  uses. The page is read for minutes, not scanned for seconds.
+
+Inside it, `h1` enters at the page-title step (28 px / 700 / `-0.02em`) because
+the page *is* the document and owns its title; `h2` is 20, `h3` 16, `h4` and
+below 14. That is the same scale as everywhere else, entered one step higher
+than in a card. Headings take 32 px above and 12 below: a heading belongs to
+what follows it.
+
+The rendered HTML comes from the server, so these are the only rules in the
+product that live in `style.css` as tag selectors (`.md-body …`) rather than as
+utility classes — there is no React markup to hang a class on. Syntax colour in
+a code block (`.tok-kw` in accent, `.tok-str` in success) is semantic and does
+not count as the screen's one accent use.
+
 ## Keyboard and focus
 
 A floating layer is not finished until it behaves. `useLayer` in `ui.tsx`

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { audit } from "../audit.js";
@@ -9,8 +9,10 @@ import { publish } from "../events.js";
 import type { AppConfig } from "../config.js";
 import {
   assignments,
+  classroomJournals,
   classrooms,
   enrollments,
+  journalPages,
   organizations,
   studentRepos,
   users,
@@ -185,11 +187,36 @@ export async function studentPlugin(
         );
       }
 
+      // Issue #45: which classrooms have a journal worth opening. One query,
+      // and the visibility rule is the same one the journal routes apply — a
+      // journal holding only drafts must not advertise itself to a student.
+      const withJournal = new Set(
+        roomIds.length
+          ? (
+              await app.db
+                .selectDistinct({ classroomId: classroomJournals.classroomId })
+                .from(classroomJournals)
+                .innerJoin(journalPages, eq(journalPages.journalId, classroomJournals.journalId))
+                .where(
+                  and(
+                    inArray(classroomJournals.classroomId, roomIds),
+                    eq(journalPages.draft, false),
+                    or(
+                      isNull(journalPages.visibleFrom),
+                      sql`${journalPages.visibleFrom} <= now()`,
+                    ),
+                  ),
+                )
+            ).map((r) => r.classroomId)
+          : [],
+      );
+
       return rooms.map((r) => ({
         id: r.id,
         name: r.name,
         orgLogin: r.orgLogin,
         teacher: `${r.teacher} ${r.teacherFamily}`.trim(),
+        hasJournal: withJournal.has(r.id),
         assignments: published
           .filter((a) => a.classroomId === r.id)
           .map(({ groupMode: _groupMode, ...a }) => {

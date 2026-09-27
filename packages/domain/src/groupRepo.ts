@@ -7,27 +7,24 @@
  *   assignment can hold both a group repository and — from lot 1, before
  *   acceptance knew about groups — an individual one.
  */
+import { repoName } from "./repoName.js";
 
-/** GitHub refuses a repository name longer than 100 characters. */
-export const GITHUB_REPO_NAME_MAX = 100;
+export { GITHUB_REPO_NAME_MAX } from "./repoName.js";
 
 /**
  * `<assignment-slug>-<group-slug>`, capped at GitHub's limit (both slugs are
  * already `[a-z0-9-]`, up to 60 characters each). `disambiguator` is appended
  * when that name is already taken by another repository of the organization
  * (two classrooms of the same organization with the same assignment slug both
- * have a `group-1`); it survives the cap, the prefix is what gets shortened.
+ * have a `group-1`); it survives the cap, the stem is what gets shortened.
+ * The capping itself is `repoName`, shared with the journal repositories.
  */
 export function groupRepoName(
   assignmentSlug: string,
   groupSlug: string,
   disambiguator?: string,
 ): string {
-  const tail = disambiguator ? `-${disambiguator}` : "";
-  const head = `${assignmentSlug}-${groupSlug}`
-    .slice(0, GITHUB_REPO_NAME_MAX - tail.length)
-    .replace(/-+$/, "");
-  return `${head}${tail}`;
+  return repoName(`${assignmentSlug}-${groupSlug}`, disambiguator);
 }
 
 /** The fields of a `student_repos` row the rules below read. */

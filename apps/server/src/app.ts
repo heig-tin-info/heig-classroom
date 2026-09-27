@@ -17,6 +17,7 @@ import { publish } from "./events.js";
 import { adminPlugin } from "./modules/admin.js";
 import { avatarPlugin } from "./modules/avatar.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
+import { journalPlugin } from "./modules/journal.js";
 import { eventsPlugin } from "./modules/events.js";
 import { studentPlugin } from "./modules/student.js";
 import { makeWebhookHandler, webhooksPlugin } from "./modules/webhooks.js";
@@ -27,6 +28,7 @@ import { makeCodespaceSyncHandler } from "./codespace.js";
 import { codespacePlugin } from "./modules/codespace.js";
 import { makeEmailHandler } from "./mailer.js";
 import { emailPlugin } from "./modules/email.js";
+import { ingestJournal } from "./journal/ingest.js";
 import { startJobs } from "./jobs.js";
 import { runTask, seedTasks } from "./tasks.js";
 import { startTicker } from "./ticker.js";
@@ -74,9 +76,13 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   app.addContentTypeParser(["text/csv", "text/plain"], { parseAs: "string" }, (_req, body, done) =>
     done(null, body),
   );
-  // Avatars: raw binary image (≤ 1 MB, default Fastify limit).
+  // Avatars and journal assets: raw binary image. The size limit is the
+  // default 1 MB except on the journal upload route, which raises its own
+  // `bodyLimit` to 5 MB. The list covers what the journal editor's
+  // `accept="image/*"` can actually hand over — a type with no parser here is
+  // a 415 the teacher cannot act on.
   app.addContentTypeParser(
-    ["image/jpeg", "image/png", "image/webp"],
+    ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml", "image/avif"],
     { parseAs: "buffer" },
     (_req, body, done) => done(null, body),
   );
@@ -101,6 +107,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
   await app.register(avatarPlugin);
   await app.register(classroomsPlugin, { config });
   await app.register(assignmentsPlugin, { config });
+  await app.register(journalPlugin, { config });
   await app.register(studentPlugin, { config });
   await app.register(emailPlugin, { config });
   await app.register(codespacePlugin, { config });
@@ -121,6 +128,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
       taskRunner: (key) => runTask(app, config, key),
       emailHandler: makeEmailHandler(app, config),
       codespaceSyncHandler: makeCodespaceSyncHandler(app, config),
+      journalHandler: ({ journalId }) => ingestJournal(app, config, journalId).then(() => undefined),
     });
     await seedTasks(app);
     // Deadline ticker + scheduled tasks (ADR-006): worker side only.
