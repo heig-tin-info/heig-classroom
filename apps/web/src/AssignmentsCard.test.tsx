@@ -225,3 +225,54 @@ describe("AssignmentsSection archives", () => {
     expect(calls).toContainEqual({ url: `${LIST}/a1/unarchive`, method: "POST", body: null });
   });
 });
+
+/*
+ * Issue #48: an assignment nobody accepted can be deleted in any state; the
+ * first acceptance leaves Archive as the only way out.
+ */
+describe("AssignmentsSection delete", () => {
+  const openMenu = async (
+    a: ReturnType<typeof makeAssignment>,
+    extra: Parameters<typeof mockFetch>[0] = {},
+  ) => {
+    const stub = renderSection({ [`GET ${LIST}`]: ok([a]), ...extra });
+    await screen.findByText(a.name);
+    await userEvent.click(screen.getByRole("button", { name: `Actions for ${a.name}` }));
+    return { ...stub, menu: screen.getByRole("menu") };
+  };
+
+  it("offers Delete on a published assignment nobody accepted", async () => {
+    const { menu } = await openMenu(makeAssignment({ accepted: false }));
+    expect(within(menu).getByRole("menuitem", { name: "Delete" })).toBeVisible();
+    expect(within(menu).getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  });
+
+  it("keeps only Archive once someone accepted", async () => {
+    const { menu } = await openMenu(makeAssignment({ accepted: true }));
+    expect(within(menu).queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    expect(within(menu).getByRole("menuitem", { name: "Archive" })).toBeVisible();
+  });
+
+  it("warns that students lose it, then deletes", async () => {
+    const { menu, calls } = await openMenu(makeAssignment({ accepted: false }), {
+      [`DELETE ${LIST}/a1`]: noContent(),
+    });
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Students no longer see it/)).toBeVisible();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(calls).toContainEqual({ url: `${LIST}/a1`, method: "DELETE", body: null }),
+    );
+  });
+
+  it("explains a refusal when someone accepted in the meantime", async () => {
+    const { menu } = await openMenu(makeAssignment({ accepted: false }), {
+      [`DELETE ${LIST}/a1`]: fail(409, { error: "already_accepted", message: "server words" }),
+    });
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "Delete" }));
+    const dialog = await screen.findByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText(/it can only be archived now/)).toBeVisible();
+  });
+});

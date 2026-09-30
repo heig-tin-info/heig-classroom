@@ -140,6 +140,8 @@ export function makeAssignment(overrides: Partial<Assignment> = {}): Assignment 
     browserExamKeys: [],
     groupMode: false,
     groupMaxSize: null,
+    // A published assignment in progress usually has repositories already.
+    accepted: true,
     ...overrides,
   };
 }

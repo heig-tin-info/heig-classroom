@@ -15,3 +15,7 @@ Un devoir distribue un **dépôt source** à chaque étudiant sous forme de **d�
 ## Voir les devoirs archivés
 
 Cliquez le bouton **archives** à côté de **New assignment**. Les devoirs archivés portent un badge *archived* ; le bouton de restauration en ramène un. Archiver cache le devoir aux étudiants mais conserve dépôts et notes.
+
+## Supprimer un devoir
+
+**Delete** (dans le menu de la ligne) reste disponible tant qu'aucun étudiant ni aucun groupe n'a accepté le devoir, qu'il soit en brouillon, publié ou archivé. Le dépôt distribué sur GitHub est supprimé avec lui, les étudiants ne le voient plus et son nom redevient libre pour un nouveau devoir. Dès qu'une acceptation existe, il ne reste que **Archive**, pour ne perdre aucun travail d'étudiant.
