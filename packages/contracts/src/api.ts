@@ -169,6 +169,12 @@ export interface Assignment {
   groupMode: boolean;
   /** Advisory maximum group size (warning only); null = no hint. */
   groupMaxSize: number | null;
+  /**
+   * Some student or group has a repository row for it (issue #48): the
+   * assignment can then only be archived, never deleted. Set by the list
+   * and create routes.
+   */
+  accepted: boolean;
 }
 
 export interface OrgRepo {

@@ -41,6 +41,18 @@ import {
   type MenuItem,
 } from "./ui";
 
+/**
+ * A delete refused because someone accepted the assignment since the list
+ * loaded (issue #48): the row should say what is left to do, not just fail.
+ */
+function acceptedMeanwhile(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 409 &&
+    (err.body as { error?: string } | null)?.error === "already_accepted"
+  );
+}
+
 function StateBadge({ a, now }: { a: Assignment; now: number }) {
   if (a.state === "locked") return <Badge tone="zinc" icon={Lock}>locked</Badge>;
   if (a.state === "published") {
@@ -184,6 +196,8 @@ function AssignmentRow({
   const remove = useMutation({
     mutationFn: () => api(base, { method: "DELETE" }),
     onSuccess: invalidate,
+    // The refreshed row drops Delete, leaving Archive as the way out.
+    onError: (err) => (acceptedMeanwhile(err) ? invalidate() : undefined),
   });
 
   const repoLinks: MenuItem[] = [
@@ -193,10 +207,42 @@ function AssignmentRow({
       : []),
   ];
 
+  // Issue #48: an assignment nobody accepted can be deleted, draft, published or
+  // archived alike; the first acceptance leaves Archive as the only way out.
+  const deleteItem: MenuItem[] = a.accepted
+    ? []
+    : [
+        {
+          label: "Delete",
+          icon: Trash2,
+          danger: true,
+          separator: archived,
+          onSelect: async () => {
+            if (
+              await confirm({
+                title: `Delete “${a.name}”?`,
+                message:
+                  a.state === "draft"
+                    ? "The distributed repository on GitHub is deleted too. This cannot be undone."
+                    : "No student has accepted it yet. Students no longer see it, and the distributed repository on GitHub is deleted. This cannot be undone.",
+                confirmLabel: "Delete",
+                danger: true,
+              })
+            ) {
+              remove.mutate();
+            }
+          },
+        },
+      ];
+
   const menu: MenuItem[] = archived
     ? // An archived assignment keeps its repositories on GitHub: the links are
       // the only way back to them from here.
-      [{ label: "Restore", icon: ArchiveRestore, onSelect: () => unarchive.mutate() }, ...repoLinks]
+      [
+        { label: "Restore", icon: ArchiveRestore, onSelect: () => unarchive.mutate() },
+        ...repoLinks,
+        ...deleteItem,
+      ]
     : [
         // Editable at every stage: moving the deadline of an expired
         // assignment into the future reopens it (repos unlocked, grading
@@ -213,27 +259,7 @@ function AssignmentRow({
             }
           },
         },
-        ...(a.state === "draft"
-          ? [
-              {
-                label: "Delete",
-                icon: Trash2,
-                danger: true,
-                onSelect: async () => {
-                  if (
-                    await confirm({
-                      title: `Delete “${a.name}”?`,
-                      message: "The distributed repository on GitHub is deleted too. This cannot be undone.",
-                      confirmLabel: "Delete",
-                      danger: true,
-                    })
-                  ) {
-                    remove.mutate();
-                  }
-                },
-              },
-            ]
-          : []),
+        ...deleteItem,
       ];
 
   const when =
@@ -266,7 +292,12 @@ function AssignmentRow({
     [remove.isError, remove.error, "Could not delete this assignment."],
   ];
   const hit = failures.find(([failed]) => failed);
-  const failure = hit ? apiErrorMessage(hit[1], hit[2]) : null;
+  const failure =
+    hit && hit[1] === remove.error && acceptedMeanwhile(remove.error)
+      ? "A student accepted this assignment in the meantime: it can only be archived now."
+      : hit
+        ? apiErrorMessage(hit[1], hit[2])
+        : null;
 
   return (
     // Title and state on the first line, the schedule on the second; the

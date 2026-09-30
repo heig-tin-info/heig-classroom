@@ -13,6 +13,7 @@ import {
   queueCodespaceSync,
 } from "../../codespace.js";
 import type { AppConfig } from "../../config.js";
+import type { Db } from "../../db/client.js";
 import {
   assignmentMilestones,
   assignments,
@@ -43,6 +44,27 @@ const CodespaceImage = z.string().max(200);
 const BrowserExamKeys = z.array(z.string().regex(/^[0-9a-fA-F]{64}$/)).max(20);
 /** Advisory group size (issue #2): a hint for the warning, never a limit. */
 const GroupMaxSize = z.number().int().min(1).max(50);
+
+/** Issue #48: once anyone accepted, the assignment can only be archived. */
+const ALREADY_ACCEPTED = {
+  error: "already_accepted",
+  message:
+    "Students have already accepted this assignment: it can no longer be deleted, archive it instead",
+} as const;
+
+/**
+ * Has anyone accepted the assignment? Any repository row counts, individual
+ * or group, provisioned, in flight (claimed) or failed: each is an
+ * acceptance a deletion would silently undo.
+ */
+async function hasAcceptance(db: Pick<Db, "select">, assignmentId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ id: studentRepos.id })
+    .from(studentRepos)
+    .where(eq(studentRepos.assignmentId, assignmentId))
+    .limit(1);
+  return row !== undefined;
+}
 
 const emptyToNull = (v: string | undefined) => {
   const trimmed = (v ?? "").trim();
@@ -147,7 +169,7 @@ export async function assignmentLifecycleRoutes(
       if (!scope) return reply;
       // ?archived=1 lists the archive instead of the active assignments.
       const archived = (req.query as { archived?: string }).archived === "1";
-      return app.db
+      const rows = await app.db
         .select()
         .from(assignments)
         .where(
@@ -157,6 +179,23 @@ export async function assignmentLifecycleRoutes(
           ),
         )
         .orderBy(desc(assignments.createdAt));
+      // `accepted` decides whether the row offers Delete (issue #48).
+      const accepted = new Set(
+        rows.length === 0
+          ? []
+          : (
+              await app.db
+                .selectDistinct({ assignmentId: studentRepos.assignmentId })
+                .from(studentRepos)
+                .where(
+                  inArray(
+                    studentRepos.assignmentId,
+                    rows.map((r) => r.id),
+                  ),
+                )
+            ).map((r) => r.assignmentId),
+      );
+      return rows.map((r) => ({ ...r, accepted: accepted.has(r.id) }));
     },
   );
 
@@ -526,35 +565,71 @@ export async function assignmentLifecycleRoutes(
     },
   );
 
+  // Issue #48: an assignment nobody accepted is deleted outright, whatever
+  // its state (draft, published, expired, archived), which also frees its
+  // slug for a new assignment of the same name. Once a single student or
+  // group has a repository row — provisioned, pending or failed — only
+  // Archive remains, so no student work is ever lost.
   app.delete(
     "/app/api/classrooms/:id/assignments/:aid",
     { preHandler: requireTeacher },
     async (req, reply) => {
       const scope = await accessibleAssignment(app, req, reply);
       if (!scope) return reply;
-      if (scope.assignment.state !== "draft") {
-        return reply
-          .code(409)
-          .send({ error: "not_draft", message: "Only draft assignments can be deleted" });
+      if (await hasAcceptance(app.db, scope.assignment.id)) {
+        return reply.code(409).send(ALREADY_ACCEPTED);
       }
-      // The squashed repository is deleted with the draft (no student repository exists).
-      if (scope.assignment.squashedFullName) {
-        const client = await clientFor(config, reply, scope.org);
-        if (!client) return reply;
+      // The client is resolved before anything is deleted: without the App
+      // the squashed repository could not follow, and the row must not go
+      // without it.
+      const client = scope.assignment.squashedFullName
+        ? await clientFor(config, reply, scope.org)
+        : null;
+      if (scope.assignment.squashedFullName && !client) return reply;
+
+      // The check above is only a fast path; this one is the guarantee. The
+      // row lock conflicts with the FOR KEY SHARE lock every student_repos
+      // insert takes on its assignment, so an acceptance is either already
+      // committed (and seen by the re-check) or waits and then fails on the
+      // foreign key: no repository can be created for a deleted assignment.
+      const deleted = await app.db.transaction(async (tx) => {
+        const [locked] = await tx
+          .select({ id: assignments.id })
+          .from(assignments)
+          .where(eq(assignments.id, scope.assignment.id))
+          .for("update");
+        if (!locked) return "gone" as const;
+        if (await hasAcceptance(tx, scope.assignment.id)) return "accepted" as const;
+        // Milestones, groups and their members cascade (schema FKs).
+        await tx.delete(assignments).where(eq(assignments.id, scope.assignment.id));
+        return "deleted" as const;
+      });
+      if (deleted === "accepted") return reply.code(409).send(ALREADY_ACCEPTED);
+      if (deleted === "gone") return reply.code(404).send({ error: "not_found" });
+
+      // Only now the distributed repository: nobody can accept any more, so
+      // no provisioning can be reading from it.
+      if (client && scope.assignment.squashedFullName) {
         const [, repo] = scope.assignment.squashedFullName.split("/");
         await client.octokit
           .request("DELETE /repos/{owner}/{repo}", { owner: scope.org.login, repo: repo! })
           .catch((err) => req.log.warn({ err }, "squashed deletion failed"));
       }
-      await app.db.delete(assignments).where(eq(assignments.id, scope.assignment.id));
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",
         action: "assignment.delete",
         subjectType: "assignment",
         subjectId: scope.assignment.id,
-        payload: { name: scope.assignment.name, squashed: scope.assignment.squashedFullName },
+        payload: {
+          name: scope.assignment.name,
+          squashed: scope.assignment.squashedFullName,
+          published: scope.assignment.state !== "draft",
+          archived: scope.assignment.archivedAt !== null,
+        },
       });
+      // Students of a published assignment had it on their dashboard.
+      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
       return reply.code(204).send();
     },
   );
@@ -723,7 +798,7 @@ export async function assignmentLifecycleRoutes(
           },
         });
         if (isOnlineMode(body.data.workMode)) await queueCodespaceSync(app, row!.id);
-        return reply.code(201).send(row);
+        return reply.code(201).send({ ...row!, accepted: false });
       } catch (err) {
         // UNIQUE(classroom_id, slug): name already taken; the squashed repo
         // was just created for nothing, delete it to stay replayable.

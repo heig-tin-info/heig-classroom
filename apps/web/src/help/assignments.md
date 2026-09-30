@@ -15,3 +15,7 @@ Edit the assignment and move the deadline into the future: repositories are unlo
 ## How to see archived assignments
 
 Click the **archive** button next to **New assignment**. Archived assignments show an *archived* badge; the restore button brings one back. Archiving hides the assignment from students but keeps every repository and grade.
+
+## How to delete an assignment
+
+**Delete** (in the row's menu) stays available as long as no student and no group has accepted the assignment, whether it is a draft, published or archived. The distributed repository on GitHub is deleted with it, students no longer see it, and its name is free again for a new assignment. Once anyone has accepted, only **Archive** remains, so no student work is lost.

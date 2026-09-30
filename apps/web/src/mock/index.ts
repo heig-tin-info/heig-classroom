@@ -192,6 +192,8 @@ function assignment(
     browserExamKeys: [],
     groupMode: false,
     groupMaxSize: null,
+    // A published mock assignment has repositories unless it says otherwise.
+    accepted: (o.state ?? "published") !== "draft",
     ...o,
   };
 }
@@ -246,9 +248,11 @@ const rooms: Room[] = [
         start: -12 * D,
         deadline: 3 * D + 5 * H,
       }),
+      // Published but nobody accepted it yet: the menu still offers Delete.
       assignment("a3", "Lab 3 — Linked lists", "heig-prg1-2026", {
         start: 4 * D,
         deadline: 18 * D,
+        accepted: false,
       }),
       assignment("a4", "Lab 4 — File I/O", "heig-prg1-2026", {
         start: 19 * D,
@@ -1169,7 +1173,17 @@ on("PATCH", "/app/api/classrooms/:id/assignments/:aid", (m, body) => {
 });
 on("DELETE", "/app/api/classrooms/:id/assignments/:aid", (m) => {
   const r = roomOr404(m.groups!.id!);
-  r.assignments = r.assignments.filter((a) => a.id !== m.groups!.aid);
+  const a = assignmentOr404(r, m.groups!.aid!);
+  // Issue #48: deletable in any state until someone accepts it.
+  if (a.accepted) {
+    throw new MockError(
+      409,
+      "Students have already accepted this assignment: it can no longer be deleted, archive it instead",
+      { error: "already_accepted" },
+    );
+  }
+  r.assignments = r.assignments.filter((x) => x.id !== a.id);
+  r.archivedAssignments.delete(a.id);
   return undefined;
 });
 on("POST", "/app/api/classrooms/:id/assignments/:aid/publish", (m) => {
