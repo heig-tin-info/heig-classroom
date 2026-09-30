@@ -161,6 +161,8 @@ interface Room {
   assignments: Assignment[];
   archivedAssignments: Set<string>;
   teacher: string;
+  /** Viewer's "Notify me about students" choice; unset = the default (owner on). */
+  notifyStudents?: boolean;
 }
 
 function assignment(
@@ -715,6 +717,7 @@ function detailOf(room: Room): ClassroomDetail {
     })),
     staff: room.staff,
     isOwner: room.summary.isOwner,
+    notifyStudents: room.notifyStudents ?? room.summary.isOwner,
     appSlug: "heig-classroom",
   };
 }
@@ -1049,6 +1052,11 @@ on("PATCH", "/app/api/classrooms/:id", (m, body) => {
   const r = roomOr404(m.groups!.id!);
   if (typeof body.name === "string") r.summary.name = body.name;
   return detailOf(r);
+});
+on("PUT", "/app/api/classrooms/:id/notifications", (m, body) => {
+  const r = roomOr404(m.groups!.id!);
+  r.notifyStudents = body.students === true;
+  return { notifyStudents: r.notifyStudents };
 });
 on("DELETE", "/app/api/classrooms/:id", (m) => {
   const i = rooms.findIndex((r) => r.summary.id === m.groups!.id);

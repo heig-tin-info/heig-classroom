@@ -14,7 +14,7 @@ import { z } from "zod";
 import { audit } from "../../audit.js";
 import type { AppConfig } from "../../config.js";
 import { assignmentMilestones } from "../../db/schema.js";
-import { publish } from "../../events.js";
+import { classroomTopics, publish } from "../../events.js";
 import { accessibleAssignment, teacherGuard } from "../guards.js";
 
 export const DAY_MS = 86_400_000;
@@ -124,7 +124,7 @@ export async function assignmentMilestoneRoutes(
         subjectId: scope.assignment.id,
         payload: { name: row.name, dueAt: row.dueAt, offsetDays: row.offsetDays },
       });
-      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
+      publish("assignments", classroomTopics(scope.assignment.classroomId));
       return reply.code(201).send(view(row));
     },
   );
@@ -155,7 +155,7 @@ export async function assignmentMilestoneRoutes(
         subjectId: scope.assignment.id,
         payload: { name: gone.name, dispatched: gone.dispatchedAt !== null },
       });
-      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
+      publish("assignments", classroomTopics(scope.assignment.classroomId));
       return reply.code(204).send();
     },
   );

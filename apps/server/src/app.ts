@@ -13,7 +13,7 @@ import { authPlugin } from "./auth/plugin.js";
 import type { AppConfig } from "./config.js";
 import { createDb } from "./db/client.js";
 import { assignmentsPlugin } from "./modules/assignments/index.js";
-import { publish } from "./events.js";
+import { classroomTopics, publish } from "./events.js";
 import { adminPlugin } from "./modules/admin.js";
 import { avatarPlugin } from "./modules/avatar.js";
 import { classroomsPlugin } from "./modules/classrooms.js";
@@ -94,7 +94,7 @@ export async function buildApp({ config }: AppDeps): Promise<FastifyInstance> {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return;
     if (reply.statusCode >= 400 || !req.user) return;
     const classroom = /^\/app\/api\/classrooms\/([0-9a-f-]{36})/.exec(req.url);
-    if (classroom) publish("mutation", [`classroom:${classroom[1]}`]);
+    if (classroom) publish("mutation", classroomTopics(classroom[1]!));
     else if (req.url.startsWith("/app/api/classrooms")) publish("mutation", [`teacher:${req.user.id}`]);
     else publish("mutation", [`user:${req.user.id}`]);
   });

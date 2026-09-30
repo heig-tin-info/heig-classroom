@@ -112,6 +112,7 @@ export function makeClassroomDetail(overrides: Partial<ClassroomDetail> = {}): C
     roster: [makeRosterEntry()],
     staff: [],
     isOwner: true,
+    notifyStudents: true,
     appSlug: "heig-classroom",
     ...overrides,
   };

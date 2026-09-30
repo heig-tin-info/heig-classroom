@@ -133,6 +133,12 @@ export interface ClassroomDetail {
   /** The viewer created this classroom (or is an admin): may manage staff,
       archive and delete it. Other staff members see those read-only. */
   isOwner: boolean;
+  /**
+   * The viewer gets the student-activity toasts of this classroom (a student
+   * joined, accepted, pushed, was graded). Default: on for the owner, off for
+   * co-teachers and assistants (issue #46).
+   */
+  notifyStudents: boolean;
   appSlug: string | null;
 }
 

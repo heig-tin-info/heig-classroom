@@ -47,8 +47,10 @@ import {
   SearchInput,
   SectionHeading,
   Segmented,
+  SettingRow,
   Skeleton,
   Spinner,
+  Switch,
   Tabs,
 } from "./ui";
 
@@ -56,6 +58,51 @@ type Tab = "assignments" | "journal" | "students" | "staff" | "settings";
 
 /** The only `?tab=` values the page answers to; anything else is ignored. */
 const TABS: Tab[] = ["assignments", "journal", "students", "staff", "settings"];
+
+/**
+ * The viewer's own switch for this classroom's student toasts (issue #46):
+ * on by default for the owner, off for co-teachers and assistants. Stored on
+ * the server; the live connection reconnects by itself to apply it.
+ */
+function NotifyStudentsCard({ room }: { room: ClassroomDetail }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: (students: boolean) =>
+      api<{ notifyStudents: boolean }>(`/app/api/classrooms/${room.id}/notifications`, {
+        method: "PUT",
+        body: JSON.stringify({ students }),
+      }),
+    onSuccess: (res) => {
+      qc.setQueryData<ClassroomDetail>(["classroom", room.id], (old) =>
+        old ? { ...old, notifyStudents: res.notifyStudents } : old,
+      );
+    },
+  });
+  // Optimistic: the switch follows the click, the server answer confirms it.
+  const on = save.isPending ? save.variables : room.notifyStudents;
+  return (
+    <Card className="px-5 py-2">
+      <SettingRow
+        title={t("classroomNotify.title")}
+        desc={on ? t("classroomNotify.on") : t("classroomNotify.off")}
+        help="notifications"
+      >
+        <Switch
+          checked={on}
+          disabled={save.isPending}
+          onChange={(v) => save.mutate(v)}
+          label={t("classroomNotify.title")}
+        />
+      </SettingRow>
+      {save.isError ? (
+        <p className="pb-3 text-[13px] text-danger">
+          {apiErrorMessage(save.error, t("classroomNotify.error"))}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
 
 /** Rename, archive, delete — inline on the Settings tab, no modal. */
 function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => void }) {
@@ -98,6 +145,8 @@ function SettingsTab({ room, onGone }: { room: ClassroomDetail; onGone: () => vo
 
   return (
     <div className="max-w-2xl space-y-6">
+      <NotifyStudentsCard room={room} />
+
       <Card className="p-5">
         <SectionHeading title="Name" description="Shown to you, your staff and the students." />
         <form

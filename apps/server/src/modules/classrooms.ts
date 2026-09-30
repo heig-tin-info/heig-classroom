@@ -7,7 +7,7 @@ import { ClassroomCreate } from "@hgc/contracts";
 import type { Cell } from "@hgc/domain";
 
 import { audit } from "../audit.js";
-import { publish } from "../events.js";
+import { publish, publishTopicsChanged, staffTopic } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { assignments, classrooms, enrollments, organizations } from "../db/schema.js";
 import {
@@ -28,7 +28,14 @@ import {
   teacherGuard,
 } from "./guards.js";
 import { claimForExistingUsers, importRoster, rosterView } from "./roster.js";
-import { addStaffMember, removeStaffMember, staffView } from "./staff.js";
+import {
+  addStaffMember,
+  removeStaffMember,
+  setStudentNotices,
+  staffUserIds,
+  staffView,
+  studentNotices,
+} from "./staff.js";
 
 const RowsBody = z.object({
   rows: z
@@ -122,7 +129,7 @@ export async function classroomsPlugin(
             .where(eq(classrooms.orgId, org.id));
           publish(
             "orgs",
-            rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+            rooms.flatMap((r) => [`classroom-staff:${r.id}`, `teacher:${r.teacherId}`] as const),
           );
         }
       }
@@ -357,9 +364,33 @@ export async function classroomsPlugin(
       // of the section — no extra round-trip for a handful of rows.
       staff: await staffView(app.db, room.id),
       isOwner: isOwner(req, room),
+      notifyStudents: await studentNotices(app.db, room, req.user!.id),
       appSlug: config.GITHUB_APP_SLUG || null,
     };
   });
+
+  // Issue #46, co-staff policy (b): the viewer's own switch for the
+  // student-activity toasts of this classroom. Stored server-side, per
+  // (classroom, user); the open SSE connections reconnect to apply it.
+  app.put(
+    "/app/api/classrooms/:id/notifications",
+    { preHandler: requireTeacher },
+    async (req, reply) => {
+      const room = await accessibleClassroom(app, req, reply);
+      if (!room) return reply;
+      const body = z.object({ students: z.boolean() }).safeParse(req.body);
+      if (!body.success) {
+        return reply.code(400).send({ error: "validation", issues: body.error.issues });
+      }
+      await setStudentNotices(app.db, {
+        classroomId: room.id,
+        userId: req.user!.id,
+        on: body.data.students,
+      });
+      publishTopicsChanged([req.user!.id]);
+      return { notifyStudents: body.data.students };
+    },
+  );
 
   // Grade sheet of the whole classroom (roster x graded assignments): what a
   // GAPS import — or any other transfer into the school's grade system —
@@ -394,6 +425,8 @@ export async function classroomsPlugin(
         subjectId: room.id,
         payload: { name: room.name },
       });
+      // An archived classroom produces no toast (issue #46).
+      publishTopicsChanged(await staffUserIds(app.db, room.id));
       return reply.code(204).send();
     },
   );
@@ -418,6 +451,7 @@ export async function classroomsPlugin(
         subjectId: room.id,
         payload: { name: room.name },
       });
+      publishTopicsChanged(await staffUserIds(app.db, room.id));
       return reply.code(204).send();
     },
   );
@@ -464,7 +498,7 @@ export async function classroomsPlugin(
         subjectType: "classroom",
         subjectId: room.id,
       });
-      publish("roster", [`classroom:${room.id}`, `user:${me.id}`]);
+      publish("roster", [staffTopic(room.id), `user:${me.id}`]);
       return reply.code(201).send({ ok: true });
     },
   );
@@ -512,10 +546,10 @@ export async function classroomsPlugin(
       subjectId: room.id,
       payload: { email: res.member.email, role: res.member.role },
     });
-    // `classroom:<id>` is already published by the app-wide mutation hook;
-    // the new member's own topic is what refreshes THEIR classroom list
-    // (their SSE topic set was computed before they had access).
-    if (res.member.userId) publish("mutation", [`user:${res.member.userId}`]);
+    // The classroom's own hint comes from the app-wide mutation hook; the new
+    // member's connections reconnect so their topics include this classroom
+    // (issue #46), which also refreshes their classroom list.
+    publishTopicsChanged([res.member.userId]);
     return reply.code(201).send(res.member);
   });
 
@@ -541,7 +575,9 @@ export async function classroomsPlugin(
         subjectId: room.id,
         payload: { email: removed.email, role: removed.role },
       });
-      if (removed.userId) publish("mutation", [`user:${removed.userId}`]);
+      // Cut the removed member off this classroom's events right away, not at
+      // their next reload (issue #46).
+      publishTopicsChanged([removed.userId]);
       return reply.code(204).send();
     },
   );
@@ -594,7 +630,11 @@ export async function classroomsPlugin(
         // A corrected address must attach right away if the account already
         // exists — until GH-11 the student had to sign in again for a fix
         // the teacher had just made.
-        if (emailChanged) await claimForExistingUsers(app.db, entry.classroomId);
+        if (emailChanged) {
+          // The previous holder is no longer enrolled here (issue #46).
+          publishTopicsChanged([entry.userId]);
+          await claimForExistingUsers(app.db, entry.classroomId);
+        }
         return updated;
       } catch {
         // UNIQUE(classroom_id, email)
@@ -624,6 +664,7 @@ export async function classroomsPlugin(
         subjectId: entry.id,
         payload: { previousUserId: entry.userId },
       });
+      publishTopicsChanged([entry.userId]);
       return updated;
     },
   );
@@ -666,6 +707,7 @@ export async function classroomsPlugin(
           ...(revoked.length > 0 ? { revoked } : {}),
         },
       });
+      publishTopicsChanged([entry.userId]);
       return reply.code(204).send();
     },
   );

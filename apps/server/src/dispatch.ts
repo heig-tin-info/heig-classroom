@@ -30,7 +30,7 @@ import {
   pushReceipts,
   studentRepos,
 } from "./db/schema.js";
-import { publish } from "./events.js";
+import { classroomTopics, publish, staffTopic } from "./events.js";
 import { installationClient } from "./github/app.js";
 import { isRepoGone, markRepoDeleted, repoIsLive } from "./repos.js";
 
@@ -252,12 +252,13 @@ export function makeGradeDispatchHandler(app: FastifyInstance, config: AppConfig
         subjectId: a.id,
         payload: { repos: repos.length, dispatched, skipped, deleted, failures },
       });
-      publish("assignments", [`classroom:${row.classroomId}`], {
+      // A staff notice: to a student it is an aggregate about classmates.
+      publish("assignments", [staffTopic(row.classroomId)], {
         kind: "llm_review_dispatched",
         message: `LLM review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
       });
     } else if (deleted > 0) {
-      publish("repos", [`classroom:${row.classroomId}`]);
+      publish("repos", [staffTopic(row.classroomId)]);
     }
 
     // Failed repositories retry via pg-boss; already-dispatched ones are
@@ -273,7 +274,7 @@ export function makeGradeDispatchHandler(app: FastifyInstance, config: AppConfig
     // Completed without a single dispatch (nothing to review, every
     // repository gone): refresh the views, silently.
     if (completed.length > 0 && dispatched === 0) {
-      publish("assignments", [`classroom:${row.classroomId}`]);
+      publish("assignments", classroomTopics(row.classroomId));
     }
   };
 }
@@ -407,12 +408,12 @@ async function dispatchMilestone(
         failures,
       },
     });
-    publish("assignments", [`classroom:${row.classroomId}`], {
+    publish("assignments", [staffTopic(row.classroomId)], {
       kind: "llm_review_dispatched",
       message: `Milestone “${milestone.name}” review requested on “${a.name}” (${dispatched}/${repos.length} repositories)`,
     });
   } else if (deleted > 0) {
-    publish("repos", [`classroom:${row.classroomId}`]);
+    publish("repos", [staffTopic(row.classroomId)]);
   }
 
   // Failed repositories retry via pg-boss; the ledger skips the others.
@@ -425,6 +426,6 @@ async function dispatchMilestone(
     .where(and(eq(assignmentMilestones.id, milestone.id), isNull(assignmentMilestones.dispatchedAt)))
     .returning({ id: assignmentMilestones.id });
   if (completed.length > 0 && dispatched === 0) {
-    publish("assignments", [`classroom:${row.classroomId}`]);
+    publish("assignments", classroomTopics(row.classroomId));
   }
 }

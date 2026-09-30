@@ -35,7 +35,7 @@ import {
   organizations,
   users,
 } from "../db/schema.js";
-import { publish } from "../events.js";
+import { classroomTopics, publish } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { inviteCollaborator } from "../github/collaborators.js";
 import {
@@ -915,5 +915,5 @@ async function inviteStaff(
       app.log.warn({ err, login, repoName }, "journal collaborator invitation failed");
     }
   }
-  publish("journal", [`classroom:${classroomId}`]);
+  publish("journal", classroomTopics(classroomId));
 }

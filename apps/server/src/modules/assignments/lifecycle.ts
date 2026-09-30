@@ -21,7 +21,7 @@ import {
   gradeRuns,
   studentRepos,
 } from "../../db/schema.js";
-import { publish } from "../../events.js";
+import { classroomTopics, publish } from "../../events.js";
 import { installationClient } from "../../github/app.js";
 import { unlockStudentRepo } from "../../github/lock.js";
 import { zurichIso } from "../../github/commit.js";
@@ -441,7 +441,7 @@ export async function assignmentLifecycleRoutes(
           subjectId: updated.id,
           payload: { deadlineAt: updated.deadlineAt },
         });
-        publish("assignments", [`classroom:${updated.classroomId}`]);
+        publish("assignments", classroomTopics(updated.classroomId));
         return { ...updated, state: "published", deadlineAppliedAt: null, frozenAt: null };
       }
       return updated;

@@ -10,7 +10,7 @@ import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, classrooms, organizations, studentRepos } from "./db/schema.js";
-import { publish } from "./events.js";
+import { classroomTopics, publish, staffTopic } from "./events.js";
 import { repoUserTopics } from "./group-repos.js";
 import { installationClient } from "./github/app.js";
 import { pushEmptyCommit, zurichIso } from "./github/commit.js";
@@ -77,7 +77,7 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
     }
 
     if (repos.length === 0 || row.installationId === null) {
-      publish("assignments", [`classroom:${row.classroomId}`]);
+      publish("assignments", classroomTopics(row.classroomId));
       return;
     }
 
@@ -179,19 +179,22 @@ export function makeDeadlineHandler(app: FastifyInstance, config: AppConfig) {
           failures,
         },
       });
-      publish("assignments", [`classroom:${row.classroomId}`], {
+      // The notice is for the staff only: to a student it is an aggregate
+      // about classmates' repositories (issue #46). Students refresh silently.
+      publish("assignments", [staffTopic(row.classroomId)], {
         kind: "deadline_applied",
         message: `Deadline enforced on “${a.name}” (${applied}/${repos.length} repositories)`,
       });
+      publish("assignments", [`classroom:${row.classroomId}`]);
     } else if (claimedNow || deleted > 0) {
       // State changed (assignment locked, repositories gone) without a
       // deadline being enforced anywhere: refresh the views, silently.
-      publish("assignments", [`classroom:${row.classroomId}`]);
+      publish("assignments", classroomTopics(row.classroomId));
     }
     if (applied > 0 || deleted > 0) {
       publish(
         "repos",
-        [...(await repoUserTopics(app.db, repos)), `classroom:${row.classroomId}`],
+        [...(await repoUserTopics(app.db, repos)), staffTopic(row.classroomId)],
       );
     }
     if (claimedNow) {
@@ -236,7 +239,7 @@ export async function freezeDueAssignments(app: FastifyInstance): Promise<number
       subjectType: "assignment",
       subjectId: a.id,
     });
-    publish("assignments", [`classroom:${a.classroomId}`]);
+    publish("assignments", classroomTopics(a.classroomId));
   }
   return frozen.length;
 }

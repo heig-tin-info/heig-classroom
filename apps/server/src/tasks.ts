@@ -181,7 +181,7 @@ async function reconcileGrades(app: FastifyInstance, config: AppConfig): Promise
         }, config);
         if (id) {
           ingested += 1;
-          touched.add(`classroom:${classroomId}`);
+          touched.add(`classroom-staff:${classroomId}`);
           touchedRepos.push(repo);
         }
       }
@@ -230,7 +230,7 @@ async function reconcileRepos(app: FastifyInstance, config: AppConfig): Promise<
       clients.set(installationId!, client);
     }
     const notify = () => {
-      touched.add(`classroom:${classroomId}`);
+      touched.add(`classroom-staff:${classroomId}`);
       touchedRepos.push(repo);
     };
     // Invitation acceptance has no reliable retro-active webhook: a pending

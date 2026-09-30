@@ -13,7 +13,7 @@ import type { Octokit } from "octokit";
 import { audit } from "./audit.js";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, classrooms, organizations, studentRepos } from "./db/schema.js";
-import { publish } from "./events.js";
+import { publish, staffTopic } from "./events.js";
 import { repoUserTopics } from "./group-repos.js";
 import { installationClient } from "./github/app.js";
 import { openSyncWorkspace, updateSquashedRepo } from "./github/sync.js";
@@ -184,13 +184,15 @@ export function makeSyncHandler(app: FastifyInstance, config: AppConfig) {
         failures,
       },
     });
-    publish("assignments", [`classroom:${row.classroomId}`], {
+    // A staff notice: each student's repository view refreshes through the
+    // hint below, the sync PR itself shows up on GitHub (issue #46).
+    publish("assignments", [staffTopic(row.classroomId)], {
       kind: "sync",
       message: `Sync finished for “${a.name}”: ${prs} pull request${prs === 1 ? "" : "s"} opened, ${skipped} already up to date`,
     });
     publish(
       "repos",
-      [...(await repoUserTopics(app.db, repos)), `classroom:${row.classroomId}`],
+      [...(await repoUserTopics(app.db, repos)), staffTopic(row.classroomId)],
     );
     if (failures.length > 0) {
       throw new Error(`sync incomplete: ${failures.join(", ")}`);

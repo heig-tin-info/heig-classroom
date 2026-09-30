@@ -300,7 +300,7 @@ describe("ingestJournal", () => {
     } finally {
       off();
     }
-    expect(seen).toEqual([{ type: "journal", topics: [`classroom:${classroomId}`] }]);
+    expect(seen).toEqual([{ type: "journal", topics: [`classroom:${classroomId}`, `classroom-staff:${classroomId}`] }]);
   });
 
   it("is a no-op on a journal that does not exist", async () => {

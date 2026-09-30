@@ -17,11 +17,11 @@
  */
 import { randomUUID } from "node:crypto";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 
 import type { AppConfig } from "../config.js";
 import type { Db } from "../db/client.js";
-import { classroomStaff, users } from "../db/schema.js";
+import { classroomNotificationPrefs, classrooms, classroomStaff, users } from "../db/schema.js";
 import { emailIn, knownEmails, ownersOf } from "../identity.js";
 import { syncUserRole } from "../roles.js";
 
@@ -112,6 +112,56 @@ export async function addStaffMember(
   // teacher UI without waiting for their next login.
   await syncUserRole(db, config, email);
   return { ok: true, member: created };
+}
+
+/** Accounts of a classroom's staff: the owner and every claimed staff seat. */
+export async function staffUserIds(db: Db, classroomId: string): Promise<string[]> {
+  const [room] = await db
+    .select({ teacherId: classrooms.teacherId })
+    .from(classrooms)
+    .where(eq(classrooms.id, classroomId))
+    .limit(1);
+  const seats = await db
+    .select({ userId: classroomStaff.userId })
+    .from(classroomStaff)
+    .where(and(eq(classroomStaff.classroomId, classroomId), isNotNull(classroomStaff.userId)));
+  return [...(room ? [room.teacherId] : []), ...seats.map((s) => s.userId!)];
+}
+
+/**
+ * Does this staff member get the student-activity toasts of the classroom
+ * (issue #46, co-staff policy (b))? The stored choice, else on for the owner
+ * and off for co-teachers and assistants. Mirrors `connectionAudience`.
+ */
+export async function studentNotices(
+  db: Db,
+  room: { id: string; teacherId: string },
+  userId: string,
+): Promise<boolean> {
+  const [pref] = await db
+    .select({ on: classroomNotificationPrefs.studentActivity })
+    .from(classroomNotificationPrefs)
+    .where(
+      and(
+        eq(classroomNotificationPrefs.classroomId, room.id),
+        eq(classroomNotificationPrefs.userId, userId),
+      ),
+    )
+    .limit(1);
+  return pref?.on ?? room.teacherId === userId;
+}
+
+export async function setStudentNotices(
+  db: Db,
+  input: { classroomId: string; userId: string; on: boolean },
+) {
+  await db
+    .insert(classroomNotificationPrefs)
+    .values({ classroomId: input.classroomId, userId: input.userId, studentActivity: input.on })
+    .onConflictDoUpdate({
+      target: [classroomNotificationPrefs.classroomId, classroomNotificationPrefs.userId],
+      set: { studentActivity: input.on, updatedAt: new Date() },
+    });
 }
 
 /** Removes a staff row; returns it, or null when it is not in that classroom. */

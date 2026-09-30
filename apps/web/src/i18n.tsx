@@ -66,6 +66,10 @@ const en = {
   "staff.confirmRemove": "Remove {email} from the staff of this classroom?",
   "staff.role.teacher": "Teacher",
   "staff.role.assistant": "Assistant",
+  "classroomNotify.title": "Notify me about students",
+  "classroomNotify.on": "A notification when a student of this classroom joins, accepts an assignment, pushes or is graded.",
+  "classroomNotify.off": "No notification about this classroom's students. Your views still update live; deadlines, syncs and reviews still notify you.",
+  "classroomNotify.error": "Could not save this preference.",
 
   "github.linked": "GitHub account linked.",
   "github.conflict": "This GitHub account is already linked to another user.",
@@ -350,6 +354,10 @@ const fr: Record<keyof Dict, string> = {
   "staff.confirmRemove": "Retirer {email} de l'équipe de cette classe ?",
   "staff.role.teacher": "Enseignant",
   "staff.role.assistant": "Assistant",
+  "classroomNotify.title": "M'avertir de l'activité des étudiants",
+  "classroomNotify.on": "Une notification quand un étudiant de cette classe rejoint, accepte un devoir, pousse ou reçoit une note.",
+  "classroomNotify.off": "Aucune notification sur les étudiants de cette classe. Vos vues restent à jour en direct ; échéances, synchronisations et revues vous avertissent toujours.",
+  "classroomNotify.error": "Impossible d'enregistrer cette préférence.",
 
   "github.linked": "Compte GitHub lié.",
   "github.conflict": "Ce compte GitHub est déjà lié à un autre utilisateur.",
