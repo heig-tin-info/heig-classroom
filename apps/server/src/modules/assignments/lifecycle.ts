@@ -629,7 +629,7 @@ export async function assignmentLifecycleRoutes(
         },
       });
       // Students of a published assignment had it on their dashboard.
-      publish("assignments", [`classroom:${scope.assignment.classroomId}`]);
+      publish("assignments", classroomTopics(scope.assignment.classroomId));
       return reply.code(204).send();
     },
   );

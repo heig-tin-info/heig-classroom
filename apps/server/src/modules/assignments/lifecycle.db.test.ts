@@ -180,7 +180,7 @@ describe("DELETE /app/api/classrooms/:id/assignments/:aid", () => {
     expect(await db.select().from(assignmentMilestones)).toHaveLength(0);
     expect(squashedDeletes()).toHaveLength(1);
     // Open views (the students' dashboards among them) drop it.
-    expect(events).toContainEqual({ type: "assignments", topics: [`classroom:${s.classroomId}`] });
+    expect(events).toContainEqual({ type: "assignments", topics: [`classroom:${s.classroomId}`, `classroom-staff:${s.classroomId}`] });
     const [event] = await db
       .select()
       .from(auditLog)
