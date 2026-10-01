@@ -14,8 +14,8 @@ import type { GradeView } from "@hgc/contracts";
 import { extractGrade, GRADE_ANNOTATION_TITLE } from "@hgc/domain";
 import type { AppConfig } from "./config.js";
 import { assignments, botCommits, gradeRuns, pushReceipts, studentRepos } from "./db/schema.js";
-import { publish } from "./events.js";
-import { repoUserIds } from "./group-repos.js";
+import { publish, staffTopic } from "./events.js";
+import { repoUserIds, repoUserTopics } from "./group-repos.js";
 import { mailRecipient, queueEmail } from "./mailer.js";
 
 export const GRADING_WORKFLOW_PATH = ".github/workflows/grading.yml";
@@ -299,7 +299,8 @@ export async function ingestCompletedRun(
         .update(studentRepos)
         .set({ llmGradeRunId: id })
         .where(eq(studentRepos.id, ctx.repo.id));
-      publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
+      // Every member of a group repository hears about its grade (issue #46).
+    publish("grades", [staffTopic(ctx.classroomId), ...(await repoUserTopics(app.db, [ctx.repo]))], {
         kind: "grade_captured",
         message: `LLM review ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
       });
@@ -319,7 +320,8 @@ export async function ingestCompletedRun(
 
   await refreshGradeSelection(app, ctx);
   if (parse.status === "ok") {
-    publish("grades", [`classroom:${ctx.classroomId}`, `user:${ctx.repo.userId}`], {
+    // Every member of a group repository hears about its grade (issue #46).
+    publish("grades", [staffTopic(ctx.classroomId), ...(await repoUserTopics(app.db, [ctx.repo]))], {
       kind: "grade_captured",
       message: `Grade ${parse.points}/${parse.max} captured on ${ctx.repo.fullName?.split("/")[1] ?? "repository"}`,
     });

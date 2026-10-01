@@ -34,7 +34,7 @@ import {
   journals,
   organizations,
 } from "../db/schema.js";
-import { publish, type Topic } from "../events.js";
+import { classroomTopics, publish, type Topic } from "../events.js";
 import { installationClient } from "../github/app.js";
 import { JournalRepoError, readBlob, readTree, type TreeEntry } from "./repo.js";
 import { renderPage } from "./render.js";
@@ -348,7 +348,7 @@ export async function journalTopics(app: FastifyInstance, journalId: string): Pr
     .select({ classroomId: classroomJournals.classroomId })
     .from(classroomJournals)
     .where(eq(classroomJournals.journalId, journalId));
-  return rooms.map((r) => `classroom:${r.classroomId}` as Topic);
+  return rooms.flatMap((r) => classroomTopics(r.classroomId));
 }
 
 async function notifyReaders(app: FastifyInstance, journalId: string) {

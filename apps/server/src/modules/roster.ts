@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { parseRosterCsv, rosterFromRows, type Cell, type RosterParse } from "@hgc/domain";
 
 import { audit } from "../audit.js";
-import { publish } from "../events.js";
+import { publish, publishTopicsChanged, staffTopic } from "../events.js";
 import type { Db } from "../db/client.js";
 import { avatars, enrollments, userEmails, users } from "../db/schema.js";
 import { emailIn, knownEmails, normalizeEmail, sharedWithOthers } from "../identity.js";
@@ -119,10 +119,12 @@ export async function claimEnrollments(db: Db, user: { id: string }) {
         .set({ status: "claimed", userId: user.id, claimedAt: new Date() })
         .where(and(eq(enrollments.id, entry.id), eq(enrollments.status, "pending")));
       claimed += 1;
-      publish("roster", [`classroom:${entry.classroomId}`, `user:${user.id}`], {
+      publish("roster", [staffTopic(entry.classroomId)], {
         kind: "student_joined",
         message: `${entry.prenom} ${entry.nom} joined the classroom`,
       });
+      // A new classroom to listen to (issue #46): reconnect with it.
+      publishTopicsChanged([user.id]);
       await audit(db, {
         actorUserId: user.id,
         actorType: "system",
@@ -206,7 +208,8 @@ export async function claimForExistingUsers(db: Db, classroomId: string) {
         subjectType: "enrollment",
         subjectId: m.enrollmentId,
       });
-      publish("roster", [`classroom:${classroomId}`, `user:${m.userId}`]);
+      publish("roster", [staffTopic(classroomId)]);
+      publishTopicsChanged([m.userId]);
     } catch {
       await db
         .update(enrollments)

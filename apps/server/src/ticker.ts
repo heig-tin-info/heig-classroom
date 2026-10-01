@@ -14,7 +14,7 @@ import type { AppConfig } from "./config.js";
 import type { Db } from "./db/client.js";
 import { assignmentMilestones, assignments, classrooms, scheduledTasks } from "./db/schema.js";
 import { freezeDueAssignments } from "./deadline.js";
-import { publish } from "./events.js";
+import { classroomTopics, publish } from "./events.js";
 import { zurichIso } from "./github/commit.js";
 import { DEADLINE_QUEUE, GRADE_DISPATCH_QUEUE, TASK_QUEUE } from "./jobs.js";
 import { classroomRecipients, queueEmail } from "./mailer.js";
@@ -90,7 +90,7 @@ export function startTicker(app: FastifyInstance, config: AppConfig) {
             deadlineAt: zurichIso(a.deadlineAt),
           });
         }
-        publish("assignments", [`classroom:${a.classroomId}`]);
+        publish("assignments", classroomTopics(a.classroomId));
       }
 
       // 1. Elapsed deadlines (GH-43): published, past due, not yet applied.

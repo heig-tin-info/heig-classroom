@@ -32,7 +32,7 @@ import {
   studentRepos,
   users,
 } from "../../db/schema.js";
-import { publish } from "../../events.js";
+import { classroomTopics, publish } from "../../events.js";
 import { installationClient } from "../../github/app.js";
 import { attachMember } from "../../group-repos.js";
 import { accessibleAssignment, teacherGuard } from "../guards.js";
@@ -412,7 +412,7 @@ export async function assignmentGroupRoutes(
       subjectId: assignment.id,
       payload,
     });
-    publish("assignments", [`classroom:${assignment.classroomId}`]);
+    publish("assignments", classroomTopics(assignment.classroomId));
   }
 
   app.get(base, { preHandler: requireTeacher }, async (req, reply) => {

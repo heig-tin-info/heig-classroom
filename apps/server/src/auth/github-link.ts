@@ -11,7 +11,7 @@ import type { FastifyInstance } from "fastify";
 import { eq } from "drizzle-orm";
 
 import { audit } from "../audit.js";
-import { publish } from "../events.js";
+import { publish, staffTopic } from "../events.js";
 import type { AppConfig } from "../config.js";
 import { enrollments, users } from "../db/schema.js";
 import { inviteOnGithubLink } from "../group-repos.js";
@@ -129,10 +129,9 @@ export async function githubLinkPlugin(
         .select({ id: enrollments.classroomId })
         .from(enrollments)
         .where(eq(enrollments.userId, req.user!.id));
-      publish("github", [
-        `user:${req.user!.id}`,
-        ...rooms.map((r) => `classroom:${r.id}` as const),
-      ]);
+      // Their own views and their teachers' rosters — never their classmates,
+      // who have nothing to refetch (issue #46).
+      publish("github", [`user:${req.user!.id}`, ...rooms.map((r) => staffTopic(r.id))]);
       await audit(app.db, {
         actorUserId: req.user!.id,
         actorType: "user",

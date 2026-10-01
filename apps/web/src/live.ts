@@ -69,19 +69,33 @@ export function useLiveUpdates(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const scheduler = createRefreshScheduler(qc);
-    const es = new EventSource("/app/events");
-    es.onmessage = (e) => {
-      scheduler.hint();
-      try {
-        const data = JSON.parse(e.data as string) as {
-          notice?: { kind: NoticeKind; message: string } | null;
-        };
-        if (data.notice) notify(data.notice.kind, data.notice.message);
-      } catch {
-        // hint without payload: nothing else to do
-      }
+    let es: EventSource;
+    const open = () => {
+      es = new EventSource("/app/events");
+      es.onmessage = (e) => {
+        scheduler.hint();
+        try {
+          const data = JSON.parse(e.data as string) as {
+            type?: string;
+            notice?: { kind: NoticeKind; message: string } | null;
+          };
+          // Our subscriptions changed (staff or roster change, archive,
+          // notification switch — issue #46): the server ends this stream;
+          // reopen at once so the topics are recomputed, rather than waiting
+          // for the native retry.
+          if (data.type === "topics") {
+            es.close();
+            open();
+            return;
+          }
+          if (data.notice) notify(data.notice.kind, data.notice.message);
+        } catch {
+          // hint without payload: nothing else to do
+        }
+      };
+      es.onopen = () => scheduler.hint();
     };
-    es.onopen = () => scheduler.hint();
+    open();
     return () => {
       es.close();
       scheduler.dispose();

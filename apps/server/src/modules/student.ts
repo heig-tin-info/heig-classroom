@@ -385,7 +385,7 @@ export async function studentPlugin(
             invitation: attached?.invitation ?? null,
           },
         });
-        publish("repos", [`classroom:${assignment.classroomId}`, `user:${me.id}`]);
+        publish("repos", [`classroom-staff:${assignment.classroomId}`, `user:${me.id}`]);
         return repoRow;
       };
 
@@ -510,7 +510,7 @@ export async function studentPlugin(
         publish(
           "repos",
           [
-            `classroom:${assignment.classroomId}`,
+            `classroom-staff:${assignment.classroomId}`,
             `user:${me.id}`,
             ...newcomers.map((m) => `user:${m.userId}` as const),
           ],

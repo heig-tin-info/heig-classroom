@@ -238,6 +238,28 @@ export const classroomStaff = pgTable(
   ],
 );
 
+/**
+ * Per-classroom notification preference of a staff member (issue #46).
+ * `student_activity` gates the student-activity toasts (a student joined,
+ * accepted, pushed, was graded) of that classroom. No row means the default:
+ * on for the owner, off for co-teachers and assistants. Silent refresh hints
+ * are never gated — only the toast.
+ */
+export const classroomNotificationPrefs = pgTable(
+  "classroom_notification_prefs",
+  {
+    classroomId: uuid("classroom_id")
+      .notNull()
+      .references(() => classrooms.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    studentActivity: boolean("student_activity").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.classroomId, t.userId] })],
+);
+
 export const enrollments = pgTable(
   "enrollments",
   {

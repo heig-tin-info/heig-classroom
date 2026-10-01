@@ -94,7 +94,7 @@ async function repoContext(db: Db, githubRepoId: number) {
   // Who a change of this repository concerns: the classroom's staff and the
   // student(s) reading it — every member of a group repository (issue #2).
   const audience: Topic[] = [
-    `classroom:${row.classroomId}`,
+    `classroom-staff:${row.classroomId}`,
     ...(await repoUserTopics(db, [row.repo])),
   ];
   return { ...row, audience };
@@ -162,7 +162,7 @@ async function handleSourcePush(app: FastifyInstance, p: PushPayload) {
       ),
     )
     .returning({ classroomId: assignments.classroomId });
-  for (const a of affected) publish("assignments", [`classroom:${a.classroomId}`]);
+  for (const a of affected) publish("assignments", [`classroom-staff:${a.classroomId}`]);
 }
 
 /**
@@ -430,7 +430,7 @@ export async function handleInstallation(app: FastifyInstance, p: InstallationPa
     .where(eq(classrooms.orgId, org.id));
   publish(
     "orgs",
-    rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+    rooms.flatMap((r) => [`classroom-staff:${r.id}`, `teacher:${r.teacherId}`] as const),
   );
 }
 
@@ -521,7 +521,7 @@ export async function handleOrganization(
       .where(eq(classrooms.orgId, org.id));
     publish(
       "orgs",
-      rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+      rooms.flatMap((r) => [`classroom-staff:${r.id}`, `teacher:${r.teacherId}`] as const),
     );
     return;
   }
@@ -559,7 +559,7 @@ export async function handleOrganization(
     }
     publish(
       "orgs",
-      rooms.flatMap((r) => [`classroom:${r.id}`, `teacher:${r.teacherId}`] as const),
+      rooms.flatMap((r) => [`classroom-staff:${r.id}`, `teacher:${r.teacherId}`] as const),
     );
   }
 }
